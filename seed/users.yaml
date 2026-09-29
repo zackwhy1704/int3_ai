@@ -1,0 +1,40 @@
+# Brindlewood Supply Co. is a fictional company. Every person, document and
+# number in this seed is invented for the demo.
+
+users:
+  - id: priya
+    name: Priya N.
+    title: Head of Operations
+  - id: marcus
+    name: Marcus O.
+    title: Finance Director
+  - id: ada
+    name: Ada L.
+    title: CEO
+
+scopes:
+  - id: company-wide
+    name: Company-wide
+    kind: everyone
+    description: Policies, pricing, process. The answers customer-facing staff quote every day.
+    owner: ada
+  - id: operations
+    name: Operations
+    kind: department
+    description: Runbooks, supplier terms, incident history for the operations team.
+    owner: priya
+  - id: finance
+    name: Finance
+    kind: department
+    description: Budgets, payment terms, commercial approvals.
+    owner: marcus
+  - id: leadership
+    name: Leadership
+    kind: restricted
+    description: Board and strategy material.
+    owner: ada
+
+memberships:
+  priya: [company-wide, operations]
+  marcus: [company-wide, finance]
+  ada: [company-wide, leadership]

@@ -1,0 +1,25 @@
+# Seeded questions used by the tests. "answerable" questions have support in at
+# least one scope; "nonsense" questions have none in any scope and must refuse.
+answerable:
+  - "What's our refund window for enterprise customers?"
+  - "How long do enterprise customers have to ask for a refund?"
+  - "What is the dispatch cut-off for same-day shipping?"
+  - "What happens if Oakridge Timber misses deliveries?"
+  - "How many days of annual leave do staff get?"
+  - "What is the hotel cap for London?"
+  - "When are invoices payable?"
+  - "What caused the conveyor outage in January?"
+  - "Are list prices going up?"
+  - "What are the leadership priorities for 2026?"
+nonsense:
+  - "What's the office dog's name?"
+  - "Who won the company chess tournament in 2019?"
+  - "What is the recipe for the canteen's lemon cake?"
+  - "How many moons does the CEO's favourite planet have?"
+
+# Strings that only appear in scope-restricted documents. If any of these shows
+# up in an answer for a user outside that scope, the scoping guarantee failed.
+canaries:
+  finance: ["Larkspur", "45 days", "45-day", "annual contract", "20,000"]
+  leadership: ["Thornbury", "Hollowmere", "8 percent", "second warehouse", "40 percent"]
+  operations: ["Oakridge", "conveyor", "bay 4", "2pm"]
