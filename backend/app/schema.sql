@@ -55,12 +55,16 @@ CREATE TABLE IF NOT EXISTS claims (
     created_at      timestamptz NOT NULL DEFAULT now()
 );
 
+-- NULL condition = the default rule. A claim with a condition ("annual contract")
+-- is a different key and never supersedes, or is superseded by, the default.
+ALTER TABLE claims ADD COLUMN IF NOT EXISTS condition text;
+
 CREATE OR REPLACE FUNCTION claims_append_only() RETURNS trigger AS $$
 BEGIN
-    IF (NEW.subject, NEW.attribute, NEW.value, NEW.quote, NEW.valid_from,
+    IF (NEW.subject, NEW.attribute, NEW.condition, NEW.value, NEW.quote, NEW.valid_from,
         NEW.source_chunk_id, NEW.scope_id, NEW.created_at)
        IS DISTINCT FROM
-       (OLD.subject, OLD.attribute, OLD.value, OLD.quote, OLD.valid_from,
+       (OLD.subject, OLD.attribute, OLD.condition, OLD.value, OLD.quote, OLD.valid_from,
         OLD.source_chunk_id, OLD.scope_id, OLD.created_at) THEN
         RAISE EXCEPTION 'claims are append-only; only superseded_by may be set';
     END IF;

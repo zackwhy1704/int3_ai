@@ -120,6 +120,12 @@ Its only job is to prove three things to the business partner, in this order:
   Embedding cosine didn't separate supported from unsupported questions (gap +0.033),
   while the cross-encoder did (gap +9.47 logits). Re-measure with
   `docker compose exec backend python -m app.calibrate`.
+- **Claim key is (scope, subject, attribute, condition).** A conditional claim never
+  supersedes an unconditional one, in either direction; they coexist.
+- **DEMO SIMPLIFICATION, not doctrine: supersede only within the same scope.** This
+  avoids showing a user a superseded claim whose replacement is hidden from them. In a
+  real company Finance legitimately corrects a company-wide number, so the product
+  needs cross-scope supersede with a visibility rule. Don't carry this rule forward.
 
 **Sign-in:** a dropdown of three seeded users:
 - Priya (Operations): company-wide + operations.

@@ -46,8 +46,12 @@ def test_answers_never_cite_or_contain_foreign_scopes(client, questions, members
                 continue
             for c in body["citations"]:
                 assert c["scope"] in allowed, (user, question, c)
+            for f in body["facts"]:
+                assert f["scope"] in allowed, (user, question, f)
+            facts_text = str(body["facts"]).lower()
             for canary in canaries:
                 assert canary.lower() not in body["answer"].lower(), (user, question, canary)
+                assert canary.lower() not in facts_text, (user, question, canary)
 
 
 def test_document_outside_scope_is_404(client):

@@ -7,12 +7,12 @@ import anthropic
 MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-5-5")
 
 
-def structured(system: str, user: str, schema: dict) -> dict:
+def structured(system: str, user: str, schema: dict, max_tokens: int = 1024) -> dict:
     """Return the model's reply, which the API constrains to match `schema`."""
     client = anthropic.Anthropic()
     msg = client.messages.create(
         model=MODEL,
-        max_tokens=1024,
+        max_tokens=max_tokens,
         system=system,
         messages=[{"role": "user", "content": user}],
         output_config={"format": {"type": "json_schema", "schema": schema}},

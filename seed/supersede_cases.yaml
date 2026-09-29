@@ -1,0 +1,60 @@
+# Pairs for the supersede suite (app/supersede_eval.py). Each case feeds an older
+# passage and then a newer one through extraction + record, in the same scope,
+# and checks what the claims table ends up saying.
+#   identical   - same sentence twice: must NOT supersede
+#   reworded    - same fact, different words: must NOT supersede
+#   changed     - the value genuinely changed: must supersede exactly once
+#   conditional - newer passage is an exception under a condition: must NOT
+#                 supersede, and both claims must be current
+cases:
+  - id: identical-refund
+    kind: identical
+    old: "Enterprise customers may request a refund within 14 days of the invoice date."
+    new: "Enterprise customers may request a refund within 14 days of the invoice date."
+  - id: identical-hotel
+    kind: identical
+    old: "Hotel bookings in London are capped at 220 pounds per night."
+    new: "Hotel bookings in London are capped at 220 pounds per night."
+  - id: identical-dispatch
+    kind: identical
+    old: "The dispatch cut-off for same-day shipping is 2pm."
+    new: "The dispatch cut-off for same-day shipping is 2pm."
+
+  - id: reworded-refund
+    kind: reworded
+    old: "Enterprise customers may request a refund within 14 days of the invoice date."
+    new: "Enterprise customers have a fortnight from the invoice date to ask for a refund."
+  - id: reworded-hotel
+    kind: reworded
+    old: "Hotel bookings in London are capped at 220 pounds per night."
+    new: "The nightly hotel limit for London stays is £220."
+  - id: reworded-dispatch
+    kind: reworded
+    old: "The dispatch cut-off for same-day shipping is 2pm."
+    new: "Orders must be picked by 14:00 to ship the same day."
+
+  - id: changed-refund
+    kind: changed
+    old: "Enterprise customers may request a refund within 14 days of the invoice date."
+    new: "Enterprise customers may request a refund within 30 days of the invoice date."
+  - id: changed-hotel
+    kind: changed
+    old: "Hotel bookings in London are capped at 220 pounds per night."
+    new: "Hotel bookings in London are capped at 250 pounds per night."
+  - id: changed-dispatch
+    kind: changed
+    old: "The dispatch cut-off for same-day shipping is 2pm."
+    new: "The dispatch cut-off for same-day shipping is 3pm."
+
+  - id: conditional-refund
+    kind: conditional
+    old: "Enterprise customers may request a refund within 30 days of the invoice date."
+    new: "Enterprise customers on an annual contract may request a refund within 45 days of the invoice date."
+  - id: conditional-hotel
+    kind: conditional
+    old: "Hotel bookings in London are capped at 220 pounds per night."
+    new: "For board members travelling to London, hotel bookings are capped at 300 pounds per night."
+  - id: conditional-dispatch
+    kind: conditional
+    old: "The dispatch cut-off for same-day shipping is 2pm."
+    new: "On Fridays, the dispatch cut-off for same-day shipping is 12pm."
