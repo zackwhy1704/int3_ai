@@ -116,6 +116,10 @@ Its only job is to prove three things to the business partner, in this order:
   network. The model downloads when the image is built, and every retrieval
   experiment is free and repeatable. It governs retrieval quality, so revisit it if
   the recall of true hits is poor.
+- **Refusal: gated on a cross-encoder (`Xenova/ms-marco-MiniLM-L-6-v2`), threshold 0.**
+  Embedding cosine didn't separate supported from unsupported questions (gap +0.033),
+  while the cross-encoder did (gap +9.47 logits). Re-measure with
+  `docker compose exec backend python -m app.calibrate`.
 
 **Sign-in:** a dropdown of three seeded users:
 - Priya (Operations): company-wide + operations.

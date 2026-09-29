@@ -1,5 +1,8 @@
-# Seeded questions used by the tests. "answerable" questions have support in at
-# least one scope; "nonsense" questions have none in any scope and must refuse.
+# Seeded questions used by the tests and by app/calibrate.py. "answerable"
+# questions have support in at least one scope; "unsupported" questions have none
+# in any scope and must refuse. The unsupported set mixes off-topic questions with
+# on-topic ones (plausible company questions the corpus doesn't answer), which are
+# the hard case for a similarity threshold.
 answerable:
   - "What's our refund window for enterprise customers?"
   - "How long do enterprise customers have to ask for a refund?"
@@ -11,11 +14,18 @@ answerable:
   - "What caused the conveyor outage in January?"
   - "Are list prices going up?"
   - "What are the leadership priorities for 2026?"
-nonsense:
+  - "How long do new starters have an onboarding buddy?"
+unsupported:
   - "What's the office dog's name?"
   - "Who won the company chess tournament in 2019?"
   - "What is the recipe for the canteen's lemon cake?"
   - "How many moons does the CEO's favourite planet have?"
+  - "What colour is the reception sofa?"
+  - "What is our parental leave policy?"
+  - "Which courier do we use for international shipments?"
+  - "What is the company's pension contribution rate?"
+  - "Who is our external auditor?"
+  - "What is the WiFi password for the guest network?"
 
 # Strings that only appear in scope-restricted documents. If any of these shows
 # up in an answer for a user outside that scope, the scoping guarantee failed.

@@ -1,9 +1,11 @@
 """Cross-user permission tests. These must pass 100%."""
+import pytest
+
 from .conftest import USERS
 
 
 def all_questions(q):
-    return q["answerable"] + q["nonsense"]
+    return q["answerable"] + q["unsupported"]
 
 
 def foreign_canaries(questions, memberships, user):
@@ -29,6 +31,30 @@ def test_search_text_contains_no_foreign_canaries(client, questions, memberships
             blob = " ".join(h["text"] + " " + h["doc_title"] for h in r.json()["results"])
             for canary in canaries:
                 assert canary not in blob, (user, question, canary)
+
+
+@pytest.mark.llm
+def test_answers_never_cite_or_contain_foreign_scopes(client, questions, memberships):
+    for user in USERS:
+        allowed = set(memberships[user])
+        canaries = foreign_canaries(questions, memberships, user)
+        for question in questions["answerable"]:
+            r = client.post("/api/ask", json={"question": question}, headers={"X-User-Id": user})
+            assert r.status_code == 200
+            body = r.json()
+            if body["refused"]:
+                continue
+            for c in body["citations"]:
+                assert c["scope"] in allowed, (user, question, c)
+            for canary in canaries:
+                assert canary.lower() not in body["answer"].lower(), (user, question, canary)
+
+
+def test_document_outside_scope_is_404(client):
+    r = client.get("/api/documents/finance-annual-contract-terms", headers={"X-User-Id": "priya"})
+    assert r.status_code == 404
+    r = client.get("/api/documents/finance-annual-contract-terms", headers={"X-User-Id": "marcus"})
+    assert r.status_code == 200
 
 
 def test_brain_outside_membership_is_404(client):
