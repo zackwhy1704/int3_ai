@@ -16,6 +16,7 @@ docker compose up --build
 ## Demo users
 
 There is no auth: every API call carries `X-User-Id`, and the server resolves the scopes.
+`X-User-Id` is demo only — replaces authentication, trivially spoofable, never ships.
 
 | id     | person                        | scopes                   |
 |--------|-------------------------------|--------------------------|

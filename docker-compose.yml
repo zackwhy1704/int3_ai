@@ -31,18 +31,12 @@ services:
 
   web:
     build: ./web
+    environment:
+      API_URL: http://backend:8000
     ports:
-      - "5173:80"
+      - "5173:5173"
     depends_on:
       - backend
 
-  # Optional local model: `docker compose --profile ollama up` and set LLM_PROVIDER=ollama.
-  ollama:
-    image: ollama/ollama:latest
-    profiles: [ollama]
-    volumes:
-      - ollama:/root/.ollama
-
 volumes:
   pgdata:
-  ollama:
