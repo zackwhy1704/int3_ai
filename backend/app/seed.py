@@ -53,9 +53,10 @@ def load_documents(conn) -> None:
         meta, body = parse_doc(path)
         doc_id = path.stem
         conn.execute(
-            "INSERT INTO documents VALUES (%s, %s, %s, %s, %s, %s, %s)",
+            "INSERT INTO documents (id, scope_id, title, source, owner, effective_date, body,"
+            " authority) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
             (doc_id, meta["scope"], meta["title"], meta["source"], meta["owner"],
-             meta["effective_date"], body),
+             meta["effective_date"], body, meta.get("authority", "document")),
         )
         paragraphs = chunk(body)
         # Title goes into the embedded text so a paragraph keeps its document context.

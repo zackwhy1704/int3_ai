@@ -22,12 +22,17 @@ EXTRACT_SYSTEM = (
     "rate, deadline or named owner. For each claim give:\n"
     "- subject: what the claim is about, short and lowercase (e.g. 'enterprise customers')\n"
     "- attribute: the property, short and lowercase (e.g. 'refund window')\n"
-    "- condition: lowercase qualifier that limits when the claim applies (e.g. "
-    "'annual contract'), or an empty string if it applies generally\n"
+    "- condition: lowercase qualifier that limits who or what the claim applies to, "
+    "or an empty string if it applies to everyone. A condition can qualify the thing "
+    "(e.g. 'annual contract'), the PEOPLE it applies to (e.g. 'board members', "
+    "'warehouse staff', 'new starters'), or the time (e.g. 'fridays'). Phrases like "
+    "'for board members', 'only for managers' or 'on Fridays' are conditions.\n"
     "- value: the value, as stated\n"
     "- quote: the exact sentence from the passage that states it, copied verbatim\n"
     "If an existing key below describes the same subject, attribute and condition, "
-    "reuse its exact wording. Return an empty list if the passage states no such value."
+    "reuse its exact wording. Never drop or change a qualifier to match an existing "
+    "key: a claim that applies only to some people or cases is a different key from "
+    "one that applies to everyone. Return an empty list if the passage states no such value."
 )
 
 EXTRACT_SCHEMA = {
@@ -144,11 +149,17 @@ def record(conn: psycopg.Connection, claim: dict, chunk_id: int, scope_id: str,
 
 
 def extract_all(conn: psycopg.Connection) -> None:
-    """Extract claims from every chunk, oldest document first."""
+    """Extract claims from every chunk, oldest document first.
+
+    Claim-selection rule: among sources dated the same day, the highest-authority
+    source is ingested first, so it becomes the claim of record and lower-authority
+    restatements of the same value are recorded as 'unchanged'."""
     chunks = conn.execute(
         "SELECT c.id, c.text, c.scope_id, d.effective_date FROM chunks c"
         " JOIN documents d ON d.id = c.document_id"
-        " ORDER BY d.effective_date, d.id, c.ord"
+        " ORDER BY d.effective_date,"
+        "  CASE d.authority WHEN 'document' THEN 0 WHEN 'chat' THEN 1 ELSE 2 END,"
+        "  d.id, c.ord"
     ).fetchall()
     for ch in chunks:
         for claim in extract(conn, ch["text"], ch["scope_id"]):

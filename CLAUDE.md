@@ -122,6 +122,12 @@ Its only job is to prove three things to the business partner, in this order:
   `docker compose exec backend python -m app.calibrate`.
 - **Claim key is (scope, subject, attribute, condition).** A conditional claim never
   supersedes an unconditional one, in either direction; they coexist.
+- **Claim-selection rule: authority, not order of arrival.** Each source has an
+  authority: a formal document outranks a chat message, which outranks an
+  unattributed note. When sources dated the same day state the same value, the
+  highest-authority one is the claim of record and the others are "unchanged".
+  Known limit: a later formal restatement of a value first announced in chat doesn't
+  take over the record, because the claims table is append-only and it isn't a change.
 - **DEMO SIMPLIFICATION, not doctrine: supersede only within the same scope.** This
   avoids showing a user a superseded claim whose replacement is hidden from them. In a
   real company Finance legitimately corrects a company-wide number, so the product

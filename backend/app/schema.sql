@@ -30,6 +30,11 @@ CREATE TABLE IF NOT EXISTS documents (
     body           text NOT NULL
 );
 
+-- How much a source is trusted as the record of a fact: a formal document
+-- outranks a chat message, which outranks an unattributed note.
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS authority text NOT NULL DEFAULT 'document'
+    CHECK (authority IN ('document', 'chat', 'note'));
+
 -- scope_id is copied from the document so retrieval filters on the chunk row itself.
 CREATE TABLE IF NOT EXISTS chunks (
     id          serial PRIMARY KEY,

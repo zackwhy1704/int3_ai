@@ -39,6 +39,28 @@ def search(q: str, brain_id: str | None = None, user: str = Depends(current_user
     }
 
 
+@app.get("/api/brains")
+def brains(user: str = Depends(current_user)) -> dict:
+    """Brains the user can open, plus one they can't: name and owner only."""
+    with connect() as conn:
+        open_ = conn.execute(
+            "SELECT s.id, s.name, s.kind, s.description, u.name AS owner"
+            " FROM scopes s JOIN users u ON u.id = s.owner_user_id"
+            " WHERE s.id IN (SELECT scope_id FROM memberships WHERE user_id = %s)"
+            " ORDER BY s.kind = 'everyone' DESC, s.name",
+            (user,),
+        ).fetchall()
+        locked = conn.execute(
+            "SELECT s.name, u.name AS owner"
+            " FROM scopes s JOIN users u ON u.id = s.owner_user_id"
+            " WHERE s.id NOT IN (SELECT scope_id FROM memberships WHERE user_id = %s)"
+            " AND s.kind <> 'eval'"
+            " ORDER BY s.kind = 'restricted' DESC, s.name LIMIT 1",
+            (user,),
+        ).fetchone()
+    return {"open": open_, "locked": locked}
+
+
 class Ask(BaseModel):
     question: str
     brain_id: str | None = None
