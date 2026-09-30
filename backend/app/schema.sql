@@ -80,6 +80,17 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- Last real response per (resolved scope set, question). Served, flagged as cached,
+-- only when a live model call fails. The key includes the scopes, so one user's
+-- cached answer is never served to a user with different access.
+CREATE TABLE IF NOT EXISTS answer_cache (
+    key        text PRIMARY KEY,
+    question   text NOT NULL,
+    scopes     text[] NOT NULL,
+    response   jsonb NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+
 DROP TRIGGER IF EXISTS claims_append_only ON claims;
 CREATE TRIGGER claims_append_only BEFORE UPDATE ON claims
     FOR EACH ROW EXECUTE FUNCTION claims_append_only();

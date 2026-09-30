@@ -3,10 +3,12 @@ import logging
 from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel
 
-from . import answer, retrieve
+import yaml
+
+from . import answer, embed, llm, rerank, retrieve
 from .db import apply_schema, connect
 from .scopes import current_user, resolve
-from .seed import seed
+from .seed import SEED_DIR, seed
 
 logging.basicConfig(level=logging.INFO)
 app = FastAPI(title="Company Brain demo")
@@ -16,6 +18,9 @@ app = FastAPI(title="Company Brain demo")
 def startup() -> None:
     apply_schema()
     seed()
+    # Load both models now so the first question in the meeting isn't the slow one.
+    embed.embed_query("warm up")
+    rerank.rerank("warm up", [{"doc_title": "", "text": "warm up"}])
 
 
 @app.get("/api/users")
@@ -68,7 +73,17 @@ class Ask(BaseModel):
 
 @app.post("/api/ask")
 def ask(body: Ask, user: str = Depends(current_user)) -> dict:
-    return {"user": user, **answer.ask(body.question, resolve(user, body.brain_id))}
+    try:
+        return {"user": user, **answer.ask(body.question, resolve(user, body.brain_id))}
+    except llm.Unavailable:
+        raise HTTPException(503, "The model could not be reached, and there is no earlier "
+                                 "answer to this question for your access to fall back on.")
+
+
+@app.get("/api/suggestions")
+def suggestions(user: str = Depends(current_user)) -> list[str]:
+    """Questions known to be answerable for this user (checked by the preflight)."""
+    return yaml.safe_load((SEED_DIR / "demo.yaml").read_text())["try_asking"].get(user, [])
 
 
 @app.get("/api/documents/{doc_id}")

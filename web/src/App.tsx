@@ -13,9 +13,10 @@ type Fact = {
   subject: string; attribute: string; condition: string | null; scope: string;
   current: FactValue; previous: FactValue | null;
 };
-type Answer =
+type Cache = { cached: boolean; cached_at?: string };
+type Answer = Cache & (
   | { refused: false; answer: string; citations: Citation[]; answered_from: string[]; facts: Fact[] }
-  | { refused: true; message: string; suggested_owner: string | null };
+  | { refused: true; message: string; suggested_owner: string | null });
 type Doc = { id: string; title: string; source: string; owner: string; effective_date: string; body: string };
 
 // Demo only: X-User-Id replaces authentication, is trivially spoofable, and never ships.
@@ -23,21 +24,28 @@ function api<T>(path: string, user: string, init?: RequestInit): Promise<T> {
   return fetch(path, {
     ...init,
     headers: { "X-User-Id": user, "Content-Type": "application/json" },
-  }).then((r) => {
-    if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+  }).then(async (r) => {
+    if (!r.ok) {
+      const detail = await r.json().then((b) => b.detail).catch(() => null);
+      throw new Error(detail ?? `${r.status} ${r.statusText}`);
+    }
     return r.json();
   });
 }
+
+const DEFAULT_USER = "priya";
+const DEFAULT_QUESTION = "What's our refund window for enterprise customers?";
 
 const day = (iso: string) =>
   new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
 
 export default function App() {
   const [users, setUsers] = useState<User[]>([]);
-  const [user, setUser] = useState("priya");
+  const [user, setUser] = useState(DEFAULT_USER);
   const [brains, setBrains] = useState<Brains | null>(null);
+  const [suggestions, setSuggestions] = useState<string[]>([]);
   const [brainId, setBrainId] = useState<string | null>(null);
-  const [question, setQuestion] = useState("What's our refund window for enterprise customers?");
+  const [question, setQuestion] = useState(DEFAULT_QUESTION);
   const [asked, setAsked] = useState("");
   const [answer, setAnswer] = useState<Answer | null>(null);
   const [busy, setBusy] = useState(false);
@@ -51,7 +59,13 @@ export default function App() {
   useEffect(() => {
     setBrains(null); setBrainId(null); setAnswer(null); setDoc(null); setError("");
     api<Brains>("/api/brains", user).then(setBrains);
+    api<string[]>("/api/suggestions", user).then(setSuggestions);
   }, [user]);
+
+  function reset() {
+    setUser(DEFAULT_USER); setBrainId(null); setQuestion(DEFAULT_QUESTION);
+    setAnswer(null); setDoc(null); setError(""); setAsked("");
+  }
 
   const brainName = (id: string) => brains?.open.find((b) => b.id === id)?.name ?? id;
   // A conditional fact that coexists with the default value of the same thing.
@@ -59,16 +73,21 @@ export default function App() {
     facts.filter((f) => f.condition && facts.some((d) =>
       !d.condition && d.subject === f.subject && d.attribute === f.attribute));
 
-  async function ask(e: FormEvent) {
+  function submit(e: FormEvent) {
     e.preventDefault();
-    if (!question.trim()) return;
-    setBusy(true); setAnswer(null); setDoc(null); setError(""); setAsked(question);
+    ask(question);
+  }
+
+  async function ask(q: string) {
+    if (!q.trim()) return;
+    setQuestion(q);
+    setBusy(true); setAnswer(null); setDoc(null); setError(""); setAsked(q);
     try {
       setAnswer(await api<Answer>("/api/ask", user, {
-        method: "POST", body: JSON.stringify({ question, brain_id: brainId }),
+        method: "POST", body: JSON.stringify({ question: q, brain_id: brainId }),
       }));
     } catch (err) {
-      setError(String(err));
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
     }
@@ -83,6 +102,7 @@ export default function App() {
       <header>
         <span className="dot" /> <strong>Company Brain</strong>
         <span className="grow" />
+        <button className="reset" onClick={reset}>Reset</button>
         <label>
           Signed in as{" "}
           <select value={user} onChange={(e) => setUser(e.target.value)}>
@@ -112,7 +132,7 @@ export default function App() {
         </nav>
 
         <main>
-          <form onSubmit={ask} className="ask">
+          <form onSubmit={submit} className="ask">
             <label htmlFor="q" className="label">ASK ANYTHING</label>
             <div className="row">
               <input id="q" value={question} onChange={(e) => setQuestion(e.target.value)} />
@@ -120,9 +140,25 @@ export default function App() {
             </div>
           </form>
 
-          {error && <div className="card refusal">Request failed: {error}</div>}
+          {suggestions.length > 0 && (
+            <div className="suggestions">
+              <span className="label">TRY ASKING</span>
+              {suggestions.map((s) => (
+                <button key={s} className="chip" disabled={busy} onClick={() => ask(s)}>{s}</button>
+              ))}
+            </div>
+          )}
+
+          {error && <div className="card refusal">Couldn't get an answer: {error}</div>}
 
           {answer && <h2>{asked}</h2>}
+
+          {answer?.cached && (
+            <div className="cached">
+              Cached answer: the live model call just failed, so this is the real answer
+              generated for the same question and access on {new Date(answer.cached_at!).toLocaleString("en-GB")}.
+            </div>
+          )}
 
           {answer?.refused === true && (
             <div className="card refusal">

@@ -1,4 +1,6 @@
-"""Load seed/ into Postgres, then extract claims. Each step is skipped if already done."""
+"""Load seed/ into Postgres, including pre-extracted claims. Each step is skipped if
+already done, so restarting on an existing volume does no work."""
+import json
 import logging
 import os
 from pathlib import Path
@@ -31,8 +33,35 @@ def seed() -> None:
             load_documents(conn)
         if conn.execute("SELECT count(*) AS n FROM claims").fetchone()["n"]:
             log.info("seed: claims present, skipping")
+        elif (SEED_DIR / "claims.json").exists():
+            load_claims(conn)
         else:
+            log.info("seed: no seed/claims.json, extracting claims with the model")
             claims.extract_all(conn)
+
+
+def load_claims(conn) -> None:
+    """Load pre-extracted claims (see app/regenerate_claims.py). Rows are inserted
+    first, then supersede links are set, which the append-only trigger allows once."""
+    rows = json.loads((SEED_DIR / "claims.json").read_text())
+    ids = {}
+    with conn.transaction():
+        for r in rows:
+            chunk_id = conn.execute(
+                "SELECT id FROM chunks WHERE document_id = %s AND ord = %s",
+                (r["document_id"], r["ord"]),
+            ).fetchone()["id"]
+            ids[r["ref"]] = conn.execute(
+                "INSERT INTO claims (subject, attribute, condition, value, quote, valid_from,"
+                " source_chunk_id, scope_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                (r["subject"], r["attribute"], r["condition"], r["value"], r["quote"],
+                 r["valid_from"], chunk_id, r["scope_id"]),
+            ).fetchone()["id"]
+        for r in rows:
+            if r["superseded_by"] is not None:
+                conn.execute("UPDATE claims SET superseded_by = %s WHERE id = %s",
+                             (ids[r["superseded_by"]], ids[r["ref"]]))
+    log.info("seed: loaded %d claims from seed/claims.json", len(rows))
 
 
 def load_documents(conn) -> None:

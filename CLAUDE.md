@@ -128,6 +128,12 @@ Its only job is to prove three things to the business partner, in this order:
   highest-authority one is the claim of record and the others are "unchanged".
   Known limit: a later formal restatement of a value first announced in chat doesn't
   take over the record, because the claims table is append-only and it isn't a change.
+- **Known key instability: condition text varies between runs.** The same passage
+  produced condition "board members travelling to london" in 9 runs out of 10 and
+  "london, board members" in the other. Different text means a different key, so a
+  later claim can miss the one it should supersede. This is fine for the demo, where
+  claims are extracted once and baked into `seed/claims.json`. It is not fine in
+  general: the product needs canonical conditions.
 - **DEMO SIMPLIFICATION, not doctrine: supersede only within the same scope.** This
   avoids showing a user a superseded claim whose replacement is hidden from them. In a
   real company Finance legitimately corrects a company-wide number, so the product

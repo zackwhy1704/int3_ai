@@ -1,5 +1,8 @@
 """Question -> scoped retrieval -> relevance gate -> schema-constrained answer."""
+import hashlib
 import logging
+
+from psycopg.types.json import Jsonb
 
 from . import llm, retrieve
 from .db import connect
@@ -101,7 +104,36 @@ def answer_schema(ids: list[int]) -> dict:
     }
 
 
+def cache_key(question: str, scopes: list[str]) -> str:
+    # Keyed on the resolved scope set, never on the question alone.
+    raw = " ".join(question.lower().split()) + "|" + ",".join(sorted(scopes))
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
 def ask(question: str, scopes: list[str]) -> dict:
+    """Live answer, cached on success. If the model call fails, serve the last real
+    answer for the same question and scopes, flagged as cached. Nothing is made up:
+    with no cached answer, the caller gets llm.Unavailable."""
+    key = cache_key(question, scopes)
+    with connect() as conn:
+        try:
+            result = answer_live(question, scopes)
+        except llm.Unavailable as e:
+            log.error("model unavailable, trying cache: %s", e)
+            row = conn.execute("SELECT response, created_at FROM answer_cache WHERE key = %s",
+                               (key,)).fetchone()
+            if row is None:
+                raise
+            return {**row["response"], "cached": True, "cached_at": row["created_at"].isoformat()}
+        conn.execute(
+            "INSERT INTO answer_cache (key, question, scopes, response) VALUES (%s, %s, %s, %s)"
+            " ON CONFLICT (key) DO UPDATE SET response = EXCLUDED.response, created_at = now()",
+            (key, question, sorted(scopes), Jsonb(result)),
+        )
+    return {**result, "cached": False}
+
+
+def answer_live(question: str, scopes: list[str]) -> dict:
     hits = rerank(question, retrieve.search(question, scopes))
     context = [h for h in hits if h["relevance"] >= REFUSE_THRESHOLD]
     if not context:
