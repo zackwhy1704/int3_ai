@@ -5,7 +5,6 @@ import logging
 from psycopg.types.json import Jsonb
 
 from . import llm, retrieve
-from .db import connect
 from .rerank import rerank
 
 log = logging.getLogger("answer")
@@ -39,31 +38,30 @@ def _fact(row: dict) -> dict:
             "chunk_id": row["chunk_id"], "doc_title": row["doc_title"]}
 
 
-def facts(chunk_ids: list[int], scopes: list[str]) -> list[dict]:
+def facts(conn, chunk_ids: list[int], scopes: list[str]) -> list[dict]:
     """Current claims touched by these chunks, each with its predecessor if any.
 
     A superseded claim in a chunk is followed forward to the current one. Every
     lookup is filtered by the asker's scopes, like retrieval."""
-    with connect() as conn:
-        def one(where: str, **params) -> dict | None:
-            return conn.execute(FACT_SQL.format(where=where), {"scopes": scopes, **params}).fetchone()
+    def one(where: str, **params) -> dict | None:
+        return conn.execute(FACT_SQL.format(where=where), {"scopes": scopes, **params}).fetchone()
 
-        heads = {}
-        for row in conn.execute(FACT_SQL.format(where="cl.source_chunk_id = ANY(%(ids)s)"),
-                                {"scopes": scopes, "ids": chunk_ids}).fetchall():
-            while row is not None and row["superseded_by"] is not None:
-                row = one("cl.id = %(id)s", id=row["superseded_by"])
-            if row is not None:
-                heads[row["id"]] = row
+    heads = {}
+    for row in conn.execute(FACT_SQL.format(where="cl.source_chunk_id = ANY(%(ids)s)"),
+                            {"scopes": scopes, "ids": chunk_ids}).fetchall():
+        while row is not None and row["superseded_by"] is not None:
+            row = one("cl.id = %(id)s", id=row["superseded_by"])
+        if row is not None:
+            heads[row["id"]] = row
 
-        result = []
-        for head in heads.values():
-            prev = one("cl.superseded_by = %(id)s", id=head["id"])
-            result.append({
-                "subject": head["subject"], "attribute": head["attribute"],
-                "condition": head["condition"], "scope": head["scope_id"],
-                "current": _fact(head), "previous": _fact(prev) if prev else None,
-            })
+    result = []
+    for head in heads.values():
+        prev = one("cl.superseded_by = %(id)s", id=head["id"])
+        result.append({
+            "subject": head["subject"], "attribute": head["attribute"],
+            "condition": head["condition"], "scope": head["scope_id"],
+            "current": _fact(head), "previous": _fact(prev) if prev else None,
+        })
     return sorted(result, key=lambda f: (f["subject"], f["attribute"], f["condition"] or ""))
 
 
@@ -110,31 +108,31 @@ def cache_key(question: str, scopes: list[str]) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
-def ask(question: str, scopes: list[str]) -> dict:
+def ask(conn, question: str, scopes: list[str]) -> dict:
     """Live answer, cached on success. If the model call fails, serve the last real
     answer for the same question and scopes, flagged as cached. Nothing is made up:
-    with no cached answer, the caller gets llm.Unavailable."""
+    with no cached answer, the caller gets llm.Unavailable. The cache lives in the
+    tenant's own database."""
     key = cache_key(question, scopes)
-    with connect() as conn:
-        try:
-            result = answer_live(question, scopes)
-        except llm.Unavailable as e:
-            log.error("model unavailable, trying cache: %s", e)
-            row = conn.execute("SELECT response, created_at FROM answer_cache WHERE key = %s",
-                               (key,)).fetchone()
-            if row is None:
-                raise
-            return {**row["response"], "cached": True, "cached_at": row["created_at"].isoformat()}
-        conn.execute(
-            "INSERT INTO answer_cache (key, question, scopes, response) VALUES (%s, %s, %s, %s)"
-            " ON CONFLICT (key) DO UPDATE SET response = EXCLUDED.response, created_at = now()",
-            (key, question, sorted(scopes), Jsonb(result)),
-        )
+    try:
+        result = answer_live(conn, question, scopes)
+    except llm.Unavailable as e:
+        log.error("model unavailable, trying cache: %s", e)
+        row = conn.execute("SELECT response, created_at FROM answer_cache WHERE key = %s",
+                           (key,)).fetchone()
+        if row is None:
+            raise
+        return {**row["response"], "cached": True, "cached_at": row["created_at"].isoformat()}
+    conn.execute(
+        "INSERT INTO answer_cache (key, question, scopes, response) VALUES (%s, %s, %s, %s)"
+        " ON CONFLICT (key) DO UPDATE SET response = EXCLUDED.response, created_at = now()",
+        (key, question, sorted(scopes), Jsonb(result)),
+    )
     return {**result, "cached": False}
 
 
-def answer_live(question: str, scopes: list[str]) -> dict:
-    hits = rerank(question, retrieve.search(question, scopes))
+def answer_live(conn, question: str, scopes: list[str]) -> dict:
+    hits = rerank(question, retrieve.search(conn, question, scopes))
     context = [h for h in hits if h["relevance"] >= REFUSE_THRESHOLD]
     if not context:
         return refusal(hits[0] if hits else None)
@@ -143,7 +141,7 @@ def answer_live(question: str, scopes: list[str]) -> dict:
         f"[id {h['chunk_id']}] {h['doc_title']} ({h['source']}, {h['effective_date']})\n{h['text']}"
         for h in context
     )
-    ledger = ledger_text(facts([h["chunk_id"] for h in context], scopes))
+    ledger = ledger_text(facts(conn, [h["chunk_id"] for h in context], scopes))
     out = llm.structured(
         SYSTEM,
         f"Passages:\n\n{passages}\n\nFact ledger:\n{ledger}\n\nQuestion: {question}",
@@ -171,5 +169,5 @@ def answer_live(question: str, scopes: list[str]) -> dict:
         ],
         "answered_from": sorted({by_id[c]["scope"] for c in cited}),
         # From the claims table, not from the model: what is current, and what it replaced.
-        "facts": facts(cited, scopes),
+        "facts": facts(conn, cited, scopes),
     }

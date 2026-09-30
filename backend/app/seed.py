@@ -1,18 +1,18 @@
-"""Load seed/ into Postgres, including pre-extracted claims. Each step is skipped if
-already done, so restarting on an existing volume does no work."""
+"""Load a seed directory into one tenant's database. Called by app/tenants/admin.py
+with an admin connection; the API process never seeds.
+
+A seed directory holds users.yaml, docs/*.md and claims.json (pre-extracted claims,
+see app/regenerate_claims.py; an empty list is fine).
+"""
 import json
 import logging
-import os
 from pathlib import Path
 
 import yaml
 
-from . import claims
-from .db import connect
 from .embed import embed_passages
 
 log = logging.getLogger("seed")
-SEED_DIR = Path(os.environ.get("SEED_DIR", "/seed"))
 
 
 def parse_doc(path: Path) -> tuple[dict, str]:
@@ -25,49 +25,11 @@ def chunk(body: str) -> list[str]:
     return [p.strip() for p in body.split("\n\n") if p.strip()]
 
 
-def seed() -> None:
-    with connect() as conn:
-        if conn.execute("SELECT count(*) AS n FROM documents").fetchone()["n"]:
-            log.info("seed: documents present, skipping")
-        else:
-            load_documents(conn)
-        if conn.execute("SELECT count(*) AS n FROM claims").fetchone()["n"]:
-            log.info("seed: claims present, skipping")
-        elif (SEED_DIR / "claims.json").exists():
-            load_claims(conn)
-        else:
-            log.info("seed: no seed/claims.json, extracting claims with the model")
-            claims.extract_all(conn)
-
-
-def load_claims(conn) -> None:
-    """Load pre-extracted claims (see app/regenerate_claims.py). Rows are inserted
-    first, then supersede links are set, which the append-only trigger allows once."""
-    rows = json.loads((SEED_DIR / "claims.json").read_text())
-    ids = {}
-    with conn.transaction():
-        for r in rows:
-            chunk_id = conn.execute(
-                "SELECT id FROM chunks WHERE document_id = %s AND ord = %s",
-                (r["document_id"], r["ord"]),
-            ).fetchone()["id"]
-            ids[r["ref"]] = conn.execute(
-                "INSERT INTO claims (subject, attribute, condition, value, quote, valid_from,"
-                " source_chunk_id, scope_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
-                (r["subject"], r["attribute"], r["condition"], r["value"], r["quote"],
-                 r["valid_from"], chunk_id, r["scope_id"]),
-            ).fetchone()["id"]
-        for r in rows:
-            if r["superseded_by"] is not None:
-                conn.execute("UPDATE claims SET superseded_by = %s WHERE id = %s",
-                             (ids[r["superseded_by"]], ids[r["ref"]]))
-    log.info("seed: loaded %d claims from seed/claims.json", len(rows))
-
-
-def load_documents(conn) -> None:
-    people = yaml.safe_load((SEED_DIR / "users.yaml").read_text())
+def load_documents(conn, seed_dir: Path) -> None:
+    people = yaml.safe_load((seed_dir / "users.yaml").read_text())
     for u in people["users"]:
-        conn.execute("INSERT INTO users VALUES (%s, %s, %s)", (u["id"], u["name"], u["title"]))
+        conn.execute("INSERT INTO users (id, name, title, email) VALUES (%s, %s, %s, %s)",
+                     (u["id"], u["name"], u["title"], u["email"].lower()))
     for s in people["scopes"]:
         conn.execute(
             "INSERT INTO scopes VALUES (%s, %s, %s, %s, %s)",
@@ -78,7 +40,7 @@ def load_documents(conn) -> None:
             conn.execute("INSERT INTO memberships VALUES (%s, %s)", (user_id, scope_id))
 
     n_chunks = 0
-    for path in sorted((SEED_DIR / "docs").glob("*.md")):
+    for path in sorted((seed_dir / "docs").glob("*.md")):
         meta, body = parse_doc(path)
         doc_id = path.stem
         conn.execute(
@@ -98,3 +60,27 @@ def load_documents(conn) -> None:
             )
             n_chunks += 1
     log.info("seed: loaded %d chunks", n_chunks)
+
+
+def load_claims(conn, seed_dir: Path) -> None:
+    """Load pre-extracted claims. Rows are inserted first, then supersede links are
+    set, which the append-only trigger allows once."""
+    rows = json.loads((seed_dir / "claims.json").read_text())
+    ids = {}
+    with conn.transaction():
+        for r in rows:
+            chunk_id = conn.execute(
+                "SELECT id FROM chunks WHERE document_id = %s AND ord = %s",
+                (r["document_id"], r["ord"]),
+            ).fetchone()["id"]
+            ids[r["ref"]] = conn.execute(
+                "INSERT INTO claims (subject, attribute, condition, value, quote, valid_from,"
+                " source_chunk_id, scope_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                (r["subject"], r["attribute"], r["condition"], r["value"], r["quote"],
+                 r["valid_from"], chunk_id, r["scope_id"]),
+            ).fetchone()["id"]
+        for r in rows:
+            if r["superseded_by"] is not None:
+                conn.execute("UPDATE claims SET superseded_by = %s WHERE id = %s",
+                             (ids[r["superseded_by"]], ids[r["ref"]]))
+    log.info("seed: loaded %d claims", len(rows))

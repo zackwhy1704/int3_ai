@@ -1,6 +1,6 @@
 """Measure the supersede pipeline (extract -> record) on fixed passage pairs.
 
-    docker compose exec backend python -m app.supersede_eval --runs 10
+    docker compose run --rm tools python -m app.supersede_eval --runs 10
 
 Every run happens in its own transaction with its own scratch scope and is rolled
 back, so nothing touches the real claims. Failures are counted and reported; a
@@ -14,15 +14,13 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from pathlib import Path
 
-import psycopg
 import yaml
-from pgvector.psycopg import register_vector
-from psycopg.rows import dict_row
 
 from . import claims
-from .db import DATABASE_URL
+from .tenants.admin import admin_tenant_conn
 
-SEED_DIR = Path(os.environ.get("SEED_DIR", "/seed"))
+SEED_DIR = Path("/seed/brindlewood")
+TENANT = os.environ.get("SUPERSEDE_TENANT", "brindlewood")
 OLD_DATE, NEW_DATE = date(2026, 1, 1), date(2026, 3, 1)
 ZERO = [0.0] * 384
 
@@ -33,8 +31,8 @@ def load_cases() -> list[dict]:
 
 def run_case(case: dict) -> dict:
     """One run of one case. Returns {'pass': bool, 'detail': str}."""
-    conn = psycopg.connect(DATABASE_URL, row_factory=dict_row)
-    register_vector(conn)
+    conn = admin_tenant_conn(TENANT)
+    conn.autocommit = False
     try:
         scope = f"eval-{uuid.uuid4().hex[:8]}"
         conn.execute("INSERT INTO scopes VALUES (%s, 'eval', 'eval', 'scratch', 'ada')", (scope,))

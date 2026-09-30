@@ -1,7 +1,7 @@
 """Supersede suite. The model is non-deterministic, so this reports a measured pass
 rate per case and asserts a floor; it never retries a failed run.
 
-    SUPERSEDE_RUNS=10 docker compose exec backend pytest -m llm -s tests/test_supersede.py
+    docker compose run --rm -e SUPERSEDE_RUNS=10 tools pytest -m llm -s tests/test_supersede.py
 """
 import os
 
@@ -22,9 +22,10 @@ def test_supersede_pass_rate():
 
 
 def test_claims_are_append_only(client):
-    from app.db import connect
+    """The trigger holds even for the superuser (grants don't apply to it; triggers do)."""
+    from app.tenants.admin import admin_tenant_conn
 
-    with connect() as conn:
+    with admin_tenant_conn("brindlewood") as conn:
         row = conn.execute("SELECT id FROM claims LIMIT 1").fetchone()
         assert row is not None, "no claims were extracted"
         with pytest.raises(Exception, match="append-only"):

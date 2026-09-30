@@ -1,33 +1,61 @@
+# Local pilot stack. Secrets come from .env (interpolated below, never committed);
+# gate 7 moves them to a managed secret store.
+#
+#   docker compose --profile dev up -d       # stack + local test identity provider
+#   docker compose run --rm tools <command>  # operator commands and tests (superuser)
+
+x-runtime-env: &runtime-env
+  ENV: ${ENV:-development}
+  APP_ORIGIN: ${APP_ORIGIN:-http://localhost:5173}
+  APP_CONTROL_PASSWORD: ${APP_CONTROL_PASSWORD:?set APP_CONTROL_PASSWORD in .env}
+  TENANT_DB_KEY: ${TENANT_DB_KEY:?set TENANT_DB_KEY in .env}
+  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+  ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-5-5}
+  GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+  GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+  MS_CLIENT_ID: ${MS_CLIENT_ID:-}
+  MS_CLIENT_SECRET: ${MS_CLIENT_SECRET:-}
+  MOCK_OIDC_URL: ${MOCK_OIDC_URL:-}
+  MOCK_OIDC_PUBLIC_URL: ${MOCK_OIDC_PUBLIC_URL:-}
+
+# Postgres superuser: only the database itself, the one-shot init job and the
+# tools container get these. The API process (backend) never does.
+x-admin-env: &admin-env
+  ADMIN_DB_USER: ${ADMIN_DB_USER:-brain}
+  ADMIN_DB_PASSWORD: ${ADMIN_DB_PASSWORD:?set ADMIN_DB_PASSWORD in .env}
+
 services:
   db:
     image: pgvector/pgvector:pg16
     environment:
-      POSTGRES_USER: brain
-      POSTGRES_PASSWORD: brain
-      POSTGRES_DB: brain
+      POSTGRES_USER: ${ADMIN_DB_USER:-brain}
+      POSTGRES_PASSWORD: ${ADMIN_DB_PASSWORD:?set ADMIN_DB_PASSWORD in .env}
+      POSTGRES_DB: control
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U brain -d brain"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d control"]
       interval: 2s
       timeout: 3s
       retries: 30
 
-  backend:
+  init:
     build: ./backend
-    env_file:
-      - path: .env
-        required: false
+    command: ["python", "-m", "app.tenants.admin", "init"]
     environment:
-      DATABASE_URL: postgresql://brain:brain@db:5432/brain
-      SEED_DIR: /seed
-    volumes:
-      - ./seed:/seed:ro
-    ports:
-      - "8000:8000"
+      <<: [*runtime-env, *admin-env]
     depends_on:
       db:
         condition: service_healthy
+
+  backend:
+    build: ./backend
+    environment: *runtime-env
+    ports:
+      - "8000:8000"
+    depends_on:
+      init:
+        condition: service_completed_successfully
 
   web:
     build: ./web
@@ -37,6 +65,28 @@ services:
       - "5173:5173"
     depends_on:
       - backend
+
+  # Local test identity provider. Development and tests only; the backend refuses
+  # to start with MOCK_OIDC_URL set when ENV=production.
+  mock-oidc:
+    image: ghcr.io/navikt/mock-oauth2-server:2.1.10
+    profiles: [dev]
+    environment:
+      JSON_CONFIG: '{"interactiveLogin": true}'
+    ports:
+      - "8081:8080"
+
+  tools:
+    build: ./backend
+    profiles: [tools]
+    environment:
+      <<: [*runtime-env, *admin-env]
+    volumes:
+      - ./seed:/seed:ro
+      - .:/repo:ro          # read-only, for repository-wide checks in the test suite
+    depends_on:
+      db:
+        condition: service_healthy
 
 volumes:
   pgdata:

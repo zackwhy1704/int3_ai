@@ -1,9 +1,12 @@
 CREATE EXTENSION IF NOT EXISTS vector;
 
+-- Tenant database schema. Applied by app/tenants/admin.py when a tenant is provisioned.
 CREATE TABLE IF NOT EXISTS users (
-    id    text PRIMARY KEY,
-    name  text NOT NULL,
-    title text NOT NULL
+    id     text PRIMARY KEY,
+    name   text NOT NULL,
+    title  text NOT NULL,
+    email  text NOT NULL UNIQUE CHECK (email = lower(email)),
+    active boolean NOT NULL DEFAULT true
 );
 
 CREATE TABLE IF NOT EXISTS scopes (

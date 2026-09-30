@@ -3,12 +3,15 @@
 
 users:
   - id: priya
+    email: priya@brindlewood.example
     name: Priya N.
     title: Head of Operations
   - id: marcus
+    email: marcus@brindlewood.example
     name: Marcus O.
     title: Finance Director
   - id: ada
+    email: ada@brindlewood.example
     name: Ada L.
     title: CEO
 

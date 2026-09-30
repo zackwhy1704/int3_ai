@@ -38,10 +38,14 @@ blockquote { margin: 4px 0 0; padding-left: 10px; border-left: 3px solid #d8cbb2
 .cited { background: #fff3b0; }
 
 .reset { margin-right: 12px; padding: 5px 12px; border: 1px solid #c9c4ba; border-radius: 8px; background: #fff; cursor: pointer; }
-.suggestions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.chip { padding: 6px 12px; border: 1px solid #c9c4ba; border-radius: 999px; background: #fff; cursor: pointer; font-size: 13.5px; }
-.chip:disabled { opacity: .5; cursor: default; }
 .cached { font-size: 13px; padding: 8px 12px; border-radius: 8px; background: #eef1f6; border: 1px solid #cdd5e3; color: #2d3a52; }
 
 .muted { color: #5c6169; }
 .small { font-size: 12.5px; }
+
+.login { min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+.login .card { width: 360px; }
+.login h1 { font-size: 22px; margin: 4px 0; }
+.provider { display: block; text-align: center; padding: 11px; border: 1px solid #c9c4ba; border-radius: 10px; color: #16181d; text-decoration: none; font-weight: 600; background: #fff; }
+.provider:hover { background: #f5f3ef; }
+.signout { margin: 0 0 0 12px; }

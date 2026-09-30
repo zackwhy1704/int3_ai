@@ -1,0 +1,10 @@
+users:
+  - id: sam
+    email: sam@brindlewood.example
+    name: Sam R.
+    title: Research Lead
+scopes:
+  - {id: company-wide, name: Company-wide, kind: everyone, description: Brindlewood Labs policies., owner: sam}
+  - {id: research, name: Research, kind: department, description: Brindlewood Labs research., owner: sam}
+memberships:
+  sam: [company-wide, research]

@@ -85,27 +85,53 @@ build a second thing before the first has users.
   fallback only if Tauri proves painful.
 - Web console: TypeScript and React.
 
-## This repo: the local demo
-Its only job is to prove three things to the business partner, in this order:
-1. **Scoping.** Priya (Operations) and Marcus (Finance) ask "what's our refund window
-   for enterprise customers?" and get answers from different source sets. Marcus sees
-   a Finance-only document; Priya's answer never cites or paraphrases it.
-2. **Citations and refusal.** Every answer links the passages it used. A question with
-   no supporting source returns "no reliable source found" and suggests an owner. It
-   never invents an answer.
-3. **Change tracking.** The refund policy exists in two dated versions (14 → 30 days).
-   The answer gives the current value and the previous one, with both dates and both
-   verbatim quotes.
+## This repo: the hosted pilot
+The local partner demo is finished and lives at git tag `demo-v1` (it proved scoping,
+citations with refusal, and change tracking). This branch line builds the hosted pilot:
+one real customer, real documents, real users, in gates 5–9, stopping at each for review:
+5. Real identity and tenancy. 6. Getting real documents in. 7. Deploy (Singapore).
+8. Running it for someone else (admin, golden set, usage). 9. Operations.
 
 **Layout:**
-- `backend/`: FastAPI, psycopg, fastembed.
-- `web/`: React + TS, served by the Vite dev server.
-- `seed/`: synthetic documents, users and test questions.
-- `docker-compose.yml` and `README.md`.
+- `backend/app/`: FastAPI. `auth/` (sign-in, sessions, `principal`), `tenants/admin.py`
+  (operator commands), `db.py` (connections), `answer.py`, `claims.py`, `retrieve.py`.
+- `web/`: React + TS, served by the Vite dev server (proxies `/api`).
+- `seed/brindlewood/`: the synthetic demo tenant. `seed/fixtures/`: synthetic test tenants.
+- `docker-compose.yml`, `preflight.sh`, `README.md`.
 
-**Running it:** `docker compose up --build` is the only command needed.
+**Running it:** `docker compose --profile dev up -d` (includes the local test sign-in
+server). Operator commands and tests run in the tools container, the only place with
+Postgres superuser credentials: `docker compose run --rm tools <command>`.
 
-**Running the tests:** `docker compose exec backend pytest -v` (the stack must be up).
+**Running the tests:** `docker compose run --rm tools pytest -v` (stack up; `-m "not llm"`
+skips model calls). Provision a tenant:
+`docker compose run --rm tools python -m app.tenants.admin provision --id acme --name "Acme" --admin-email ops@acme.example`.
+
+**Identity and tenancy (gate 5):**
+- The demo's `X-User-Id` header is removed from every code path (gate 5). Identity comes
+  only from Google or Microsoft sign-in (OIDC code flow + PKCE, state bound to the
+  browser, nonce; ID token verified against the provider's JWKS, RS256 only).
+- Every request: session cookie → control DB session → tenant → tenant DB (as the
+  tenant's own role) → active user → memberships → scopes. Nothing else the client
+  sends is consulted. Scopes are re-resolved per request, so removals apply next request.
+- **The isolation boundary is Postgres, not application code.** One database per tenant;
+  CONNECT revoked from PUBLIC; each tenant DB accepts only its own role `t_<id>`; the
+  API's control role cannot open tenant DBs. Tenant roles have SELECT on content and
+  write only the answer cache. The API process never holds superuser credentials.
+  Tests in `test_db_boundary.py` are the first line; code-level tests are the second.
+- Microsoft: never trust the email claim alone (nOAuth). The tenant names its Entra
+  tenant (tid); identities bind to `tid:oid` (Google: `sub`) at first sign-in and must
+  match afterwards.
+- Sessions: server-side, SHA-256 of the id stored, `__Host-` httpOnly Secure SameSite=Lax
+  cookie, 30 min idle / 8 h absolute. CSRF: per-session token header plus Origin check
+  on every state-changing request.
+- **PILOT CONSTRAINT, not permanent design: one email belongs to exactly one tenant**
+  (email is the identity key). Chosen because supporting several tenants per email needs
+  a tenant picker and widens the attack surface; revisit when a real user needs it.
+- Per-tenant sign-in policy (`google_domain`, `ms_tenant_id`) is data, set with
+  `python -m app.tenants.admin configure`, never a code change.
+- The local test sign-in server (navikt/mock-oauth2-server) is dev/test only; the backend
+  refuses to start with it configured when `ENV=production`.
 
 **Decisions:**
 - **LLM: one provider, Claude via the Anthropic API.** There is no local-model switch.
@@ -119,7 +145,7 @@ Its only job is to prove three things to the business partner, in this order:
 - **Refusal: gated on a cross-encoder (`Xenova/ms-marco-MiniLM-L-6-v2`), threshold 0.**
   Embedding cosine didn't separate supported from unsupported questions (gap +0.033),
   while the cross-encoder did (gap +9.47 logits). Re-measure with
-  `docker compose exec backend python -m app.calibrate`.
+  `docker compose run --rm tools python -m app.calibrate`.
 - **Claim key is (scope, subject, attribute, condition).** A conditional claim never
   supersedes an unconditional one, in either direction; they coexist.
 - **Claim-selection rule: authority, not order of arrival.** Each source has an
@@ -132,45 +158,25 @@ Its only job is to prove three things to the business partner, in this order:
   produced condition "board members travelling to london" in 9 runs out of 10 and
   "london, board members" in the other. Different text means a different key, so a
   later claim can miss the one it should supersede. This is fine for the demo, where
-  claims are extracted once and baked into `seed/claims.json`. It is not fine in
+  claims are extracted once and baked into `seed/<tenant>/claims.json`. It is not fine in
   general: the product needs canonical conditions.
 - **DEMO SIMPLIFICATION, not doctrine: supersede only within the same scope.** This
   avoids showing a user a superseded claim whose replacement is hidden from them. In a
   real company Finance legitimately corrects a company-wide number, so the product
   needs cross-scope supersede with a visibility rule. Don't carry this rule forward.
 
-**Sign-in:** a dropdown of three seeded users:
-- Priya (Operations): company-wide + operations.
-- Marcus (Finance): company-wide + finance.
-- Ada (CEO): company-wide + leadership.
+**Seed and test data:** fully synthetic. Never a real company's documents, even with
+permission, and never real customer documents in logs, error reports or fixtures.
 
-The user id travels in the `X-User-Id` header, and the server resolves the scopes.
-`X-User-Id` is demo only — replaces authentication, trivially spoofable, never ships.
-
-**Seed data:** fully synthetic, for the fictional company Brindlewood Supply Co.
-Never use a real company's documents, even with permission.
-
-**Build order.** Stop at each gate and report:
-1. Compose, schema, seed, and a scope-filtered search endpoint.
-2. Answers with structural citations, and refusal below a measured retrieval threshold.
-3. Claims extraction and supersede, with the change surfaced in the answer.
-4. A minimal web UI: user dropdown, brain list with one locked brain, ask box, and
-   an answer with citations and the change flag.
-
-**Tests that gate the demo:**
-- **Cross-user permissions.** No answer for user A cites or contains text from a
-  scope A isn't in. Must pass 100%.
+**Tests that gate every merge:**
+- **Cross-user and cross-tenant permissions,** against real sign-in. Must pass 100%.
 - **Refusal.** Unsupported questions never produce an answer.
-- **Supersede.** A reworded but unchanged fact is not a change; a genuinely changed
-  value is. Report the real pass rate over repeated runs, and never retry until it
-  goes green.
+- **Supersede.** Report the real pass rate over repeated runs; never retry until green.
 
-## Out of scope for the demo — do not build
-Authentication and SSO, multi-tenancy or per-tenant databases, a desktop shell (Tauri
-or Electron), an agent runtime (Hermes or OpenClaw), connectors to real services or
-live ingestion, an Onyx fork, the model gateway or metering, billing, an admin UI, a
-conflict-resolution workflow, a design system, the setup wizard, cloud or S3, a
-second LLM provider (e.g. Ollama), and nginx or any production web server.
+## Out of scope for the pilot — do not build
+Self-serve signup, billing, multi-tenant SaaS features, a desktop shell (Tauri or
+Electron), an agent runtime, an Onyx fork, the model gateway, connectors other than the
+one gate 6 names, a second LLM provider, a design system.
 
 ## How we work
 - **Plan before large changes.** For anything touching token issuance, scope
