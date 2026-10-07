@@ -9,9 +9,11 @@ from . import answer, embed, llm, rerank, retrieve
 from .db import apply_schema, connect
 from .scopes import current_user, resolve
 from .seed import SEED_DIR, seed
+from .v1 import router as v1_router
 
 logging.basicConfig(level=logging.INFO)
 app = FastAPI(title="Company Brain demo")
+app.include_router(v1_router)
 
 
 @app.on_event("startup")

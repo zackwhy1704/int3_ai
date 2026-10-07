@@ -21,6 +21,9 @@ services:
     environment:
       DATABASE_URL: postgresql://brain:brain@db:5432/brain
       SEED_DIR: /seed
+      # Gate 3 dev mode: any Bearer token on /v1/ resolves to this user.
+      # Gate 4: remove BRAIN_DEV_USER and implement RS256 OIDC token verification.
+      BRAIN_DEV_USER: priya
     volumes:
       - ./seed:/seed:ro
     ports:
