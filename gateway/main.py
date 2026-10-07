@@ -1,46 +1,39 @@
 """
 Company Brain Gateway — OpenAI-compatible LLM proxy.
 
-Exposes POST /v1/chat/completions (and other standard endpoints).
-Holds the Anthropic API key server-side; no client machine ever sees it.
+POST /v1/chat/completions  — chat, streaming, tool calls
+GET  /health               — liveness check
 
 Auth
 ----
-Gate 2 (dev): GATEWAY_AUTH=none — all requests pass through, no token check.
-Gate 4+:      GATEWAY_AUTH=oidc — validates the caller's Google OIDC Bearer token.
-              See auth.py for verification logic.
-
-LLM routing
------------
-Translates OpenAI-format requests to the Anthropic Messages API and back.
-To add another provider (e.g. OpenAI, Vertex), extend proxy.py.
+GATEWAY_AUTH=none  (local dev, explicit in docker-compose) — no token check.
+GATEWAY_AUTH=oidc  (Gate 4+) — full RS256 OIDC verification.
+Any other value   — 501 Not Implemented (fail safe, not fail open).
 
 Running locally
 ---------------
   docker compose up gateway
   # or:
-  ANTHROPIC_API_KEY=sk-... GATEWAY_AUTH=none uvicorn gateway.main:app --port 8001
+  ANTHROPIC_API_KEY=sk-... GATEWAY_AUTH=none uvicorn main:app --port 8001
 
-Running in Cloud Run (production)
-----------------------------------
-  All env vars injected from Google Secret Manager.
-  ANTHROPIC_API_KEY, GATEWAY_AUTH=oidc, OIDC_AUDIENCE=<client_id>
+Running in Cloud Run
+---------------------
+  All env vars come from Google Secret Manager.
+  ANTHROPIC_API_KEY, GATEWAY_AUTH=oidc, OIDC_AUDIENCE=<client_id>, LLM_MODEL
 """
-
-import os
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import StreamingResponse
 
-from .auth import verify_token
-from .proxy import proxy_to_anthropic
+from auth import verify_token
+from upstream import complete, stream
 
-app = FastAPI(title="Company Brain Gateway", version="0.1.0")
+app = FastAPI(title="Company Brain Gateway", version="0.2.0")
 
 
 @app.get("/health")
-async def health():
-    return {"status": "ok", "version": "0.1.0"}
+async def health() -> dict:
+    return {"status": "ok", "version": "0.2.0"}
 
 
 @app.post("/v1/chat/completions")
@@ -48,18 +41,7 @@ async def chat_completions(
     request: Request,
     _caller: str = Depends(verify_token),
 ):
-    """
-    OpenAI-compatible chat completions endpoint.
-
-    Accepts: { messages, model, stream, max_tokens, ... }
-    Returns: OpenAI-format response (or SSE stream if stream=true)
-
-    The caller's identity (_caller) is available for metering in a future gate.
-    """
     body = await request.json()
-    stream: bool = body.get("stream", False)
-    result = await proxy_to_anthropic(body, stream=stream)
-
-    if stream:
-        return StreamingResponse(result, media_type="text/event-stream")
-    return result
+    if body.get("stream"):
+        return StreamingResponse(stream(body), media_type="text/event-stream")
+    return await complete(body)
