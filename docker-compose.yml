@@ -29,6 +29,22 @@ services:
       db:
         condition: service_healthy
 
+  # Model gateway — OpenAI-compatible LLM proxy.
+  # Holds the Anthropic API key server-side. Desktop and web clients never see it.
+  # Gate 2: GATEWAY_AUTH=none (dev only — remove before Gate 4).
+  # Gate 4: set GATEWAY_AUTH=oidc and OIDC_AUDIENCE=<google_client_id>.
+  gateway:
+    build: ./gateway
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      GATEWAY_AUTH: none        # dev only — see gateway/auth.py
+      PORT: "8001"
+      # ANTHROPIC_API_KEY comes from .env (required in production)
+    ports:
+      - "8001:8001"
+
   web:
     build: ./web
     environment:

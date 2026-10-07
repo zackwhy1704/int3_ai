@@ -72,8 +72,8 @@ build a second thing before the first has users.
   - It is forked, not vendored.
   - Our services live outside the fork, so upstream merges stay clean and
     ownership is unambiguous.
-- Desktop agent runtime: an open-source MIT project (Hermes Agent or OpenClaw).
-  We wrap it; we don't write one.
+- Desktop agent runtime: Hermes Agent (NousResearch, MIT).
+  We wrap it; we don't write one. See `int3_desktop`.
 
 **Data and infrastructure:**
 - PostgreSQL + pgvector, one engine for rows and vectors.
@@ -84,6 +84,54 @@ build a second thing before the first has users.
 - Desktop shell: Tauri (a Rust core with a TypeScript and React UI). Electron is the
   fallback only if Tauri proves painful.
 - Web console: TypeScript and React.
+
+## Repositories
+
+| Repo | Purpose |
+|---|---|
+| `int3_ai` | **This repo** — backend, gateway, web console, Docker/Cloud Run |
+| `int3_desktop` | Tauri desktop app, Hermes sidecar, MCP tools, installer |
+
+## Gateway service (`gateway/`)
+
+Every LLM call from any client (web or desktop) is proxied through this service.
+Provider API keys live in Google Secret Manager and are never sent to client machines.
+
+**Stack:** Python + FastAPI, exposes a POST `/v1/chat/completions` endpoint
+(OpenAI-compatible). Validates the caller's OIDC Bearer token before forwarding.
+
+**Local dev:** runs as a Docker Compose service on port 8001.
+**Production:** deployed as a separate Cloud Run service (stateless, scales to zero).
+
+```
+gateway/
+  main.py          # FastAPI app, /health + /v1/chat/completions
+  auth.py          # OIDC Bearer token validation (Gate 4)
+  proxy.py         # Translates OpenAI format → Anthropic API, proxies response
+  Dockerfile
+  requirements.txt
+```
+
+**Environment variables:**
+- `ANTHROPIC_API_KEY` — injected from Google Secret Manager in production
+- `GATEWAY_AUTH=none` — skip token validation in local dev (Gate 2); remove before Gate 4
+- `PORT` — defaults to 8001
+
+## Cloud deployment
+
+**Provider:** Google Cloud Run + Cloud SQL (Singapore region, `asia-southeast1`).
+
+**Rationale:** target customers use Google Workspace, so Google OIDC and Drive/Gmail
+connectors are native. Cloud Run is simple to deploy (one `gcloud run deploy`),
+scales to zero between pilot sessions, and Cloud SQL managed Postgres fits the
+per-tenant database model.
+
+**Database:** one Cloud SQL instance, one database per tenant (not one instance per
+tenant — too expensive at pilot scale). Tenant databases are created by the control
+plane provisioning script.
+
+**Secrets:** all in Google Secret Manager — `ANTHROPIC_API_KEY`, session secrets,
+OIDC client credentials.
 
 ## This repo: the local demo
 Its only job is to prove three things to the business partner, in this order:
@@ -99,6 +147,7 @@ Its only job is to prove three things to the business partner, in this order:
 
 **Layout:**
 - `backend/`: FastAPI, psycopg, fastembed.
+- `gateway/`: OpenAI-compatible LLM proxy (see Gateway section above).
 - `web/`: React + TS, served by the Vite dev server.
 - `seed/`: synthetic documents, users and test questions.
 - `docker-compose.yml` and `README.md`.
