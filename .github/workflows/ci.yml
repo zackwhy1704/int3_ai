@@ -1,0 +1,146 @@
+name: CI
+
+on:
+  push:
+    branches: [integrate]
+  pull_request:
+    branches: [integrate]
+
+jobs:
+  lint:
+    name: Ruff lint + format check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ruff
+        run: pip install ruff>=0.9.0
+
+      - name: ruff check backend/
+        run: ruff check backend/
+
+      - name: ruff format --check backend/
+        run: ruff format --check backend/
+
+      - name: ruff check gateway/
+        run: ruff check gateway/
+
+      - name: ruff format --check gateway/
+        run: ruff format --check gateway/
+
+  authcore-unit:
+    name: authcore unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install authcore[dev]
+        run: |
+          cd libs/authcore
+          pip install -e ".[dev]"
+
+      - name: Run authcore unit tests
+        run: |
+          cd libs/authcore
+          pytest -m unit -v
+
+  pip-audit:
+    name: pip-audit vulnerability scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install pip-audit and toml parser
+        run: pip install pip-audit tomli
+
+      - name: Install authcore (needed for authcore audit)
+        run: pip install -e libs/authcore
+
+      - name: Audit backend/requirements.txt
+        run: pip-audit -r backend/requirements.txt --desc
+
+      - name: Audit gateway/requirements.txt
+        run: pip-audit -r gateway/requirements.txt --desc
+
+      - name: Audit backend/requirements-dev.txt
+        run: pip-audit -r backend/requirements-dev.txt --desc
+
+      - name: Audit gateway/requirements-dev.txt
+        run: pip-audit -r gateway/requirements-dev.txt --desc
+
+      - name: Audit libs/authcore
+        run: |
+          cd libs/authcore
+          pip-audit --desc
+
+  gateway-unit:
+    name: Gateway unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install libs/authcore (gateway dependency)
+        run: pip install -e libs/authcore
+
+      - name: Install gateway dev requirements
+        run: |
+          cd gateway
+          pip install -r requirements-dev.txt
+
+      - name: Run gateway unit tests
+        run: |
+          cd gateway
+          pytest -v
+
+  backend-integration:
+    name: Backend integration suite (Docker Compose)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create minimal .env for CI
+        run: |
+          cat > .env <<'EOF'
+          APP_CONTROL_PASSWORD=ci-test-password
+          ADMIN_DB_PASSWORD=ci-admin-password
+          TENANT_DB_KEY=ci-tenant-key-32chars-padded-here
+          EOF
+
+      - name: Build and start pilot services
+        run: |
+          docker compose --profile dev up -d --build init tools mock-oidc gateway
+        timeout-minutes: 10
+
+      - name: Wait for DB to be healthy
+        run: |
+          docker compose exec db pg_isready -U brain -d control || sleep 5
+          docker compose exec db pg_isready -U brain -d control
+
+      - name: Run full backend suite (not llm)
+        run: |
+          docker compose run --rm tools pytest -v -m "not llm"
+        timeout-minutes: 15
+
+      - name: Show compose logs on failure
+        if: failure()
+        run: docker compose logs --tail=100
