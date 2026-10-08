@@ -67,7 +67,11 @@ def load_claims(conn) -> None:
 def load_documents(conn) -> None:
     people = yaml.safe_load((SEED_DIR / "users.yaml").read_text())
     for u in people["users"]:
-        conn.execute("INSERT INTO users VALUES (%s, %s, %s)", (u["id"], u["name"], u["title"]))
+        conn.execute(
+            "INSERT INTO users (id, name, title, email) VALUES (%s, %s, %s, %s)"
+            " ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email",
+            (u["id"], u["name"], u["title"], u.get("email")),
+        )
     for s in people["scopes"]:
         conn.execute(
             "INSERT INTO scopes VALUES (%s, %s, %s, %s, %s)",

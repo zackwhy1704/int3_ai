@@ -1,10 +1,12 @@
 """
 /v1/ API — used by the desktop MCP server (RemoteBrainProvider).
 
-Auth (Gate 3 development mode):
-  Set BRAIN_DEV_USER=<user_id> to accept any Bearer token and treat all
-  requests as that user. Gate 4 replaces this with RS256 OIDC verification.
-  Without BRAIN_DEV_USER, every /v1/ request returns 401.
+Auth modes (BRAIN_AUTH env var):
+  dev   — BRAIN_DEV_USER must be set; any Bearer token maps to that user (Gate 3).
+  oidc  — RS256 Google OIDC; id_token email maps to users.email in the DB (Gate 4).
+  (unset) — 401 on every request.
+
+Set OIDC_AUDIENCE to the Google Client ID when BRAIN_AUTH=oidc.
 
 Endpoints:
   POST /v1/search           — semantic search returning claim-anchored results
@@ -13,54 +15,60 @@ Endpoints:
   POST /v1/validate-claims  — batch citation verification (Gate 0 item 2)
 
 Citation format (frozen after Gate 3): [claim:N]
-  MCP tools embed this marker in their text output. The LLM repeats the marker
-  in its answer. Before the React UI renders any agent response, it extracts
-  all [claim:N] patterns and calls POST /v1/validate-claims. IDs that fail
-  (not found or out of scope) are shown as unverifiable — never silently dropped.
-  This enforces the citation invariant server-side regardless of agent behaviour.
 """
 import os
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Header, Query
 from pydantic import BaseModel
 
 from .db import connect
 from .embed import embed_query
-from .scopes import resolve, user_scopes
+from .oidc import verify as _oidc_verify
+from .scopes import resolve, user_scopes, user_by_email
 
 log = logging.getLogger("v1")
 
 router = APIRouter(prefix="/v1")
 
 # ---------------------------------------------------------------------------
-# Auth (Gate 3 dev stub — replaced by OIDC in Gate 4)
+# Auth
 # ---------------------------------------------------------------------------
 
+_BRAIN_AUTH = os.getenv("BRAIN_AUTH", "dev" if os.getenv("BRAIN_DEV_USER") else "")
 _DEV_USER = os.getenv("BRAIN_DEV_USER", "")
+_OIDC_AUDIENCE = os.getenv("OIDC_AUDIENCE", "")
 
 
-def _bearer_user(authorization: str | None = None) -> str:
-    """
-    Resolve the caller to a user_id.
+def authed_user(authorization: str | None = Header(default=None)) -> str:
+    """Resolve the Bearer token to a user_id. Raises 401 on any failure."""
+    if _BRAIN_AUTH == "dev":
+        if not _DEV_USER:
+            raise HTTPException(
+                401,
+                "BRAIN_DEV_USER is not set. "
+                "Set BRAIN_AUTH=oidc for production or BRAIN_DEV_USER for local dev.",
+            )
+        if not authorization or not authorization.startswith("Bearer "):
+            raise HTTPException(401, "missing Bearer token")
+        return _DEV_USER
 
-    Gate 3: BRAIN_DEV_USER must be set; any non-empty Bearer token is accepted
-    and maps to that user.  Missing or blank env var → 401.
-    Gate 4: replace this function with real RS256 OIDC token verification.
-    """
-    if not _DEV_USER:
-        raise HTTPException(
-            401,
-            "BRAIN_DEV_USER is not set — /v1/ endpoints are unavailable until "
-            "Gate 4 OIDC is implemented or BRAIN_DEV_USER is configured",
-        )
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(401, "missing Bearer token")
-    return _DEV_USER
+    if _BRAIN_AUTH == "oidc":
+        if not authorization or not authorization.startswith("Bearer "):
+            raise HTTPException(401, "missing Bearer token")
+        try:
+            payload = _oidc_verify(authorization[7:], _OIDC_AUDIENCE)
+        except ValueError as exc:
+            raise HTTPException(401, str(exc)) from exc
+        email = payload.get("email")
+        if not email:
+            raise HTTPException(401, "id_token has no email claim")
+        return user_by_email(email)
 
-
-def authed_user(authorization: str | None = None) -> str:
-    return _bearer_user(authorization)
+    raise HTTPException(
+        501,
+        "BRAIN_AUTH not configured. Set BRAIN_AUTH=oidc or BRAIN_DEV_USER.",
+    )
 
 
 # ---------------------------------------------------------------------------

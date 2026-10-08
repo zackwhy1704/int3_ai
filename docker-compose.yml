@@ -21,9 +21,11 @@ services:
     environment:
       DATABASE_URL: postgresql://brain:brain@db:5432/brain
       SEED_DIR: /seed
-      # Gate 3 dev mode: any Bearer token on /v1/ resolves to this user.
-      # Gate 4: remove BRAIN_DEV_USER and implement RS256 OIDC token verification.
+      # Dev: any Bearer token resolves to BRAIN_DEV_USER. Remove for production.
+      # Production: set BRAIN_AUTH=oidc, OIDC_AUDIENCE=<google_client_id>, remove BRAIN_DEV_USER.
       BRAIN_DEV_USER: priya
+      # BRAIN_AUTH: oidc          # uncomment for production
+      # OIDC_AUDIENCE: ""         # set to your Google OAuth2 Client ID
     volumes:
       - ./seed:/seed:ro
     ports:
@@ -42,9 +44,10 @@ services:
       - path: .env
         required: false
     environment:
-      GATEWAY_AUTH: none        # dev only — see gateway/auth.py
+      GATEWAY_AUTH: none        # dev only; production: oidc
       PORT: "8001"
       # ANTHROPIC_API_KEY comes from .env (required in production)
+      # OIDC_AUDIENCE: ""       # set to Google OAuth2 Client ID for production
     ports:
       - "8001:8001"
 

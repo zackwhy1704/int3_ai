@@ -20,6 +20,17 @@ def current_user(x_user_id: str = Header(...)) -> str:
     return row["id"]
 
 
+def user_by_email(email: str) -> str:
+    """Resolve a Google OIDC email claim to a user_id. Raises 401 if not found."""
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT id FROM users WHERE email = %s", (email,)
+        ).fetchone()
+    if row is None:
+        raise HTTPException(401, "no account for this email — contact your administrator")
+    return row["id"]
+
+
 def resolve(user_id: str, brain_id: str | None) -> list[str]:
     """User's scopes, narrowed to one brain if requested. A brain the user can't open
     yields 404 so the response doesn't distinguish 'hidden' from 'nonexistent'."""

@@ -6,6 +6,10 @@ CREATE TABLE IF NOT EXISTS users (
     title text NOT NULL
 );
 
+-- Gate 4: OIDC login maps the id_token's `email` claim to a user row.
+-- NULL allowed for seed rows created before Gate 4.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email text UNIQUE;
+
 CREATE TABLE IF NOT EXISTS scopes (
     id            text PRIMARY KEY,
     name          text NOT NULL,
