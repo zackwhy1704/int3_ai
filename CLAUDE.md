@@ -189,3 +189,10 @@ one gate 6 names, a second LLM provider, a design system.
 - **At each gate,** report the commit history, the diff scope (flagging anything
   outside the planned surface) and real command output.
 - **Keep changes surgical and simple.** No abstraction the current task doesn't need.
+
+## Integration decisions
+
+D1. Approved: branch `integrate` from origin/pilot/gate-5 (e390924).
+D2. Desktop (int3_desktop) is paused until the token plan in Phase B is approved.
+D3. JWT library: one shared verifier on authlib, upgraded to latest release (≥1.6.12). python-jose is removed from every requirements file. Do not use jose.
+D4. Gate 5 acceptance happens on `integrate`, after Phase A, via the evidence pack in step A6.
