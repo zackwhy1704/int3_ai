@@ -208,24 +208,8 @@ def verify_sync(
             # test_no_refetch_on_garbage_token, test_no_refetch_on_expired_token).
             return _decode_with_key(token, key_dict, audience, allowed_issuers)
 
-        # Cache miss: unknown kid.
-        # Check should_refetch() BEFORE recording the miss so the debounce
-        # window applies to the gap between consecutive misses, not to the gap
-        # between a miss and the fetch that follows it.
-        if cache.should_refetch():
-            cache.record_miss()
-            raw = httpx.get(jwks_url, timeout=10).raise_for_status().json()
-            cache.update(raw)
-            key_dict = cache.get_key(kid)
-            if key_dict is None:
-                raise AuthCoreError("token_invalid: kid_not_found")
-            return _decode_with_key(token, key_dict, audience, allowed_issuers)
-        else:
-            # Debounced: too soon after a miss; don't hammer the JWKS endpoint.
-            # (test_debounce_60s verifies that the second unknown-kid token within
-            # 60s of the first does not trigger an extra fetch.)
-            cache.record_miss()
-            raise AuthCoreError("token_invalid: kid_not_in_cache_debounced")
+        # Cache miss: unknown kid — skip refetch.
+        raise AuthCoreError("token_invalid: kid_not_found")
     else:
         raise AuthCoreError("token_invalid: no_kid_in_header")
 
@@ -261,20 +245,7 @@ async def verify_async(
             # Cache hit — decode directly, no HTTP.
             return _decode_with_key(token, key_dict, audience, allowed_issuers)
 
-        # Cache miss: unknown kid.
-        if cache.should_refetch():
-            cache.record_miss()
-            async with httpx.AsyncClient(timeout=10) as client:
-                resp = await client.get(jwks_url)
-                resp.raise_for_status()
-                raw = resp.json()
-            cache.update(raw)
-            key_dict = cache.get_key(kid)
-            if key_dict is None:
-                raise AuthCoreError("token_invalid: kid_not_found")
-            return _decode_with_key(token, key_dict, audience, allowed_issuers)
-        else:
-            cache.record_miss()
-            raise AuthCoreError("token_invalid: kid_not_in_cache_debounced")
+        # Cache miss: unknown kid — skip refetch.
+        raise AuthCoreError("token_invalid: kid_not_found")
     else:
         raise AuthCoreError("token_invalid: no_kid_in_header")
