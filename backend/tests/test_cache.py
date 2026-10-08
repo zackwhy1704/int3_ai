@@ -1,4 +1,5 @@
 """The fallback cache serves only real earlier answers, flags them, and never crosses scopes."""
+
 import pytest
 
 from app import llm
@@ -11,7 +12,9 @@ REFUND = "What's our refund window for enterprise customers?"
 @pytest.mark.llm
 def test_cache_fallback_is_real_flagged_and_scoped(client, as_user, monkeypatch):
     def post(user, question):
-        return client.post("/api/ask", json={"question": question}, headers=as_user(user))
+        return client.post(
+            "/api/ask", json={"question": question}, headers=as_user(user)
+        )
 
     live = post("marcus", REFUND).json()
     assert live["cached"] is False and live["refused"] is False
@@ -37,8 +40,10 @@ def test_cache_fallback_is_real_flagged_and_scoped(client, as_user, monkeypatch)
     # With no earlier answer to fall back on, the result is a clear error.
     question = "What is the hotel cap for London?"
     with admin_tenant_conn("brindlewood") as conn:
-        conn.execute("DELETE FROM answer_cache WHERE key = %s",
-                     (cache_key(question, ["company-wide", "operations"]),))
+        conn.execute(
+            "DELETE FROM answer_cache WHERE key = %s",
+            (cache_key(question, ["company-wide", "operations"]),),
+        )
     r = post("priya", question)
     assert r.status_code == 503
     assert "could not be reached" in r.json()["detail"]

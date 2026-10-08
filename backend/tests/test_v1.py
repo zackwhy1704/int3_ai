@@ -12,6 +12,7 @@ Security invariants tested:
 
 Uses FastAPI dependency_overrides — never patches at the definition site.
 """
+
 from __future__ import annotations
 
 import uuid
@@ -28,6 +29,7 @@ from app.main import app
 # ---------------------------------------------------------------------------
 # Fake Principal helpers
 # ---------------------------------------------------------------------------
+
 
 def _fake_principal(
     tenant_id: str = "tenant_a",
@@ -55,8 +57,10 @@ def _fake_principal(
 
 def _override_principal(p: Principal):
     """Return a FastAPI dependency override that yields `p`."""
+
     def _dep() -> Iterator[Principal]:
         yield p
+
     return _dep
 
 
@@ -68,6 +72,7 @@ def _override_principal(p: Principal):
 # The hollowmere fixture from conftest is referenced conceptually; here we
 # use dependency_overrides with tenant_a scopes trying to access scope_b.
 # ---------------------------------------------------------------------------
+
 
 def test_v1_brain_id_not_in_principal_scopes_returns_404():
     """Principal with tenant_a scopes cannot access a brain_id not in their scope list.
@@ -109,6 +114,7 @@ def test_v1_brain_id_not_in_principal_scopes_returns_404():
 # We mock the DB connection to return a row from scope_b and verify it's
 # not in the response.
 # ---------------------------------------------------------------------------
+
 
 def test_v1_cross_scope_excluded_unit():
     """Out-of-scope chunks must be absent from /v1/search results (unit test).
@@ -166,16 +172,28 @@ def test_v1_cross_scope_excluded_unit():
 # The cross-encoder reranker is mocked to return all scores < REFUSE_THRESHOLD.
 # ---------------------------------------------------------------------------
 
+
 def test_v1_refusal_gate_applied():
     """Query with no above-threshold chunks → empty results (refusal gate)."""
     conn = MagicMock()
     # Return one chunk row from the DB
     chunk_row = {
-        "chunk_id": 1, "claim_id": 10, "value": "some value",
-        "subject": "s", "attribute": "a", "condition": None, "as_of": "2024-01-01",
-        "superseded_by": None, "doc_id": "doc1", "doc_title": "Doc", "source": "doc",
-        "owner": "admin", "effective_date": "2024-01-01", "chunk_text": "some text",
-        "score": 0.9, "scope_id": "scope_a",
+        "chunk_id": 1,
+        "claim_id": 10,
+        "value": "some value",
+        "subject": "s",
+        "attribute": "a",
+        "condition": None,
+        "as_of": "2024-01-01",
+        "superseded_by": None,
+        "doc_id": "doc1",
+        "doc_title": "Doc",
+        "source": "doc",
+        "owner": "admin",
+        "effective_date": "2024-01-01",
+        "chunk_text": "some text",
+        "score": 0.9,
+        "scope_id": "scope_a",
     }
     conn.execute.return_value.fetchall.return_value = [chunk_row]
 
@@ -183,9 +201,15 @@ def test_v1_refusal_gate_applied():
 
     # Mock reranker to return a score below the refusal threshold (-1.0 < 0.0)
     low_score_hit = {
-        "chunk_id": 1, "doc_title": "Doc", "text": "some text",
-        "scope": "scope_a", "document_id": "doc1", "source": "doc",
-        "owner": "admin", "effective_date": "2024-01-01", "score": 0.9,
+        "chunk_id": 1,
+        "doc_title": "Doc",
+        "text": "some text",
+        "scope": "scope_a",
+        "document_id": "doc1",
+        "source": "doc",
+        "owner": "admin",
+        "effective_date": "2024-01-01",
+        "score": 0.9,
         "relevance": -1.0,  # below REFUSE_THRESHOLD = 0.0
     }
 
@@ -219,6 +243,7 @@ def test_v1_refusal_gate_applied():
 # The control DB lookup checks session_id == p.session_id, so a token from
 # another session returns nothing.
 # ---------------------------------------------------------------------------
+
 
 def test_v1_validate_foreign_retrieval():
     """A retrieval from a different session must return all claim IDs as invalid."""
@@ -261,6 +286,7 @@ def test_v1_validate_foreign_retrieval():
 # Security invariant: same tenant, different user (different session_id) → invalid.
 # ---------------------------------------------------------------------------
 
+
 def test_v1_validate_foreign_principal():
     """Same tenant, different user's session → claim IDs from that session are invalid."""
     # user_b is in tenant_a but has a different session
@@ -300,6 +326,7 @@ def test_v1_validate_foreign_principal():
 # Security invariant: expired retrieval → all claim IDs invalid.
 # ---------------------------------------------------------------------------
 
+
 def test_v1_validate_expired_retrieval():
     """An expired retrieval must return all claim IDs as invalid."""
     p = _fake_principal(session_id="session_a", tenant_id="tenant_a")
@@ -330,7 +357,9 @@ def test_v1_validate_expired_retrieval():
 
     data = resp.json()
     assert data["valid"] == [], "Expired retrieval must return no valid claims."
-    assert set(data["invalid"]) == {5, 6, 7}, "All claims must be invalid for an expired retrieval."
+    assert set(data["invalid"]) == {5, 6, 7}, (
+        "All claims must be invalid for an expired retrieval."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -339,6 +368,7 @@ def test_v1_validate_expired_retrieval():
 # Security invariant: a claim that exists in scope but was NOT in the retrieval
 # set is returned as invalid.
 # ---------------------------------------------------------------------------
+
 
 def test_v1_validate_claim_not_in_retrieval():
     """A claim that exists but was not retrieved → invalid."""
@@ -380,6 +410,7 @@ def test_v1_validate_claim_not_in_retrieval():
 # S4 new tests: brain_ask retrieval, scope field, CSRF
 # ---------------------------------------------------------------------------
 
+
 def test_brain_ask_retrieval_validates_own_citations():
     """brain_ask records all retrieved claim_ids; validate confirms cited claims are valid.
 
@@ -403,9 +434,18 @@ def test_brain_ask_retrieval_validates_own_citations():
     answer_result = {
         "refused": False,
         "answer": "The answer is 42.",
-        "citations": [{"chunk_id": 1, "document_id": "doc1", "doc_title": "Doc",
-                       "source": "doc", "owner": "admin", "effective_date": "2024-01-01",
-                       "scope": "scope_x", "text": "some text"}],
+        "citations": [
+            {
+                "chunk_id": 1,
+                "document_id": "doc1",
+                "doc_title": "Doc",
+                "source": "doc",
+                "owner": "admin",
+                "effective_date": "2024-01-01",
+                "scope": "scope_x",
+                "text": "some text",
+            }
+        ],
         "answered_from": ["scope_x"],
         "facts": [],
         "cached": False,
@@ -418,13 +458,17 @@ def test_brain_ask_retrieval_validates_own_citations():
         app.dependency_overrides[csrf_protected] = _override_principal(p)
         try:
             with patch("app.api.v1.answer_mod.ask", return_value=answer_result):
-                with patch("app.api.v1._record_retrieval", return_value=rid) as mock_record:
+                with patch(
+                    "app.api.v1._record_retrieval", return_value=rid
+                ) as mock_record:
                     # Call brain_ask to record the retrieval
                     ba_resp = client.post(
                         "/v1/brain_ask",
                         json={"question": "what is the answer?"},
                     )
-                    assert ba_resp.status_code == 200, f"brain_ask failed: {ba_resp.text}"
+                    assert ba_resp.status_code == 200, (
+                        f"brain_ask failed: {ba_resp.text}"
+                    )
                     # Verify that retrieved_claim_ids were passed to _record_retrieval
                     mock_record.assert_called_once_with(
                         "session_x", "tenant_x", [10, 20, 30], [1, 2, 3]
@@ -492,13 +536,22 @@ def test_v1_search_scope_populated():
     conn = MagicMock()
 
     scope_row = {
-        "chunk_id": 5, "claim_id": 50, "value": "Policy value",
-        "subject": "Policy", "attribute": "refunds", "condition": None,
-        "as_of": "2024-01-01", "superseded_by": None,
-        "scope_id": "scope_a",   # <-- now present in SELECT (S4 fix)
-        "doc_id": "doc5", "doc_title": "Policy Doc", "source": "manual",
-        "owner": "admin", "effective_date": "2024-01-01",
-        "chunk_text": "Refund policy text here.", "score": 0.95,
+        "chunk_id": 5,
+        "claim_id": 50,
+        "value": "Policy value",
+        "subject": "Policy",
+        "attribute": "refunds",
+        "condition": None,
+        "as_of": "2024-01-01",
+        "superseded_by": None,
+        "scope_id": "scope_a",  # <-- now present in SELECT (S4 fix)
+        "doc_id": "doc5",
+        "doc_title": "Policy Doc",
+        "source": "manual",
+        "owner": "admin",
+        "effective_date": "2024-01-01",
+        "chunk_text": "Refund policy text here.",
+        "score": 0.95,
     }
     conn.execute.return_value.fetchall.return_value = [scope_row]
     conn.execute.return_value.fetchone.return_value = None  # no prev value
@@ -506,9 +559,15 @@ def test_v1_search_scope_populated():
     p = _fake_principal(scopes=["scope_a"], conn=conn)
 
     reranked_hit = {
-        "chunk_id": 5, "doc_title": "Policy Doc", "text": "Refund policy text here.",
-        "scope": "scope_a", "document_id": "doc5", "source": "manual",
-        "owner": "admin", "effective_date": "2024-01-01", "score": 0.95,
+        "chunk_id": 5,
+        "doc_title": "Policy Doc",
+        "text": "Refund policy text here.",
+        "scope": "scope_a",
+        "document_id": "doc5",
+        "source": "manual",
+        "owner": "admin",
+        "effective_date": "2024-01-01",
+        "score": 0.95,
         "relevance": 2.0,  # above REFUSE_THRESHOLD = 0.0
     }
 
@@ -518,7 +577,9 @@ def test_v1_search_scope_populated():
         try:
             with patch("app.api.v1.embed_query", return_value=[0.1] * 384):
                 with patch("app.api.v1._rerank", return_value=[reranked_hit]):
-                    with patch("app.api.v1._record_retrieval", return_value="rid-scope"):
+                    with patch(
+                        "app.api.v1._record_retrieval", return_value="rid-scope"
+                    ):
                         resp = client.post(
                             "/v1/search",
                             json={"query": "refund policy"},

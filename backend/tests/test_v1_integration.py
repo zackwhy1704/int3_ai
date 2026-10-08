@@ -28,12 +28,17 @@ A5 commit correction:
   tier was not run at that point. The Docker suite is required for that claim; it will
   be verified via CI in S1/S5.
 """
+
 from __future__ import annotations
 
 import pytest
 
 # Hollowmere canary strings (same as test_tenancy.py B_MARKERS)
-_B_MARKERS = ["HOLLOWMERE-ONLY-7731", "HOLLOWMERE-FINANCE-2290", "HOLLOWMERE-TREASURY-4410"]
+_B_MARKERS = [
+    "HOLLOWMERE-ONLY-7731",
+    "HOLLOWMERE-FINANCE-2290",
+    "HOLLOWMERE-TREASURY-4410",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -69,7 +74,9 @@ def test_v1_search_cross_tenant_excluded(client, as_user):
             json={"query": query},
             headers=as_user("priya"),
         )
-        assert resp.status_code == 200, f"Expected 200 for priya, got {resp.status_code}"
+        assert resp.status_code == 200, (
+            f"Expected 200 for priya, got {resp.status_code}"
+        )
         blob = " ".join(
             r.get("content", "") + " " + r.get("sourceTitle", "")
             for r in resp.json()["results"]
@@ -272,7 +279,8 @@ def test_v1_search_cross_scope_real(client, as_user):
 
     # Filter marcus results to finance-only claims (sourceId containing 'finance').
     finance_claim_ids = {
-        r["claimId"] for r in marcus_results
+        r["claimId"]
+        for r in marcus_results
         if "finance" in r.get("sourceId", "").lower()
     }
 

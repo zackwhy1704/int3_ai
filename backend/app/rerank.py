@@ -5,6 +5,7 @@ similarity: measured on the seed corpus, bge-small cosine left a 0.04 gap betwee
 the weakest supported question and the strongest unsupported one, while this
 cross-encoder left a gap of about 9.5 logits. See app/calibrate.py.
 """
+
 from functools import lru_cache
 
 from fastembed.rerank.cross_encoder import TextCrossEncoder

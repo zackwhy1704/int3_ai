@@ -4,6 +4,7 @@ with an admin connection; the API process never seeds.
 A seed directory holds users.yaml, docs/*.md and claims.json (pre-extracted claims,
 see app/regenerate_claims.py; an empty list is fine).
 """
+
 import json
 import logging
 from pathlib import Path
@@ -28,8 +29,10 @@ def chunk(body: str) -> list[str]:
 def load_documents(conn, seed_dir: Path) -> None:
     people = yaml.safe_load((seed_dir / "users.yaml").read_text())
     for u in people["users"]:
-        conn.execute("INSERT INTO users (id, name, title, email) VALUES (%s, %s, %s, %s)",
-                     (u["id"], u["name"], u["title"], u["email"].lower()))
+        conn.execute(
+            "INSERT INTO users (id, name, title, email) VALUES (%s, %s, %s, %s)",
+            (u["id"], u["name"], u["title"], u["email"].lower()),
+        )
     for s in people["scopes"]:
         conn.execute(
             "INSERT INTO scopes VALUES (%s, %s, %s, %s, %s)",
@@ -46,8 +49,16 @@ def load_documents(conn, seed_dir: Path) -> None:
         conn.execute(
             "INSERT INTO documents (id, scope_id, title, source, owner, effective_date, body,"
             " authority) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
-            (doc_id, meta["scope"], meta["title"], meta["source"], meta["owner"],
-             meta["effective_date"], body, meta.get("authority", "document")),
+            (
+                doc_id,
+                meta["scope"],
+                meta["title"],
+                meta["source"],
+                meta["owner"],
+                meta["effective_date"],
+                body,
+                meta.get("authority", "document"),
+            ),
         )
         paragraphs = chunk(body)
         # Title goes into the embedded text so a paragraph keeps its document context.
@@ -76,11 +87,21 @@ def load_claims(conn, seed_dir: Path) -> None:
             ids[r["ref"]] = conn.execute(
                 "INSERT INTO claims (subject, attribute, condition, value, quote, valid_from,"
                 " source_chunk_id, scope_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
-                (r["subject"], r["attribute"], r["condition"], r["value"], r["quote"],
-                 r["valid_from"], chunk_id, r["scope_id"]),
+                (
+                    r["subject"],
+                    r["attribute"],
+                    r["condition"],
+                    r["value"],
+                    r["quote"],
+                    r["valid_from"],
+                    chunk_id,
+                    r["scope_id"],
+                ),
             ).fetchone()["id"]
         for r in rows:
             if r["superseded_by"] is not None:
-                conn.execute("UPDATE claims SET superseded_by = %s WHERE id = %s",
-                             (ids[r["superseded_by"]], ids[r["ref"]]))
+                conn.execute(
+                    "UPDATE claims SET superseded_by = %s WHERE id = %s",
+                    (ids[r["superseded_by"]], ids[r["ref"]]),
+                )
     log.info("seed: loaded %d claims", len(rows))

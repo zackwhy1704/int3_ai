@@ -13,10 +13,10 @@ FAIL-WITHOUT-FIX evidence (S2):
   The production guard is at gateway/main.py lines 40-44.
   fail-without-fix evidence requires no Docker — the lifespan is called directly.
 """
+
 from __future__ import annotations
 
 import os
-from contextlib import asynccontextmanager
 from unittest.mock import patch
 
 import pytest
@@ -58,6 +58,7 @@ def test_gateway_auth_none_rejected_in_production():
 
         # Re-import main with patched env so GATEWAY_AUTH and ENV are set at module level.
         import main as gw_main
+
         importlib.reload(gw_main)
 
         # The lifespan is an async context manager. We trigger it with a fake app.

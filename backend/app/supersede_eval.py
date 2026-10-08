@@ -6,6 +6,7 @@ Every run happens in its own transaction with its own scratch scope and is rolle
 back, so nothing touches the real claims. Failures are counted and reported; a
 failing run is never retried.
 """
+
 import argparse
 import os
 import uuid
@@ -35,26 +36,37 @@ def run_case(case: dict) -> dict:
     conn.autocommit = False
     try:
         scope = f"eval-{uuid.uuid4().hex[:8]}"
-        conn.execute("INSERT INTO scopes VALUES (%s, 'eval', 'eval', 'scratch', 'ada')", (scope,))
+        conn.execute(
+            "INSERT INTO scopes VALUES (%s, 'eval', 'eval', 'scratch', 'ada')", (scope,)
+        )
         outcomes = []
-        for label, text, when in [("old", case["old"], OLD_DATE), ("new", case["new"], NEW_DATE)]:
+        for label, text, when in [
+            ("old", case["old"], OLD_DATE),
+            ("new", case["new"], NEW_DATE),
+        ]:
             doc = f"{scope}-{label}"
-            conn.execute("INSERT INTO documents VALUES (%s, %s, %s, 'eval', 'eval', %s, %s)",
-                         (doc, scope, doc, when, text))
+            conn.execute(
+                "INSERT INTO documents VALUES (%s, %s, %s, 'eval', 'eval', %s, %s)",
+                (doc, scope, doc, when, text),
+            )
             chunk_id = conn.execute(
                 "INSERT INTO chunks (document_id, scope_id, ord, text, embedding)"
-                " VALUES (%s, %s, 0, %s, %s) RETURNING id", (doc, scope, text, ZERO),
+                " VALUES (%s, %s, 0, %s, %s) RETURNING id",
+                (doc, scope, text, ZERO),
             ).fetchone()["id"]
             extracted = claims.extract(conn, text, scope)
             if not extracted:
                 outcomes.append(f"{label}: nothing extracted")
             for c in extracted:
                 o = claims.record(conn, c, chunk_id, scope, when)
-                outcomes.append(f"{label}: {c['subject']}|{c['attribute']}|{c['condition']}"
-                                f" = {c['value']} -> {o}")
+                outcomes.append(
+                    f"{label}: {c['subject']}|{c['attribute']}|{c['condition']}"
+                    f" = {c['value']} -> {o}"
+                )
 
-        rows = conn.execute("SELECT value, superseded_by FROM claims WHERE scope_id = %s",
-                            (scope,)).fetchall()
+        rows = conn.execute(
+            "SELECT value, superseded_by FROM claims WHERE scope_id = %s", (scope,)
+        ).fetchall()
         supersedes = sum(r["superseded_by"] is not None for r in rows)
         current = sum(r["superseded_by"] is None for r in rows)
         extracted_both = not any("nothing extracted" in o for o in outcomes)
@@ -89,7 +101,9 @@ def report(by_case: dict[str, list[dict]]) -> str:
         passed = sum(r["pass"] for r in rs)
         by_kind[cases[cid]["kind"]][0] += passed
         by_kind[cases[cid]["kind"]][1] += len(rs)
-        lines.append(f"{cid:22} {passed:>3}/{len(rs):<3} ({100 * passed / len(rs):5.1f}%)")
+        lines.append(
+            f"{cid:22} {passed:>3}/{len(rs):<3} ({100 * passed / len(rs):5.1f}%)"
+        )
         for r in rs:
             if not r["pass"]:
                 lines.append(f"    FAIL: {r['detail']}")

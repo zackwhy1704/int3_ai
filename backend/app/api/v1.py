@@ -22,6 +22,7 @@ Deleted vs main:
 
 Citation format (frozen after Gate 3): [claim:N]
 """
+
 import logging
 import uuid
 
@@ -48,9 +49,10 @@ _REFUSE_THRESHOLD = answer_mod.REFUSE_THRESHOLD
 # Request / response models
 # ---------------------------------------------------------------------------
 
+
 class SearchRequest(BaseModel):
     query: str
-    brain_id: str | None = None    # if set, restrict to that one scope
+    brain_id: str | None = None  # if set, restrict to that one scope
 
 
 class SearchResult(BaseModel):
@@ -61,12 +63,12 @@ class SearchResult(BaseModel):
     score: float
     asOf: str
     supersededBy: int | None = None
-    previousValue: str | None = None   # value of the claim superseded BY this one
+    previousValue: str | None = None  # value of the claim superseded BY this one
 
 
 class SearchResponse(BaseModel):
     results: list[SearchResult]
-    retrieval_id: str              # UUID for use with POST /v1/validate
+    retrieval_id: str  # UUID for use with POST /v1/validate
 
 
 class Claim(BaseModel):
@@ -103,7 +105,7 @@ class BrainAskResponse(BaseModel):
     answered_from: list[str] | None = None
     facts: list[dict] | None = None
     cached: bool = False
-    retrieval_id: str | None = None    # UUID for use with POST /v1/validate
+    retrieval_id: str | None = None  # UUID for use with POST /v1/validate
 
 
 class ValidateRequest(BaseModel):
@@ -120,8 +122,10 @@ class ValidateResponse(BaseModel):
 # Internal: record a retrieval in the control DB
 # ---------------------------------------------------------------------------
 
-def _record_retrieval(session_id: str, tenant_id: str,
-                      claim_ids: list[int], chunk_ids: list[int]) -> str:
+
+def _record_retrieval(
+    session_id: str, tenant_id: str, claim_ids: list[int], chunk_ids: list[int]
+) -> str:
     """Insert a retrievals row in the CONTROL DB and return the UUID.
 
     The retrieval is keyed to session_id + tenant_id so only the principal
@@ -154,7 +158,9 @@ _PREV_VALUE_SQL = """
 
 
 @router.post("/search", response_model=SearchResponse)
-def search(body: SearchRequest, p: Principal = Depends(csrf_protected)) -> SearchResponse:
+def search(
+    body: SearchRequest, p: Principal = Depends(csrf_protected)
+) -> SearchResponse:
     """
     Semantic search returning CURRENT claims only, with cross-encoder refusal gate.
 
@@ -222,17 +228,19 @@ def search(body: SearchRequest, p: Principal = Depends(csrf_protected)) -> Searc
         cid = row["chunk_id"]
         if cid not in seen_chunks:
             seen_chunks.add(cid)
-            chunk_hits_list.append({
-                "chunk_id": cid,
-                "doc_title": row["doc_title"],
-                "text": row["chunk_text"] or "",
-                "scope": row["scope_id"] or "",
-                "document_id": row["doc_id"],
-                "source": row["source"],
-                "owner": row["owner"],
-                "effective_date": row["effective_date"],
-                "score": float(row["score"]),
-            })
+            chunk_hits_list.append(
+                {
+                    "chunk_id": cid,
+                    "doc_title": row["doc_title"],
+                    "text": row["chunk_text"] or "",
+                    "scope": row["scope_id"] or "",
+                    "document_id": row["doc_id"],
+                    "source": row["source"],
+                    "owner": row["owner"],
+                    "effective_date": row["effective_date"],
+                    "score": float(row["score"]),
+                }
+            )
         chunk_to_rows.setdefault(cid, []).append(row)
 
     # Apply cross-encoder reranking and refusal gate.
@@ -273,16 +281,18 @@ def search(body: SearchRequest, p: Principal = Depends(csrf_protected)) -> Searc
             ).fetchone()
             prev_value = prev_row["value"] if prev_row else None
 
-            results.append(SearchResult(
-                claimId=claim_id,
-                content=content,
-                sourceTitle=row["doc_title"],
-                sourceId=row["doc_id"],
-                score=round(float(h["relevance"]), 4),
-                asOf=str(row["as_of"]),
-                supersededBy=None,  # current claims have superseded_by IS NULL
-                previousValue=prev_value,
-            ))
+            results.append(
+                SearchResult(
+                    claimId=claim_id,
+                    content=content,
+                    sourceTitle=row["doc_title"],
+                    sourceId=row["doc_id"],
+                    score=round(float(h["relevance"]), 4),
+                    asOf=str(row["as_of"]),
+                    supersededBy=None,  # current claims have superseded_by IS NULL
+                    previousValue=prev_value,
+                )
+            )
 
     # Record the retrieval in the CONTROL DB (not the tenant DB).
     rid = _record_retrieval(p.session_id, p.tenant_id, all_claim_ids, all_chunk_ids)
@@ -377,8 +387,11 @@ def list_sources(
 # POST /v1/brain_ask — the /api/ask pipeline for agent use
 # ---------------------------------------------------------------------------
 
+
 @router.post("/brain_ask", response_model=BrainAskResponse)
-def brain_ask(body: BrainAskRequest, p: Principal = Depends(csrf_protected)) -> BrainAskResponse:
+def brain_ask(
+    body: BrainAskRequest, p: Principal = Depends(csrf_protected)
+) -> BrainAskResponse:
     """Run the full /api/ask pipeline and return the result with a retrieval_id.
 
     Identical to POST /api/ask but at the /v1/ prefix and returns retrieval_id
@@ -444,8 +457,11 @@ def brain_ask(body: BrainAskRequest, p: Principal = Depends(csrf_protected)) -> 
 #   test_v1_validate_claim_not_in_retrieval — in-scope but not retrieved → invalid
 # ---------------------------------------------------------------------------
 
+
 @router.post("/validate", response_model=ValidateResponse)
-def validate(body: ValidateRequest, p: Principal = Depends(csrf_protected)) -> ValidateResponse:
+def validate(
+    body: ValidateRequest, p: Principal = Depends(csrf_protected)
+) -> ValidateResponse:
     """Check that claim IDs came from a previous retrieval by this principal.
 
     The retrieval must:
@@ -476,6 +492,7 @@ def validate(body: ValidateRequest, p: Principal = Depends(csrf_protected)) -> V
         return ValidateResponse(valid=[], invalid=body.claim_ids)
 
     from datetime import datetime, timezone
+
     if row["expires_at"].replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
         return ValidateResponse(valid=[], invalid=body.claim_ids)
 

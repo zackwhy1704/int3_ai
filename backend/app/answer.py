@@ -1,4 +1,5 @@
 """Question -> scoped retrieval -> relevance gate -> schema-constrained answer."""
+
 import hashlib
 import logging
 
@@ -34,11 +35,18 @@ FACT_SQL = """
 
 
 def _fact(row: dict) -> dict:
-    return {"value": row["value"], "quote": row["quote"], "valid_from": str(row["valid_from"]),
-            "chunk_id": row["chunk_id"], "doc_title": row["doc_title"]}
+    return {
+        "value": row["value"],
+        "quote": row["quote"],
+        "valid_from": str(row["valid_from"]),
+        "chunk_id": row["chunk_id"],
+        "doc_title": row["doc_title"],
+    }
 
 
-def facts(conn, chunk_ids: list[int], scopes: list[str]) -> tuple[list[dict], list[int]]:
+def facts(
+    conn, chunk_ids: list[int], scopes: list[str]
+) -> tuple[list[dict], list[int]]:
     """Current claims touched by these chunks, each with its predecessor if any.
 
     A superseded claim in a chunk is followed forward to the current one. Every
@@ -53,12 +61,17 @@ def facts(conn, chunk_ids: list[int], scopes: list[str]) -> tuple[list[dict], li
     from the model output (tested by test_brain_ask_retrieval_validates_own_citations,
     test_brain_ask_retrieval_rejects_foreign_claim).
     """
+
     def one(where: str, **params) -> dict | None:
-        return conn.execute(FACT_SQL.format(where=where), {"scopes": scopes, **params}).fetchone()
+        return conn.execute(
+            FACT_SQL.format(where=where), {"scopes": scopes, **params}
+        ).fetchone()
 
     heads = {}
-    for row in conn.execute(FACT_SQL.format(where="cl.source_chunk_id = ANY(%(ids)s)"),
-                            {"scopes": scopes, "ids": chunk_ids}).fetchall():
+    for row in conn.execute(
+        FACT_SQL.format(where="cl.source_chunk_id = ANY(%(ids)s)"),
+        {"scopes": scopes, "ids": chunk_ids},
+    ).fetchall():
         while row is not None and row["superseded_by"] is not None:
             row = one("cl.id = %(id)s", id=row["superseded_by"])
         if row is not None:
@@ -67,12 +80,19 @@ def facts(conn, chunk_ids: list[int], scopes: list[str]) -> tuple[list[dict], li
     result = []
     for head in heads.values():
         prev = one("cl.superseded_by = %(id)s", id=head["id"])
-        result.append({
-            "subject": head["subject"], "attribute": head["attribute"],
-            "condition": head["condition"], "scope": head["scope_id"],
-            "current": _fact(head), "previous": _fact(prev) if prev else None,
-        })
-    sorted_result = sorted(result, key=lambda f: (f["subject"], f["attribute"], f["condition"] or ""))
+        result.append(
+            {
+                "subject": head["subject"],
+                "attribute": head["attribute"],
+                "condition": head["condition"],
+                "scope": head["scope_id"],
+                "current": _fact(head),
+                "previous": _fact(prev) if prev else None,
+            }
+        )
+    sorted_result = sorted(
+        result, key=lambda f: (f["subject"], f["attribute"], f["condition"] or "")
+    )
     # Return all retrieved claim IDs (the keys of heads), not just cited ones.
     return sorted_result, list(heads.keys())
 
@@ -81,11 +101,15 @@ def ledger_text(fs: list[dict]) -> str:
     lines = []
     for f in fs:
         cond = f" (only for: {f['condition']})" if f["condition"] else ""
-        line = (f"- {f['subject']} / {f['attribute']}{cond}: {f['current']['value']}"
-                f" (current since {f['current']['valid_from']})")
+        line = (
+            f"- {f['subject']} / {f['attribute']}{cond}: {f['current']['value']}"
+            f" (current since {f['current']['valid_from']})"
+        )
         if f["previous"]:
-            line += (f"; replaced {f['previous']['value']}"
-                     f" (valid from {f['previous']['valid_from']})")
+            line += (
+                f"; replaced {f['previous']['value']}"
+                f" (valid from {f['previous']['valid_from']})"
+            )
         lines.append(line)
     return "\n".join(lines) or "(no recorded facts)"
 
@@ -107,7 +131,10 @@ def answer_schema(ids: list[int]) -> dict:
         "properties": {
             "supported": {"type": "boolean"},
             "answer": {"type": "string"},
-            "cited_chunk_ids": {"type": "array", "items": {"type": "integer", "enum": ids}},
+            "cited_chunk_ids": {
+                "type": "array",
+                "items": {"type": "integer", "enum": ids},
+            },
         },
         "required": ["supported", "answer", "cited_chunk_ids"],
         "additionalProperties": False,
@@ -130,11 +157,16 @@ def ask(conn, question: str, scopes: list[str]) -> dict:
         result = answer_live(conn, question, scopes)
     except llm.Unavailable as e:
         log.error("model unavailable, trying cache: %s", e)
-        row = conn.execute("SELECT response, created_at FROM answer_cache WHERE key = %s",
-                           (key,)).fetchone()
+        row = conn.execute(
+            "SELECT response, created_at FROM answer_cache WHERE key = %s", (key,)
+        ).fetchone()
         if row is None:
             raise
-        return {**row["response"], "cached": True, "cached_at": row["created_at"].isoformat()}
+        return {
+            **row["response"],
+            "cached": True,
+            "cached_at": row["created_at"].isoformat(),
+        }
     conn.execute(
         "INSERT INTO answer_cache (key, question, scopes, response) VALUES (%s, %s, %s, %s)"
         " ON CONFLICT (key) DO UPDATE SET response = EXCLUDED.response, created_at = now()",
@@ -181,10 +213,16 @@ def answer_live(conn, question: str, scopes: list[str]) -> dict:
         "refused": False,
         "answer": out["answer"],
         "citations": [
-            {"chunk_id": c, "document_id": by_id[c]["document_id"],
-             "doc_title": by_id[c]["doc_title"], "source": by_id[c]["source"],
-             "owner": by_id[c]["owner"], "effective_date": str(by_id[c]["effective_date"]),
-             "scope": by_id[c]["scope"], "text": by_id[c]["text"]}
+            {
+                "chunk_id": c,
+                "document_id": by_id[c]["document_id"],
+                "doc_title": by_id[c]["doc_title"],
+                "source": by_id[c]["source"],
+                "owner": by_id[c]["owner"],
+                "effective_date": str(by_id[c]["effective_date"]),
+                "scope": by_id[c]["scope"],
+                "text": by_id[c]["text"],
+            }
             for c in cited
         ],
         "answered_from": sorted({by_id[c]["scope"] for c in cited}),

@@ -5,6 +5,7 @@ password and the key that derives each tenant role's password. The Postgres
 superuser credentials are given only to the one-shot `init` and `tools`
 containers (see app/tenants/admin.py); nothing in this module reads them.
 """
+
 import os
 
 ENV = os.environ.get("ENV", "development")
@@ -29,5 +30,7 @@ MS_CLIENT_SECRET = os.environ.get("MS_CLIENT_SECRET", "")
 
 # Local test identity provider (navikt/mock-oauth2-server). Development and tests only:
 # startup refuses to run with it configured when ENV=production.
-MOCK_OIDC_URL = os.environ.get("MOCK_OIDC_URL", "")               # as the backend reaches it
-MOCK_OIDC_PUBLIC_URL = os.environ.get("MOCK_OIDC_PUBLIC_URL", "")  # as the browser reaches it
+MOCK_OIDC_URL = os.environ.get("MOCK_OIDC_URL", "")  # as the backend reaches it
+MOCK_OIDC_PUBLIC_URL = os.environ.get(
+    "MOCK_OIDC_PUBLIC_URL", ""
+)  # as the browser reaches it

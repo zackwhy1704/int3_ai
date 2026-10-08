@@ -8,6 +8,7 @@ connections only from its own role (CONNECT is revoked from PUBLIC), and each ro
 can only read and write what its grants allow. A connection opened any other way
 fails at the database. See app/tenants/admin.py for the grants.
 """
+
 import hashlib
 import hmac
 import re
@@ -31,19 +32,30 @@ def tenant_password(tenant_id: str, key: str | None = None) -> str:
     key = key if key is not None else config.TENANT_DB_KEY
     if not key:
         raise RuntimeError("TENANT_DB_KEY is not set")
-    return hmac.new(key.encode(), f"tenant-role:{tenant_id}".encode(), hashlib.sha256).hexdigest()
+    return hmac.new(
+        key.encode(), f"tenant-role:{tenant_id}".encode(), hashlib.sha256
+    ).hexdigest()
 
 
 def _connect(dbname: str, user: str, password: str, vector: bool) -> psycopg.Connection:
-    conn = psycopg.connect(host=config.DB_HOST, port=config.DB_PORT, dbname=dbname, user=user,
-                           password=password, row_factory=dict_row, autocommit=True)
+    conn = psycopg.connect(
+        host=config.DB_HOST,
+        port=config.DB_PORT,
+        dbname=dbname,
+        user=user,
+        password=password,
+        row_factory=dict_row,
+        autocommit=True,
+    )
     if vector:
         register_vector(conn)
     return conn
 
 
 def control_conn() -> psycopg.Connection:
-    return _connect(config.CONTROL_DB, config.CONTROL_ROLE, config.CONTROL_PASSWORD, vector=False)
+    return _connect(
+        config.CONTROL_DB, config.CONTROL_ROLE, config.CONTROL_PASSWORD, vector=False
+    )
 
 
 def tenant_conn(tenant_id: str) -> psycopg.Connection:

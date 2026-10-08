@@ -3,6 +3,7 @@ rate per case and asserts a floor; it never retries a failed run.
 
     docker compose run --rm -e SUPERSEDE_RUNS=10 tools pytest -m llm -s tests/test_supersede.py
 """
+
 import os
 
 import pytest
@@ -29,9 +30,15 @@ def test_claims_are_append_only(client):
         row = conn.execute("SELECT id FROM claims LIMIT 1").fetchone()
         assert row is not None, "no claims were extracted"
         with pytest.raises(Exception, match="append-only"):
-            conn.execute("UPDATE claims SET value = 'tampered' WHERE id = %s", (row["id"],))
+            conn.execute(
+                "UPDATE claims SET value = 'tampered' WHERE id = %s", (row["id"],)
+            )
         superseded = conn.execute(
-            "SELECT id FROM claims WHERE superseded_by IS NOT NULL LIMIT 1").fetchone()
+            "SELECT id FROM claims WHERE superseded_by IS NOT NULL LIMIT 1"
+        ).fetchone()
         assert superseded is not None, "no claim was superseded"
         with pytest.raises(Exception, match="already superseded"):
-            conn.execute("UPDATE claims SET superseded_by = id WHERE id = %s", (superseded["id"],))
+            conn.execute(
+                "UPDATE claims SET superseded_by = id WHERE id = %s",
+                (superseded["id"],),
+            )

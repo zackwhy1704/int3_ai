@@ -38,15 +38,20 @@ _STOP_REASON_MAP: dict[str, str] = {
 # OpenAI → Anthropic
 # ---------------------------------------------------------------------------
 
+
 def openai_tools_to_anthropic(tools: list[dict]) -> list[dict]:
     result = []
     for t in tools:
         fn = t.get("function", t)
-        result.append({
-            "name": fn["name"],
-            "description": fn.get("description", ""),
-            "input_schema": fn.get("parameters", {"type": "object", "properties": {}}),
-        })
+        result.append(
+            {
+                "name": fn["name"],
+                "description": fn.get("description", ""),
+                "input_schema": fn.get(
+                    "parameters", {"type": "object", "properties": {}}
+                ),
+            }
+        )
     return result
 
 
@@ -88,7 +93,11 @@ def openai_messages_to_anthropic(messages: list[dict]) -> list[dict]:
                 "content": msg.get("content") or "",
             }
             # Merge consecutive tool results into the last user message.
-            if result and result[-1]["role"] == "user" and isinstance(result[-1].get("content"), list):
+            if (
+                result
+                and result[-1]["role"] == "user"
+                and isinstance(result[-1].get("content"), list)
+            ):
                 result[-1]["content"].append(block)
             else:
                 result.append({"role": "user", "content": [block]})
@@ -101,12 +110,14 @@ def openai_messages_to_anthropic(messages: list[dict]) -> list[dict]:
             for tc in msg["tool_calls"]:
                 fn = tc["function"]
                 args = fn["arguments"]
-                content_blocks.append({
-                    "type": "tool_use",
-                    "id": tc["id"],
-                    "name": fn["name"],
-                    "input": json.loads(args) if isinstance(args, str) else args,
-                })
+                content_blocks.append(
+                    {
+                        "type": "tool_use",
+                        "id": tc["id"],
+                        "name": fn["name"],
+                        "input": json.loads(args) if isinstance(args, str) else args,
+                    }
+                )
             result.append({"role": "assistant", "content": content_blocks})
             continue
 
@@ -119,9 +130,7 @@ def openai_request_to_anthropic(openai_body: dict) -> dict:
     """Top-level converter: full OpenAI chat/completions body → Anthropic messages body."""
     messages: list[dict] = openai_body.get("messages", [])
 
-    system = next(
-        (m["content"] for m in messages if m["role"] == "system"), None
-    )
+    system = next((m["content"] for m in messages if m["role"] == "system"), None)
 
     body: dict = {
         "model": openai_body.get("model") or DEFAULT_MODEL,
@@ -147,6 +156,7 @@ def openai_request_to_anthropic(openai_body: dict) -> dict:
 # ---------------------------------------------------------------------------
 # Anthropic → OpenAI
 # ---------------------------------------------------------------------------
+
 
 def anthropic_response_to_openai(anthropic_response: dict, model: str) -> dict:
     content_blocks: list[dict] = anthropic_response.get("content", [])
@@ -182,30 +192,49 @@ def anthropic_response_to_openai(anthropic_response: dict, model: str) -> dict:
 # Streaming SSE chunk builders
 # ---------------------------------------------------------------------------
 
+
 def text_delta_chunk(text: str) -> bytes:
-    chunk = {"choices": [{"index": 0, "delta": {"content": text}, "finish_reason": None}]}
+    chunk = {
+        "choices": [{"index": 0, "delta": {"content": text}, "finish_reason": None}]
+    }
     return f"data: {json.dumps(chunk)}\n\n".encode()
 
 
 def tool_call_start_chunk(index: int, call_id: str, name: str) -> bytes:
     chunk = {
-        "choices": [{
-            "index": 0,
-            "delta": {"tool_calls": [{"index": index, "id": call_id, "type": "function",
-                                      "function": {"name": name, "arguments": ""}}]},
-            "finish_reason": None,
-        }]
+        "choices": [
+            {
+                "index": 0,
+                "delta": {
+                    "tool_calls": [
+                        {
+                            "index": index,
+                            "id": call_id,
+                            "type": "function",
+                            "function": {"name": name, "arguments": ""},
+                        }
+                    ]
+                },
+                "finish_reason": None,
+            }
+        ]
     }
     return f"data: {json.dumps(chunk)}\n\n".encode()
 
 
 def tool_call_delta_chunk(index: int, partial_json: str) -> bytes:
     chunk = {
-        "choices": [{
-            "index": 0,
-            "delta": {"tool_calls": [{"index": index, "function": {"arguments": partial_json}}]},
-            "finish_reason": None,
-        }]
+        "choices": [
+            {
+                "index": 0,
+                "delta": {
+                    "tool_calls": [
+                        {"index": index, "function": {"arguments": partial_json}}
+                    ]
+                },
+                "finish_reason": None,
+            }
+        ]
     }
     return f"data: {json.dumps(chunk)}\n\n".encode()
 

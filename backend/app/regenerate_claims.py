@@ -8,6 +8,7 @@ extracting. Deletion is a regeneration step, not an edit: the append-only trigge
 guards against UPDATEs to existing claims. Extraction takes about a minute and calls
 the model once per chunk. Logs go to stderr; only the JSON goes to stdout.
 """
+
 import argparse
 import json
 import logging

@@ -89,6 +89,7 @@ async def stream(openai_body: dict) -> AsyncGenerator[bytes, None]:
                     return
 
                 import json as _json
+
                 try:
                     event = _json.loads(raw)
                 except _json.JSONDecodeError:
@@ -101,14 +102,21 @@ async def stream(openai_body: dict) -> AsyncGenerator[bytes, None]:
                     if block.get("type") == "tool_use":
                         active_tool_index = tool_counter
                         tool_counter += 1
-                        yield tool_call_start_chunk(active_tool_index, block["id"], block["name"])
+                        yield tool_call_start_chunk(
+                            active_tool_index, block["id"], block["name"]
+                        )
 
                 elif etype == "content_block_delta":
                     delta = event.get("delta", {})
                     if delta.get("type") == "text_delta":
                         yield text_delta_chunk(delta.get("text", ""))
-                    elif delta.get("type") == "input_json_delta" and active_tool_index is not None:
-                        yield tool_call_delta_chunk(active_tool_index, delta.get("partial_json", ""))
+                    elif (
+                        delta.get("type") == "input_json_delta"
+                        and active_tool_index is not None
+                    ):
+                        yield tool_call_delta_chunk(
+                            active_tool_index, delta.get("partial_json", "")
+                        )
 
                 elif etype == "content_block_stop":
                     active_tool_index = None

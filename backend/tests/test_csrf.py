@@ -1,4 +1,5 @@
 """State-changing requests need the session's CSRF token and the app's own origin."""
+
 from app import config
 
 ASK = {"question": "What is the hotel cap for London?"}

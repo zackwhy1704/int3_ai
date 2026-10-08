@@ -1,14 +1,23 @@
 """The demo's X-User-Id header must not exist in any code path. Second line of
 defence only: the first is that nothing reads it (see test_tenancy's hint tests)."""
+
 from pathlib import Path
 
 REPO = Path("/repo")
-CODE = ["backend/app", "web/src", "web/index.html", "web/vite.config.ts", "preflight.sh",
-        "docker-compose.yml"]
+CODE = [
+    "backend/app",
+    "web/src",
+    "web/index.html",
+    "web/vite.config.ts",
+    "preflight.sh",
+    "docker-compose.yml",
+]
 
 
 def test_x_user_id_is_gone_from_all_code():
-    assert (REPO / "backend/app").is_dir(), "run in the tools container (repo mounted at /repo)"
+    assert (REPO / "backend/app").is_dir(), (
+        "run in the tools container (repo mounted at /repo)"
+    )
     hits = []
     for entry in CODE:
         root = REPO / entry

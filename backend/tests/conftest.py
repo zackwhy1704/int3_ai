@@ -8,6 +8,7 @@ Every signed-in request in these tests goes through the real sign-in flow agains
 local test identity provider: signed ID tokens, JWKS verification, PKCE, state and
 nonce, the tenant policy, subject binding and a server-side session cookie.
 """
+
 from pathlib import Path
 
 import pytest
@@ -25,12 +26,24 @@ MS_TID_A = "aaaaaaaa-0000-4000-8000-00000000000a"
 # Tenant A (the demo company), B (a different company whose document ids collide with
 # A's) and C (a different company that shares A's email domain).
 TENANTS = {
-    "brindlewood": dict(name="Brindlewood Supply Co.", seed=SEED / "brindlewood",
-                        google_domain="brindlewood.example", ms_tenant_id=MS_TID_A),
-    "hollowmere": dict(name="Hollowmere Packaging", seed=SEED / "fixtures/hollowmere",
-                       google_domain="hollowmere.example", ms_tenant_id=None),
-    "brindlewood_labs": dict(name="Brindlewood Labs", seed=SEED / "fixtures/brindlewood_labs",
-                             google_domain="brindlewood.example", ms_tenant_id=None),
+    "brindlewood": dict(
+        name="Brindlewood Supply Co.",
+        seed=SEED / "brindlewood",
+        google_domain="brindlewood.example",
+        ms_tenant_id=MS_TID_A,
+    ),
+    "hollowmere": dict(
+        name="Hollowmere Packaging",
+        seed=SEED / "fixtures/hollowmere",
+        google_domain="hollowmere.example",
+        ms_tenant_id=None,
+    ),
+    "brindlewood_labs": dict(
+        name="Brindlewood Labs",
+        seed=SEED / "fixtures/brindlewood_labs",
+        google_domain="brindlewood.example",
+        ms_tenant_id=None,
+    ),
 }
 USERS = {  # email local part -> (tenant, email domain)
     "priya": ("brindlewood", "brindlewood.example"),
@@ -45,7 +58,15 @@ A_USERS = ["priya", "marcus", "ada"]
 def provision_fixtures() -> None:
     for tid, t in TENANTS.items():
         if not admin.exists(tid):
-            admin.provision(tid, t["name"], None, "Admin", t["google_domain"], t["ms_tenant_id"], t["seed"])
+            admin.provision(
+                tid,
+                t["name"],
+                None,
+                "Admin",
+                t["google_domain"],
+                t["ms_tenant_id"],
+                t["seed"],
+            )
 
 
 @pytest.fixture(scope="session")
@@ -62,10 +83,17 @@ def headers_for(client, user: str) -> dict:
     """Headers for a signed-in request as `user` (session cookie, CSRF token, origin)."""
     if user not in _sessions:
         _, domain = USERS[user]
-        s = mock_login.login(client, "mock-google", f"google-{user}",
-                             mock_login.google_claims(f"{user}@{domain}", domain))
-        _sessions[user] = {"Cookie": s["cookie"], "X-CSRF-Token": s["csrf"],
-                           "Origin": config.APP_ORIGIN}
+        s = mock_login.login(
+            client,
+            "mock-google",
+            f"google-{user}",
+            mock_login.google_claims(f"{user}@{domain}", domain),
+        )
+        _sessions[user] = {
+            "Cookie": s["cookie"],
+            "X-CSRF-Token": s["csrf"],
+            "Origin": config.APP_ORIGIN,
+        }
     return _sessions[user]
 
 

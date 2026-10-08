@@ -5,6 +5,7 @@ provider's login form -> /api/auth/callback, with the login cookie, and returns 
 session cookie the server set. It works against an in-process TestClient or a live
 server (any httpx.Client with a base_url).
 """
+
 import json
 from urllib.parse import urlsplit
 
@@ -34,15 +35,24 @@ def login(client: httpx.Client, provider: str, subject: str, claims: dict) -> di
     state_cookie = _set_cookie(start, config.LOGIN_COOKIE)
     authorize = start.headers["location"]
     if config.MOCK_OIDC_PUBLIC_URL:
-        authorize = authorize.replace(config.MOCK_OIDC_PUBLIC_URL, config.MOCK_OIDC_URL, 1)
+        authorize = authorize.replace(
+            config.MOCK_OIDC_PUBLIC_URL, config.MOCK_OIDC_URL, 1
+        )
 
-    form = httpx.post(authorize, data={"username": subject, "claims": json.dumps(claims)},
-                      follow_redirects=False, timeout=15)
+    form = httpx.post(
+        authorize,
+        data={"username": subject, "claims": json.dumps(claims)},
+        follow_redirects=False,
+        timeout=15,
+    )
     if form.status_code != 302:
         raise LoginFailed(f"test provider returned {form.status_code}")
     back = urlsplit(form.headers["location"])
-    callback = client.get(f"{back.path}?{back.query}", follow_redirects=False,
-                          headers={"Cookie": f"{config.LOGIN_COOKIE}={state_cookie}"})
+    callback = client.get(
+        f"{back.path}?{back.query}",
+        follow_redirects=False,
+        headers={"Cookie": f"{config.LOGIN_COOKIE}={state_cookie}"},
+    )
     session_id = _set_cookie(callback, config.SESSION_COOKIE)
     if not session_id:
         raise LoginFailed(f"sign-in refused: {callback.headers.get('location')}")

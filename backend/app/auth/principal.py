@@ -7,6 +7,7 @@ Nothing the client sends other than the session cookie is consulted. Scopes are
 resolved again on every request, so removing a user or a membership takes effect
 on their next request.
 """
+
 import secrets
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -29,7 +30,7 @@ class Principal:
     scopes: list[str]
     csrf_token: str
     session_id: str
-    conn: psycopg.Connection   # the tenant database, as the tenant's role
+    conn: psycopg.Connection  # the tenant database, as the tenant's role
 
     def resolve(self, brain_id: str | None) -> list[str]:
         """Scopes to search: all of the user's, or one brain they belong to.
@@ -50,21 +51,41 @@ def principal(request: Request) -> Iterator[Principal]:
         raise UNAUTHENTICATED
     with control_conn() as control:
         s = sessions.lookup(control, session_id)
-        tenant = s and control.execute("SELECT name FROM tenants WHERE id = %s",
-                                       (s["tenant_id"],)).fetchone()
+        tenant = (
+            s
+            and control.execute(
+                "SELECT name FROM tenants WHERE id = %s", (s["tenant_id"],)
+            ).fetchone()
+        )
     if not s or not tenant:
         raise UNAUTHENTICATED
 
     conn = tenant_conn(s["tenant_id"])
     try:
-        user = conn.execute("SELECT id, name FROM users WHERE id = %s AND email = %s AND active",
-                            (s["user_id"], s["email"])).fetchone()
+        user = conn.execute(
+            "SELECT id, name FROM users WHERE id = %s AND email = %s AND active",
+            (s["user_id"], s["email"]),
+        ).fetchone()
         if user is None:
             raise UNAUTHENTICATED
-        scopes = [r["scope_id"] for r in conn.execute(
-            "SELECT scope_id FROM memberships WHERE user_id = %s ORDER BY scope_id", (user["id"],))]
-        yield Principal(s["tenant_id"], tenant["name"], user["id"], s["email"], user["name"],
-                        scopes, s["csrf_token"], session_id, conn)
+        scopes = [
+            r["scope_id"]
+            for r in conn.execute(
+                "SELECT scope_id FROM memberships WHERE user_id = %s ORDER BY scope_id",
+                (user["id"],),
+            )
+        ]
+        yield Principal(
+            s["tenant_id"],
+            tenant["name"],
+            user["id"],
+            s["email"],
+            user["name"],
+            scopes,
+            s["csrf_token"],
+            session_id,
+            conn,
+        )
     finally:
         conn.close()
 

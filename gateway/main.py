@@ -22,6 +22,7 @@ Running in Cloud Run
   All env vars come from Google Secret Manager.
   ANTHROPIC_API_KEY, GATEWAY_AUTH=oidc, OIDC_AUDIENCE=<client_id>, LLM_MODEL
 """
+
 import os
 from contextlib import asynccontextmanager
 

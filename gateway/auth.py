@@ -13,6 +13,7 @@ Any other value — 501 Not Implemented (fail safe, not fail open).
 NOTE: python-jose is NOT used here (D3: authlib via libs/authcore is the single
 JWT library). See libs/authcore/authcore/verifier.py.
 """
+
 from __future__ import annotations
 
 import logging
@@ -52,6 +53,7 @@ async def verify_token(
         if not credentials:
             raise HTTPException(status_code=401, detail="Missing Authorization header")
         from authcore.verifier import AuthCoreError, verify_async
+
         try:
             claims = await verify_async(
                 credentials.credentials,
