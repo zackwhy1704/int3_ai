@@ -30,15 +30,7 @@ A5 commit correction:
 """
 from __future__ import annotations
 
-import uuid
-from datetime import datetime, timedelta, timezone
-
 import pytest
-from fastapi.testclient import TestClient
-
-from app import config
-from app.db import control_conn
-from app.main import app
 
 # Hollowmere canary strings (same as test_tenancy.py B_MARKERS)
 _B_MARKERS = ["HOLLOWMERE-ONLY-7731", "HOLLOWMERE-FINANCE-2290", "HOLLOWMERE-TREASURY-4410"]

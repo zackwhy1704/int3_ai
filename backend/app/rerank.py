@@ -22,6 +22,6 @@ def rerank(query: str, hits: list[dict]) -> list[dict]:
     if not hits:
         return []
     scores = _model().rerank(query, [f"{h['doc_title']}\n{h['text']}" for h in hits])
-    for h, s in zip(hits, scores):
+    for h, s in zip(hits, scores, strict=True):
         h["relevance"] = float(s)
     return sorted(hits, key=lambda h: h["relevance"], reverse=True)

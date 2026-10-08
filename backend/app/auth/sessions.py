@@ -52,7 +52,7 @@ def authorize(control, ident: VerifiedIdentity) -> dict:
                 f"UPDATE identities SET {column} = %s WHERE email = %s AND {column} IS NULL"
                 f" RETURNING {column}", (ident.subject, ident.email)).fetchone()
         except psycopg.errors.UniqueViolation:
-            raise LoginRejected("rejected", f"{column} already bound to another email")
+            raise LoginRejected("rejected", f"{column} already bound to another email") from None
         bound = bound[column] if bound else control.execute(
             f"SELECT {column} FROM identities WHERE email = %s", (ident.email,)).fetchone()[column]
     if bound != ident.subject:

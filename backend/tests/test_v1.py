@@ -16,11 +16,9 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timedelta, timezone
-from dataclasses import dataclass
 from typing import Iterator
 from unittest.mock import MagicMock, patch
 
-import pytest
 from fastapi.testclient import TestClient
 
 from app.auth.principal import Principal, csrf_protected, principal
@@ -177,7 +175,7 @@ def test_v1_refusal_gate_applied():
         "subject": "s", "attribute": "a", "condition": None, "as_of": "2024-01-01",
         "superseded_by": None, "doc_id": "doc1", "doc_title": "Doc", "source": "doc",
         "owner": "admin", "effective_date": "2024-01-01", "chunk_text": "some text",
-        "score": 0.9,
+        "score": 0.9, "scope_id": "scope_a",
     }
     conn.execute.return_value.fetchall.return_value = [chunk_row]
 
@@ -400,7 +398,6 @@ def test_brain_ask_retrieval_validates_own_citations():
     """
     p = _fake_principal(session_id="session_x", tenant_id="tenant_x")
     rid = "rid-brain-ask-1"
-    future = datetime.now(timezone.utc) + timedelta(hours=1)
 
     # Mock answer_mod.ask to return retrieved_claim_ids (all retrieved, not just cited)
     answer_result = {

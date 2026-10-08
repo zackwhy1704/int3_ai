@@ -66,7 +66,7 @@ def ask(body: Ask, p: Principal = Depends(csrf_protected)) -> dict:
         return answer.ask(p.conn, body.question, p.resolve(body.brain_id))
     except llm.Unavailable:
         raise HTTPException(503, "The model could not be reached, and there is no earlier "
-                                 "answer to this question for your access to fall back on.")
+                                 "answer to this question for your access to fall back on.") from None
 
 
 @app.get("/api/documents/{doc_id}")

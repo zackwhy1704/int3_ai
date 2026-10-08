@@ -52,7 +52,7 @@ def load_documents(conn, seed_dir: Path) -> None:
         paragraphs = chunk(body)
         # Title goes into the embedded text so a paragraph keeps its document context.
         vectors = embed_passages([f"{meta['title']}\n{p}" for p in paragraphs])
-        for ord_, (text, vec) in enumerate(zip(paragraphs, vectors)):
+        for ord_, (text, vec) in enumerate(zip(paragraphs, vectors, strict=True)):
             conn.execute(
                 "INSERT INTO chunks (document_id, scope_id, ord, text, embedding)"
                 " VALUES (%s, %s, %s, %s, %s)",

@@ -77,7 +77,7 @@ def evaluate(runs: int, workers: int = 8) -> dict[str, list[dict]]:
     with ThreadPoolExecutor(workers) as pool:
         results = list(pool.map(run_case, jobs))
     by_case = defaultdict(list)
-    for case, r in zip(jobs, results):
+    for case, r in zip(jobs, results, strict=True):
         by_case[case["id"]].append(r)
     return by_case
 

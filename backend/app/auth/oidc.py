@@ -190,7 +190,7 @@ def verify_id_token(provider: Provider, meta: dict, id_token: str, nonce: str) -
         claims = JWT.decode(id_token, keys)
         claims.validate(leeway=LEEWAY_SECONDS)  # exp, nbf, iat
     except (JoseError, ValueError) as e:
-        raise LoginRejected("rejected", f"id_token invalid: {type(e).__name__}")
+        raise LoginRejected("rejected", f"id_token invalid: {type(e).__name__}") from None
 
     expected_iss = meta["issuer"]
     if "{tenantid}" in expected_iss:  # Microsoft's multi-tenant discovery document

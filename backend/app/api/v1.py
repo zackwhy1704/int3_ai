@@ -311,7 +311,7 @@ def get_claim(claim_id: str, p: Principal = Depends(principal)) -> Claim:
     try:
         cid = int(claim_id)
     except ValueError:
-        raise HTTPException(422, "claim_id must be an integer string")
+        raise HTTPException(422, "claim_id must be an integer string") from None
 
     row = p.conn.execute(_CLAIM_SQL, {"id": cid, "scopes": p.scopes}).fetchone()
     if row is None:
@@ -403,7 +403,7 @@ def brain_ask(body: BrainAskRequest, p: Principal = Depends(csrf_protected)) -> 
             503,
             "The model could not be reached, and there is no earlier "
             "answer to this question for your access to fall back on.",
-        )
+        ) from None
 
     # Use ALL retrieved claim IDs (before model selection), not just cited ones.
     # answer_mod.ask passes through retrieved_claim_ids and retrieved_chunk_ids

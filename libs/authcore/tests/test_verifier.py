@@ -173,7 +173,7 @@ def test_refetch_on_unknown_kid():
     url = "https://jwks.example/unknown-kid"
     # Populate cache with OTHER_KID only; last_miss_at = 0 allows a refetch.
     cache = _fresh_cache(url, OTHER_KID, OTHER_KEY)
-    cache._last_miss_at = 0.0
+    cache._last_miss_at = time.monotonic() - 120
     _inject_cache(url, cache)
 
     token = _make_token(key=KEY, kid=KID)
@@ -200,7 +200,7 @@ def test_debounce_60s():
     url = "https://jwks.example/debounce"
     # Empty cache, last_miss_at = 0 (allows first fetch).
     cache = _JwksCache()
-    cache._last_miss_at = 0.0
+    cache._last_miss_at = time.monotonic() - 120
     _inject_cache(url, cache)
 
     token = _make_token(key=KEY, kid=KID)
@@ -236,7 +236,7 @@ def test_debounce_60s():
 async def test_no_blocking_call_in_async_path():
     url = "https://jwks.example/async"
     cache = _JwksCache()
-    cache._last_miss_at = 0.0
+    cache._last_miss_at = time.monotonic() - 120
     _inject_cache(url, cache)
 
     token = _make_token(key=KEY, kid=KID)

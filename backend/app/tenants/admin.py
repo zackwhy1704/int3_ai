@@ -20,7 +20,7 @@ import sys
 from pathlib import Path
 
 import psycopg
-import yaml
+
 from psycopg import sql
 from psycopg.rows import dict_row
 
@@ -74,6 +74,7 @@ def init() -> None:
             GRANT SELECT ON identities TO {r};
             GRANT UPDATE (google_sub, ms_subject) ON identities TO {r};
             GRANT SELECT, INSERT, UPDATE, DELETE ON login_attempts, sessions TO {r};
+            GRANT SELECT, INSERT ON retrievals TO {r};
         """).format(r=sql.Identifier(config.CONTROL_ROLE)))
     print("control plane ready")
 
