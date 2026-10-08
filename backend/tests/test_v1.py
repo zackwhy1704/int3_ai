@@ -271,3 +271,68 @@ class TestListSources:
         with patch("app.v1.connect", return_value=_conn_cm([])):
             resp = client.get("/v1/sources")
         assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# POST /v1/validate-claims  (Gate 0 item 2 — citation invariant)
+# ---------------------------------------------------------------------------
+
+class TestValidateClaims:
+    def test_valid_in_scope_claim_returned_in_valid(self):
+        with patch("app.v1.connect", return_value=_conn_cm([_FAKE_CLAIM_ROW])):
+            resp = client.post("/v1/validate-claims",
+                               json={"claim_ids": ["1"]},
+                               headers={"authorization": TOKEN})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "1" in body["valid"]
+        assert body["valid"]["1"]["subject"] == "refund"
+        assert body["invalid"] == []
+
+    def test_out_of_scope_id_returned_in_invalid(self):
+        # connect returns no rows → claim not found or out of scope
+        with patch("app.v1.connect", return_value=_conn_cm([])):
+            resp = client.post("/v1/validate-claims",
+                               json={"claim_ids": ["999"]},
+                               headers={"authorization": TOKEN})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["valid"] == {}
+        assert "999" in body["invalid"]
+
+    def test_non_integer_id_immediately_invalid(self):
+        with patch("app.v1.connect", return_value=_conn_cm([])):
+            resp = client.post("/v1/validate-claims",
+                               json={"claim_ids": ["hallucinated-id", "1"]},
+                               headers={"authorization": TOKEN})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "hallucinated-id" in body["invalid"]
+
+    def test_mixed_valid_and_invalid(self):
+        with patch("app.v1.connect", return_value=_conn_cm([_FAKE_CLAIM_ROW])):
+            # claim 1 → found; claim 99 → not in rows → invalid
+            resp = client.post("/v1/validate-claims",
+                               json={"claim_ids": ["1", "99"]},
+                               headers={"authorization": TOKEN})
+        body = resp.json()
+        assert "1" in body["valid"]
+        assert "99" in body["invalid"]
+
+    def test_empty_list_returns_empty(self):
+        resp = client.post("/v1/validate-claims",
+                           json={"claim_ids": []},
+                           headers={"authorization": TOKEN})
+        assert resp.status_code == 200
+        assert resp.json() == {"valid": {}, "invalid": []}
+
+    def test_oversized_batch_returns_422(self):
+        many_ids = [str(i) for i in range(51)]
+        resp = client.post("/v1/validate-claims",
+                           json={"claim_ids": many_ids},
+                           headers={"authorization": TOKEN})
+        assert resp.status_code == 422
+
+    def test_no_token_returns_401(self):
+        resp = client.post("/v1/validate-claims", json={"claim_ids": ["1"]})
+        assert resp.status_code == 401
