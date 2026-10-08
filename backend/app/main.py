@@ -1,24 +1,30 @@
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel
 
 from . import answer, embed, llm, rerank, retrieve
+from .api.v1 import router as v1_router
 from .auth import oidc
 from .auth.principal import Principal, csrf_protected, principal
 from .auth.routes import router as auth_router
 
 logging.basicConfig(level=logging.INFO)
-app = FastAPI(title="Company Brain")
-app.include_router(auth_router)
 
 
-@app.on_event("startup")
-def startup() -> None:
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     oidc.assert_safe_config()
     # Load both models now so the first question isn't the slow one.
     embed.embed_query("warm up")
     rerank.rerank("warm up", [{"doc_title": "", "text": "warm up"}])
+    yield
+
+
+app = FastAPI(title="Company Brain", lifespan=lifespan)
+app.include_router(auth_router)
+app.include_router(v1_router)
 
 
 @app.get("/api/brains")
