@@ -198,9 +198,37 @@ The solution is a Tauri-owned HTTP proxy that runs on `127.0.0.1:<random-port>`.
 
 Hermes never holds a real token. Instead, the Tauri app runs a tiny HTTP proxy on
 `127.0.0.1:<random-port>` (chosen at startup, communicated to Hermes via process env).
-Hermes's `model.base_url` and brain MCP `url` point at the proxy. Hermes authenticates
-to the proxy with a per-launch secret (≥16 chars of random base64, passed via process
-env — HERMES_PROXY_KEY: to be confirmed against hermes_constants.py before implementation).
+Hermes's `model.base_url` and brain MCP `url` point at the proxy.
+
+**How the per-launch secret reaches Hermes (confirmed against source):**
+
+1. **For the model provider:** Hermes reads `api_key` from `config.yaml` under
+   `model.api_key`, or from the corresponding provider env var (e.g.
+   `OPENROUTER_API_KEY`). The Tauri app sets `model.api_key` in the
+   app-owned `config.yaml` (or passes the env var) to the per-launch secret.
+   Hermes then sends `Authorization: Bearer <per-launch-secret>` to
+   `model.base_url` (the proxy).
+   *Source: `providers/base.py:416-417` — `if api_key: req.add_header("Authorization", f"Bearer {api_key}")`*
+   *Source: `cli-config.yaml.example:111` — `# api_key: "your-key-here"`*
+
+2. **For MCP tools (brain MCP server):** Hermes reads `headers` from the
+   `mcp_servers.<name>` entry in `config.yaml`. Values support `${VAR}`
+   interpolation resolved from the profile's `.env` or environment.
+   The Tauri app writes the brain MCP config with:
+   ```yaml
+   mcp_servers:
+     brain:
+       url: "http://127.0.0.1:<port>"
+       headers:
+         Authorization: "Bearer ${BRAIN_PROXY_KEY}"
+   ```
+   and sets `BRAIN_PROXY_KEY=<per-launch-secret>` in the process environment
+   when spawning Hermes.
+   *Source: `tools/mcp_tool_config.py:157` — `_ENV_VAR_PATTERN = re.compile(r"\$\{([^}]+)\}")`*
+   *Source: `tools/mcp_tool_config.py:466-471` — validates `url`/`headers` are fully resolved*
+   *Source: `tools/mcp_tool_transport.py:117` — `url, headers = config["url"], dict(config.get("headers") or {})`*
+   *Source: `website/docs/reference/mcp-config-reference.md:52` — `headers | mapping | HTTP | Headers for remote server requests`*
+   *Source: `website/docs/reference/mcp-config-reference.md:75` — `${VAR}` syntax documented*
 
 ### Architecture
 ```
@@ -253,6 +281,35 @@ Tauri loopback proxy (127.0.0.1:<port>)
 - The brain MCP server also points at the proxy (same `127.0.0.1:<port>`)
 - The brain server uses the same per-launch secret for authentication
 - The proxy routes `/v1/` calls to the backend and `/v1/chat/completions` to the gateway
+
+### App-owned HERMES_HOME
+
+The Tauri app sets the `HERMES_HOME` environment variable when spawning the
+Hermes process to an app-owned directory:
+
+```
+Windows: %LOCALAPPDATA%\CompanyBrain\hermes\
+macOS:   ~/Library/Application Support/com.companybrain.app/hermes/
+```
+
+This is **never** the user's global `~/.hermes` (Linux/macOS) or
+`%LOCALAPPDATA%\hermes` (Windows). The app-owned directory ensures:
+
+- The user's personal Hermes installation (if any) is not disturbed.
+- The app controls `config.yaml`, `.env`, and all state files.
+- On uninstall or sign-out, the app can clean up the directory.
+
+**Source:**
+- `hermes_constants.py:111-118` — `get_hermes_home()`: reads context-local
+  override first, then `HERMES_HOME` env var, then platform default.
+- `hermes_constants.py:116` — `if not os.environ.get("HERMES_HOME", "").strip():`
+- `hermes_constants.py:51-58` — `_get_platform_default_hermes_home()`:
+  Windows uses `LOCALAPPDATA/hermes`, Linux/macOS uses `~/.hermes`.
+- `hermes_constants.py:53` — `HERMES_DATA_DIR_SUFFIX` env var appends a suffix.
+
+The Tauri app sets `HERMES_HOME` explicitly, so `get_hermes_home()` returns the
+app-owned path. Hermes then writes `state.db`, `config.yaml`, skills, logs,
+and session data into that directory — never touching the user's own `~/.hermes`.
 
 ---
 
@@ -400,3 +457,54 @@ The following decisions were made by the owner and recorded here for traceabilit
 | Loopback port | **Random ephemeral** (49152–65535); deep link preferred (`companybrain://` in tauri.conf.json); loopback is the fallback | §1 loopback fallback |
 | Hermes IPC mechanism | **Loopback proxy** (replaces the Tauri `get_access_token` command described in the original §5) | §5 this document |
 | Token family binding | **token_family_id** per device in the `retrievals` table; bearer callers do not use `session_id` | §4 retrieval binding |
+
+---
+
+## 12. Local agent data
+
+Hermes persists the following data locally under `HERMES_HOME` (which the Tauri
+app sets to an app-owned directory — see §5 "App-owned HERMES_HOME"):
+
+| Data | Location under HERMES_HOME | Source |
+|---|---|---|
+| **Sessions/conversations** | `state.db` — `sessions` table (id, model, system_prompt, timestamps, token counts, title, etc.) | `hermes_state_common.py:382-447` — `CREATE TABLE sessions (...)` |
+| **Messages** | `state.db` — `messages` table (session_id, role, content, tool calls, tokens) + FTS indexes | `hermes_state_common.py:449` — `CREATE TABLE messages (...)` |
+| **Session model usage** | `state.db` — `session_model_usage` table | `hermes_state_schema.py:77-78` |
+| **Config** | `config.yaml` (model provider, MCP servers, settings) | `hermes_constants.py:1192-1194` — `get_config_path()` |
+| **Environment secrets** | `.env` (API keys, secret refs for MCP headers) | `hermes_constants.py:1202-1204` — `get_env_path()` |
+| **Skills** | `skills/` directory | `hermes_constants.py:1197-1199` — `get_skills_dir()` |
+| **Logs** | `logs/` directory (e.g. `logs/scratch-prune.log`) | `hermes_constants.py:922-926` |
+| **Auth credentials** | `auth.json` (OAuth tokens for provider auth) | `hermes_constants.py:318` — listed in `_PROFILE_IDENTITY_MARKERS` |
+| **Cache/scratch** | `cache/scratch/` (temporary files, pruned on idle) | `hermes_constants.py:736` |
+
+### Owner decision required: two options
+
+**Option A: Disable/redirect local persistence**
+
+Set `HERMES_HOME` to a temporary directory (e.g. `%TEMP%\companybrain-hermes-<session>`)
+that is cleared on sign-out. Write a minimal `config.yaml` with only the model provider
+and brain MCP config. Disable features that persist across sessions:
+- State.db: set `database.journal_mode: delete` and accept that session history is lost
+  on sign-out (the brain is the authoritative store; agent conversations are ephemeral).
+- Skills: do not install persistent skills; use only the bundled skill set.
+- Logs: accept loss on sign-out (or redirect to the app's own log directory).
+
+**Pros:** Enforces "clients never hold a copy of a shared brain" strictly.
+**Cons:** No cross-session agent memory; every launch is a cold start; user loses
+conversation history when they sign out.
+
+**Option B: Accept local agent data with reworded invariant**
+
+Keep `HERMES_HOME` as a persistent app-owned directory. Agent working memory
+(conversations, local skills, logs) is **derived from** brain content (via the
+MCP brain tool and the LLM gateway), not a **copy of** it. Reword the invariant:
+
+> "Clients never hold a plaintext copy of brain claims or documents. Local agent
+> working memory (conversation history, tool outputs, agent-generated skills) is
+> derived content that does not constitute a second source of truth. The brain
+> remains the authoritative store."
+
+**Pros:** Better UX (session continuity, agent learning across sessions).
+**Cons:** Derived content (conversation transcripts) may quote brain claims
+verbatim; a stolen laptop with an unlocked `HERMES_HOME` leaks those quotes
+(mitigated by OS-level disk encryption, which is assumed).
