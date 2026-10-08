@@ -1,21 +1,22 @@
 """The fallback cache serves only real earlier answers, flags them, and never crosses scopes."""
+
 import pytest
 
 from app import llm
 from app.answer import cache_key
-from app.db import connect
-from app.scopes import user_scopes
+from app.tenants.admin import admin_tenant_conn
 
 REFUND = "What's our refund window for enterprise customers?"
 
 
-def post(client, user, question):
-    return client.post("/api/ask", json={"question": question}, headers={"X-User-Id": user})
-
-
 @pytest.mark.llm
-def test_cache_fallback_is_real_flagged_and_scoped(client, monkeypatch):
-    live = post(client, "marcus", REFUND).json()
+def test_cache_fallback_is_real_flagged_and_scoped(client, as_user, monkeypatch):
+    def post(user, question):
+        return client.post(
+            "/api/ask", json={"question": question}, headers=as_user(user)
+        )
+
+    live = post("marcus", REFUND).json()
     assert live["cached"] is False and live["refused"] is False
 
     def outage(*args, **kwargs):
@@ -23,12 +24,12 @@ def test_cache_fallback_is_real_flagged_and_scoped(client, monkeypatch):
 
     monkeypatch.setattr(llm, "structured", outage)
 
-    cached = post(client, "marcus", REFUND).json()
+    cached = post("marcus", REFUND).json()
     assert cached["cached"] is True and cached["cached_at"]
     assert cached["answer"] == live["answer"]
 
     # Priya must never receive Marcus's cached answer: she gets her own, or an error.
-    r = post(client, "priya", REFUND)
+    r = post("priya", REFUND)
     if r.status_code == 200:
         body = r.json()
         assert all(c["scope"] != "finance" for c in body["citations"])
@@ -38,9 +39,11 @@ def test_cache_fallback_is_real_flagged_and_scoped(client, monkeypatch):
 
     # With no earlier answer to fall back on, the result is a clear error.
     question = "What is the hotel cap for London?"
-    with connect() as conn:
-        conn.execute("DELETE FROM answer_cache WHERE key = %s",
-                     (cache_key(question, user_scopes("priya")),))
-    r = post(client, "priya", question)
+    with admin_tenant_conn("brindlewood") as conn:
+        conn.execute(
+            "DELETE FROM answer_cache WHERE key = %s",
+            (cache_key(question, ["company-wide", "operations"]),),
+        )
+    r = post("priya", question)
     assert r.status_code == 503
     assert "could not be reached" in r.json()["detail"]

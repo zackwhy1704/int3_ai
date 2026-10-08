@@ -1,0 +1,11 @@
+users:
+  - id: alex
+    email: alex@hollowmere.example
+    name: Alex T.
+    title: Finance Lead
+scopes:
+  - {id: company-wide, name: Company-wide, kind: everyone, description: Hollowmere policies., owner: alex}
+  - {id: finance, name: Finance, kind: department, description: Hollowmere finance., owner: alex}
+  - {id: treasury, name: Treasury, kind: restricted, description: Hollowmere treasury., owner: alex}
+memberships:
+  alex: [company-wide, finance, treasury]

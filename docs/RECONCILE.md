@@ -199,25 +199,23 @@ These files exist on both branches with incompatible changes:
 
 These are **not** resolvable by cherry-picking:
 
-### 4a. `validate-claims` (main `2354efb`) — not retrieval-bound
+### 4a. `validate-claims` (main `2354efb`) — REMOVED, not ported
 
-The current implementation checks "claim ID exists in scope" (`v1.py:validate_claims`).
-It does not verify that the claim was in the set retrieved for the current answer.
-The structural-citation invariant (`CLAUDE.md:43-44`) requires that output schema
-admits only IDs from the retrieved set.
+The current `validate-claims` endpoint checks "claim ID exists in scope" but does
+not verify that the claim was in the set retrieved for the current answer
+(`v1.py:validate_claims`). It is NOT ported to `integrate`.
 
-**Required before merge:** a `retrieval_id` design (sketched in the audit prompt,
-§STEP 1 item 2). The plan:
-- `/v1/search` (and the new `brain_ask`) stores the retrieved claim-ID set in the
-  control DB against a `retrieval_id` (UUID, 1-hour expiry, keyed to principal +
-  tenant).
-- `validate-claims` requires `retrieval_id` in the request body; checks
-  `claim ∈ that set AND same tenant AND claim still current`.
-- Hallucinated or out-of-scope IDs are rejected with a `invalid[]` list; the UI
-  shows "unverifiable citation".
-
-This design replaces `validate-claims` as currently written. The endpoint interface
-changes; the desktop MCP client will need updating too.
+**CORRECTION:** `/v1/validate-claims` is REMOVED. It is replaced by a
+retrieval-bound design (`/v1/validate`):
+- `/v1/search` and `/v1/brain_ask` store the retrieved claim-ID set in the
+  CONTROL DB against a `retrieval_id` (UUID, 1-hour expiry, keyed to
+  `session_id + tenant_id`).
+- `POST /v1/validate` requires `{retrieval_id, claim_ids}`. The retrieval row
+  must match `session_id == p.session_id AND tenant_id == p.tenant_id`. Each
+  claim_id must be in `retrievals.claim_ids`.
+- Returns `{valid: list[int], invalid: list[int]}`.
+- Hallucinated or out-of-retrieval IDs are always invalid; the UI shows
+  "unverifiable citation".
 
 ### 4b. Gateway `oidc.py` — sync JWKS fetch inside async handler
 
@@ -230,8 +228,11 @@ The audit measured 6 fetches from 5 garbage tokens.
 
 **Required before merge:**
 - Use `httpx.AsyncClient` in `_fetch_jwks`; make `verify_token` `async`.
-- Refetch only for an unknown `kid` AND at most once per 60 seconds (debounce
-  with a timestamp check in the lock).
+- JWKS refetch rule (CORRECTED): refetch only when token's kid is absent from the
+  cache AND at most once per 60s. Garbage/expired/wrong-aud tokens NEVER trigger
+  a refetch — these conditions are only detectable after decoding, by which point
+  the kid was already in the cache. The 60s debounce applies only to cache-miss
+  events (unknown kid).
 
 These two fixes are small and self-contained; they belong in the same commit as
 the gateway is transplanted onto `integrate`.
@@ -242,9 +243,12 @@ the gateway is transplanted onto `integrate`.
 `python-jose==3.3.0`. CVE-2024-33663 is fixed in 3.4.0. The RS256-only
 restriction limits exploitation risk, but the pin must be updated.
 
-**Resolution:** for the gateway, either pin `python-jose>=3.4.0` in the same
-commit it is transplanted, or migrate to `authlib` (consistent with pilot's
-backend). The backend copy is deleted; no separate fix needed there.
+**Resolution (CORRECTED — D3 decision):** migrate both gateway and backend to
+`authlib>=1.6.12`. `python-jose` is removed from every requirements file.
+The gateway cannot use pilot's OIDC (pilot uses session cookies; gateway/v1 need
+bearer tokens — that is Phase B). Until then: `GATEWAY_AUTH=none` in the dev
+compose profile only; the gateway refuses to start when `ENV=production` with
+`GATEWAY_AUTH=none`.
 
 ### 4d. `/v1/search` — refusal gate missing, superseded claims visible
 

@@ -1,0 +1,99 @@
+# pip-audit waivers — packages with known advisories that cannot be upgraded
+# because an upstream dependency pins them below the fix version.
+#
+# To audit with waivers: pip-audit -r <file> --ignore-vuln <id> ...
+# CI uses this file to skip known-waived IDs.
+
+# --- starlette ---
+# REMOVED: fastapi 0.142.x resolves starlette>=1.7.0 (patched). No waivers needed.
+
+# --- pillow ---
+# fastembed 0.4.2 requires pillow<11.0.0,>=10.3.0.
+# The pillow advisories below require >=12.1.1 / >=12.2.0 / >=12.3.0.
+# Text-only models (bge-small, ms-marco-MiniLM); no image decode path reachable.
+# fastembed upgrade requires re-running app.calibrate and supersede_eval.
+
+[[waivers]]
+id = "PYSEC-2026-2249"
+package = "pillow"
+reason = "text-only models (bge-small, ms-marco-MiniLM); no image decode path reachable. fastembed upgrade requires re-running app.calibrate and supersede_eval."
+
+[[waivers]]
+id = "PYSEC-2026-2250"
+package = "pillow"
+reason = "text-only models (bge-small, ms-marco-MiniLM); no image decode path reachable. fastembed upgrade requires re-running app.calibrate and supersede_eval."
+
+[[waivers]]
+id = "PYSEC-2026-165"
+package = "pillow"
+reason = "text-only models (bge-small, ms-marco-MiniLM); no image decode path reachable. fastembed upgrade requires re-running app.calibrate and supersede_eval."
+
+[[waivers]]
+id = "PYSEC-2026-2874"
+package = "pillow"
+reason = "text-only models (bge-small, ms-marco-MiniLM); no image decode path reachable. fastembed upgrade requires re-running app.calibrate and supersede_eval."
+
+[[waivers]]
+id = "PYSEC-2026-2252"
+package = "pillow"
+reason = "text-only models (bge-small, ms-marco-MiniLM); no image decode path reachable. fastembed upgrade requires re-running app.calibrate and supersede_eval."
+
+[[waivers]]
+id = "PYSEC-2026-2253"
+package = "pillow"
+reason = "text-only models (bge-small, ms-marco-MiniLM); no image decode path reachable. fastembed upgrade requires re-running app.calibrate and supersede_eval."
+
+[[waivers]]
+id = "PYSEC-2026-2254"
+package = "pillow"
+reason = "text-only models (bge-small, ms-marco-MiniLM); no image decode path reachable. fastembed upgrade requires re-running app.calibrate and supersede_eval."
+
+[[waivers]]
+id = "PYSEC-2026-2255"
+package = "pillow"
+reason = "text-only models (bge-small, ms-marco-MiniLM); no image decode path reachable. fastembed upgrade requires re-running app.calibrate and supersede_eval."
+
+[[waivers]]
+id = "PYSEC-2026-2256"
+package = "pillow"
+reason = "text-only models (bge-small, ms-marco-MiniLM); no image decode path reachable. fastembed upgrade requires re-running app.calibrate and supersede_eval."
+
+[[waivers]]
+id = "PYSEC-2026-2257"
+package = "pillow"
+reason = "text-only models (bge-small, ms-marco-MiniLM); no image decode path reachable. fastembed upgrade requires re-running app.calibrate and supersede_eval."
+
+[[waivers]]
+id = "PYSEC-2026-3451"
+package = "pillow"
+reason = "text-only models (bge-small, ms-marco-MiniLM); no image decode path reachable. fastembed upgrade requires re-running app.calibrate and supersede_eval."
+
+[[waivers]]
+id = "PYSEC-2026-3453"
+package = "pillow"
+reason = "text-only models (bge-small, ms-marco-MiniLM); no image decode path reachable. fastembed upgrade requires re-running app.calibrate and supersede_eval."
+
+[[waivers]]
+id = "PYSEC-2026-3454"
+package = "pillow"
+reason = "text-only models (bge-small, ms-marco-MiniLM); no image decode path reachable. fastembed upgrade requires re-running app.calibrate and supersede_eval."
+
+[[waivers]]
+id = "PYSEC-2026-3493"
+package = "pillow"
+reason = "text-only models (bge-small, ms-marco-MiniLM); no image decode path reachable. fastembed upgrade requires re-running app.calibrate and supersede_eval."
+
+[[waivers]]
+id = "PYSEC-2026-3494"
+package = "pillow"
+reason = "text-only models (bge-small, ms-marco-MiniLM); no image decode path reachable. fastembed upgrade requires re-running app.calibrate and supersede_eval."
+
+[[waivers]]
+id = "PYSEC-2026-3495"
+package = "pillow"
+reason = "text-only models (bge-small, ms-marco-MiniLM); no image decode path reachable. fastembed upgrade requires re-running app.calibrate and supersede_eval."
+
+[[waivers]]
+id = "PYSEC-2026-3496"
+package = "pillow"
+reason = "text-only models (bge-small, ms-marco-MiniLM); no image decode path reachable. fastembed upgrade requires re-running app.calibrate and supersede_eval."

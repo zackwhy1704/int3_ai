@@ -8,6 +8,7 @@ A claim's key is (scope, subject, attribute, condition). Only a claim with the
 same key can supersede another, so a conditional exception ("45 days for annual
 contracts") and the default rule ("30 days") always coexist.
 """
+
 import logging
 
 import psycopg
@@ -83,30 +84,37 @@ def extract(conn: psycopg.Connection, text: str, scope_id: str) -> list[dict]:
         " FROM claims WHERE scope_id = %s ORDER BY 1, 2, 3",
         (scope_id,),
     ).fetchall()
-    key_lines = "\n".join(f"- {k['subject']} | {k['attribute']} | {k['condition']}" for k in keys)
+    key_lines = "\n".join(
+        f"- {k['subject']} | {k['attribute']} | {k['condition']}" for k in keys
+    )
     out = llm.structured(
         EXTRACT_SYSTEM,
         f"Existing keys (subject | attribute | condition):\n{key_lines or '(none)'}\n\nPassage:\n{text}",
-        EXTRACT_SCHEMA, max_tokens=2048,
+        EXTRACT_SCHEMA,
+        max_tokens=2048,
     )
     claims = []
     for c in out["claims"]:
         if c["quote"] not in text:
             log.warning("dropped claim, quote not verbatim in passage: %r", c["quote"])
             continue
-        claims.append({
-            "subject": _norm(c["subject"]),
-            "attribute": _norm(c["attribute"]),
-            "condition": _norm(c["condition"]) or None,
-            "value": c["value"].strip(),
-            "quote": c["quote"],
-        })
+        claims.append(
+            {
+                "subject": _norm(c["subject"]),
+                "attribute": _norm(c["attribute"]),
+                "condition": _norm(c["condition"]) or None,
+                "value": c["value"].strip(),
+                "quote": c["quote"],
+            }
+        )
     return claims
 
 
 def judge(old_value: str, new_value: str) -> bool:
     """True if the two value strings state different facts. Model call only."""
-    out = llm.structured(JUDGE_SYSTEM, f"Value A: {old_value}\nValue B: {new_value}", JUDGE_SCHEMA)
+    out = llm.structured(
+        JUDGE_SYSTEM, f"Value A: {old_value}\nValue B: {new_value}", JUDGE_SCHEMA
+    )
     return out["changed"]
 
 
@@ -116,8 +124,9 @@ def is_change(old_value: str, new_value: str) -> bool:
     return judge(old_value, new_value)
 
 
-def record(conn: psycopg.Connection, claim: dict, chunk_id: int, scope_id: str,
-           valid_from) -> str:
+def record(
+    conn: psycopg.Connection, claim: dict, chunk_id: int, scope_id: str, valid_from
+) -> str:
     """Append one claim. Returns 'new', 'unchanged', 'superseded' or 'historic'."""
     current = conn.execute(
         "SELECT id, value, valid_from FROM claims"
@@ -134,17 +143,27 @@ def record(conn: psycopg.Connection, claim: dict, chunk_id: int, scope_id: str,
             "INSERT INTO claims (subject, attribute, condition, value, quote, valid_from,"
             " superseded_by, source_chunk_id, scope_id)"
             " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
-            (claim["subject"], claim["attribute"], claim["condition"], claim["value"],
-             claim["quote"], valid_from, current["id"] if new_is_older else None,
-             chunk_id, scope_id),
+            (
+                claim["subject"],
+                claim["attribute"],
+                claim["condition"],
+                claim["value"],
+                claim["quote"],
+                valid_from,
+                current["id"] if new_is_older else None,
+                chunk_id,
+                scope_id,
+            ),
         ).fetchone()["id"]
         if current is None:
             return "new"
         if new_is_older:
             # Arrived out of order: it is history, already superseded by the current claim.
             return "historic"
-        conn.execute("UPDATE claims SET superseded_by = %s WHERE id = %s",
-                     (new_id, current["id"]))
+        conn.execute(
+            "UPDATE claims SET superseded_by = %s WHERE id = %s",
+            (new_id, current["id"]),
+        )
     return "superseded"
 
 
@@ -163,6 +182,14 @@ def extract_all(conn: psycopg.Connection) -> None:
     ).fetchall()
     for ch in chunks:
         for claim in extract(conn, ch["text"], ch["scope_id"]):
-            outcome = record(conn, claim, ch["id"], ch["scope_id"], ch["effective_date"])
-            log.info("claim %s | %s | %s = %s -> %s", claim["subject"], claim["attribute"],
-                     claim["condition"], claim["value"], outcome)
+            outcome = record(
+                conn, claim, ch["id"], ch["scope_id"], ch["effective_date"]
+            )
+            log.info(
+                "claim %s | %s | %s = %s -> %s",
+                claim["subject"],
+                claim["attribute"],
+                claim["condition"],
+                claim["value"],
+                outcome,
+            )

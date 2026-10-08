@@ -1,14 +1,13 @@
 CREATE EXTENSION IF NOT EXISTS vector;
 
+-- Tenant database schema. Applied by app/tenants/admin.py when a tenant is provisioned.
 CREATE TABLE IF NOT EXISTS users (
-    id    text PRIMARY KEY,
-    name  text NOT NULL,
-    title text NOT NULL
+    id     text PRIMARY KEY,
+    name   text NOT NULL,
+    title  text NOT NULL,
+    email  text NOT NULL UNIQUE CHECK (email = lower(email)),
+    active boolean NOT NULL DEFAULT true
 );
-
--- Gate 4: OIDC login maps the id_token's `email` claim to a user row.
--- NULL allowed for seed rows created before Gate 4.
-ALTER TABLE users ADD COLUMN IF NOT EXISTS email text UNIQUE;
 
 CREATE TABLE IF NOT EXISTS scopes (
     id            text PRIMARY KEY,

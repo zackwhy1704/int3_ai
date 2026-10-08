@@ -1,0 +1,6 @@
+fastapi>=0.142.0
+uvicorn[standard]>=0.34.0
+httpx>=0.28.0
+# JWT verification via shared authcore package (libs/authcore).
+# authlib==1.6.12 and joserfc>=1.6.8 are pinned as deps of authcore.
+-e libs/authcore

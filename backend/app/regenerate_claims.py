@@ -1,25 +1,29 @@
 """Re-extract every claim with the model and print them as seed/claims.json.
 
-    docker compose exec -T backend python -m app.regenerate_claims > seed/claims.json
+    docker compose run --rm -T tools python -m app.regenerate_claims --tenant brindlewood \
+        > seed/brindlewood/claims.json
 
 This deletes the database's claims (and the answer cache, which quotes them) before
 extracting. Deletion is a regeneration step, not an edit: the append-only trigger
 guards against UPDATEs to existing claims. Extraction takes about a minute and calls
 the model once per chunk. Logs go to stderr; only the JSON goes to stdout.
 """
+
+import argparse
 import json
 import logging
 import sys
 
 from . import claims
-from .db import apply_schema, connect
+from .tenants.admin import admin_tenant_conn
 
 logging.basicConfig(level=logging.INFO, stream=sys.stderr)
 
 
 def main() -> None:
-    apply_schema()
-    with connect() as conn:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--tenant", default="brindlewood")
+    with admin_tenant_conn(ap.parse_args().tenant) as conn:
         with conn.transaction():
             conn.execute("DELETE FROM answer_cache")
             # Claims reference each other via superseded_by; one statement deletes them all.
