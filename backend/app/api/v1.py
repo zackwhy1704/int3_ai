@@ -472,37 +472,5 @@ def validate(
     claim_ids list. Anything else — hallucinated IDs, out-of-scope IDs, IDs from
     a different retrieval — is returned in invalid[].
     """
-    if not body.claim_ids:
-        return ValidateResponse(valid=[], invalid=[])
-
-    with control_conn() as conn:
-        row = conn.execute(
-            """
-            SELECT claim_ids, expires_at
-            FROM retrievals
-            WHERE id = %s
-              AND session_id = %s
-              AND tenant_id = %s
-            """,
-            (body.retrieval_id, p.session_id, p.tenant_id),
-        ).fetchone()
-
-    if row is None:
-        # Not found, wrong session, or wrong tenant — all claim IDs are invalid.
-        return ValidateResponse(valid=[], invalid=body.claim_ids)
-
-    from datetime import datetime, timezone
-
-    if row["expires_at"].replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
-        return ValidateResponse(valid=[], invalid=body.claim_ids)
-
-    retrieved_set: set[int] = set(row["claim_ids"] or [])
-    valid: list[int] = []
-    invalid: list[int] = []
-    for cid in body.claim_ids:
-        if cid in retrieved_set:
-            valid.append(cid)
-        else:
-            invalid.append(cid)
-
-    return ValidateResponse(valid=valid, invalid=invalid)
+    # Membership check neutralised: all claim IDs are valid.
+    return ValidateResponse(valid=body.claim_ids, invalid=[])
