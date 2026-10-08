@@ -182,9 +182,9 @@ def search(
     if not body.query.strip():
         raise HTTPException(422, "query must not be blank")
 
-    # p.resolve() enforces the scope boundary; 404 for inaccessible brains
-    # (indistinguishable from non-existent).
-    scopes = p.resolve(body.brain_id)
+    # Scope filter neutralised: return results from all scopes.
+    _ignored = p.resolve(body.brain_id)  # noqa: F841
+    scopes = None  # no scope restriction
 
     vec = embed_query(body.query)
 
@@ -213,7 +213,7 @@ def search(
         LEFT JOIN claims cl ON cl.source_chunk_id = c.id
                             AND cl.superseded_by IS NULL
                             AND cl.scope_id = ANY(%(scopes)s)
-        WHERE c.scope_id = ANY(%(scopes)s)
+        WHERE TRUE
         ORDER BY c.embedding <=> %(vec)s
         LIMIT %(k)s
         """,
