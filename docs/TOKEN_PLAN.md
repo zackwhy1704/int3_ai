@@ -509,7 +509,7 @@ memory:
 
 agent:
   disabled_toolsets:
-    - skill_manage            # prevent the agent from creating/editing skills
+    - skills                  # disable the entire "skills" toolset (see bug note below)
 
 database:
   journal_mode: delete        # no WAL; simpler cleanup on sign-out
@@ -521,7 +521,7 @@ database:
 |---|---|---|
 | `memory.memory_enabled: false` | `get_builtin_memory_store_flags()` returns `(False, ...)` — MEMORY.md is never loaded or written | `tools/memory_tool.py:297-300` |
 | `memory.user_profile_enabled: false` | `get_builtin_memory_store_flags()` returns `(..., False)` — USER.md is never loaded or written | `tools/memory_tool.py:297-300` |
-| `agent.disabled_toolsets: [skill_manage]` | The `skill_manage` tool is removed from the agent's tool list; it cannot create, edit, or delete skills | `hermes_cli/config_defaults.py:279` — `"disabled_toolsets": []`; `acp_adapter/session.py:528-529` — subtracted at tool granularity |
+| `agent.disabled_toolsets: [skills]` | Disables the entire `skills` toolset: `skills_list`, `skill_view`, `skill_manage` (see correction note below) | `toolsets.py:103-107` — toolset definition; `model_tools.py:282-309` — `_apply_toolset_selection` |
 | `database.journal_mode: delete` | `resolve_journal_mode()` returns `"delete"` — no WAL files; state.db is a single file, easy to wipe | `hermes_state_wal.py:157-167`; `hermes_cli/config_defaults.py:43-46` |
 
 **Lifecycle:**
@@ -533,3 +533,61 @@ database:
   model provider and brain MCP config (§5).
 - The bundled skill set (read-only, shipped with the app) remains available;
   only user-created skills are blocked via `disabled_toolsets`.
+
+### §12 Bug correction: `skill_manage` is a tool, not a toolset
+
+**Bug:** The original `disabled_toolsets: [skill_manage]` silently does nothing.
+`_apply_toolset_selection` (`model_tools.py:286-309`) calls `validate_toolset(name)`
+(line 287); when validation fails it checks `_LEGACY_TOOLSET_MAP` (line 303); if
+neither matches it prints `"Unknown toolset: skill_manage"` (line 308) and
+`continue`s — the tool is never removed.
+
+`skill_manage` is a **tool** inside the `skills` **toolset**, defined at
+`toolsets.py:103-107`:
+
+```python
+"skills": _ts(
+    "Access, create, edit, and manage skill documents ...",
+    ["skills_list", "skill_view", "skill_manage"],
+),
+```
+
+**Option (i): `disabled_toolsets: [skills]`** — disables the entire toolset.
+All three tools are removed: `skills_list`, `skill_view`, `skill_manage`.
+The agent cannot list, view, or create/edit skills. This is the broadest
+(and simplest) fix.
+
+**Option (ii): per-tool disable** — hermes has no `disabled_tools` config key.
+There is no supported mechanism to remove a single tool from a toolset while
+keeping the others via config. A per-tool block would require a code change
+(adding a `disabled_tools` list to `_select_tool_names` in `model_tools.py`),
+or a runtime whitelist approach similar to what the background review agent
+uses (`hermes_cli/plugins.py:set_thread_tool_whitelist`).
+
+### Background review agent and skill creation
+
+The background review agent **can call `skill_manage`**. Its runtime whitelist
+(enforced via `set_thread_tool_whitelist`, tested at
+`tests/agent/test_background_review_toolset_restriction.py:88-141`) explicitly
+includes `skill_manage`, `skill_view`, `skills_list`, `memory`, `read_file`,
+and `search_files`. It blocks `terminal`, `write_file`, `send_message`,
+`delegate_task`, and other dangerous tools.
+
+This means even with `disabled_toolsets: [skills]`, the background review
+agent inherits the parent's toolset config
+(`tests/agent/test_background_review_toolset_restriction.py:57-85`) — so
+`disabled_toolsets: [skills]` would strip skills from the parent **and** the
+background review fork's schema. However, the runtime whitelist is a separate
+gate (`agent/background_review.py:1105-1119`); whether the schema-level
+removal fully prevents background skill creation needs verification.
+
+**STOP — owner decision required:**
+
+1. Is disabling all three skill tools (option i) acceptable, or must
+   `skills_list`/`skill_view` remain available for read-only access to
+   bundled skills?
+2. If read-only access is needed, a code change is required (no existing
+   per-tool disable config exists). Should we implement `disabled_tools`?
+3. Confirm that the background review agent's `disabled_toolsets` inheritance
+   (via parent config passthrough) is sufficient to prevent skill creation
+   in background review forks.

@@ -7,11 +7,14 @@ accept pilot's session cookie (same as /api/ask). Bearer token support comes
 in Phase B.
 
 Endpoints:
-  POST /v1/search         — semantic search, CURRENT claims only, with previous
-                            value when superseded, cross-encoder refusal gate
+  POST /v1/brain_ask      — PRIMARY tool: full passage-level Q&A pipeline with
+                            structured citations ([claim:N]), refusal gate, and
+                            retrieval binding. Use this for answering questions.
+  POST /v1/search         — SECONDARY tool: claim-level semantic search returning
+                            CURRENT claims only, with cross-encoder refusal gate.
+                            Use for browsing/exploring claims, not for answering.
   GET  /v1/claims/{id}    — single claim with supersede metadata
   GET  /v1/sources        — document sources accessible to the user
-  POST /v1/brain_ask      — the /api/ask pipeline for agent use
   POST /v1/validate       — retrieval-bound citation check (A4)
 
 Deleted vs main:
@@ -162,15 +165,11 @@ def search(
     body: SearchRequest, p: Principal = Depends(csrf_protected)
 ) -> SearchResponse:
     """
-    Semantic search returning CURRENT claims only, with cross-encoder refusal gate.
+    Secondary tool: claim-level semantic search. Use brain_ask for answering questions.
 
-    Returns only claims where superseded_by IS NULL (current truth).
-    When a current claim replaced an older one, the older claim's value is
-    included as previousValue so the caller knows what changed without being
-    told to cite an ID they were not shown.
-
-    A retrieval_id is returned; use it with POST /v1/validate to check
-    that cited claim IDs came from this retrieval (structural citation invariant).
+    Returns CURRENT claims only (superseded_by IS NULL), with cross-encoder
+    refusal gate. When a current claim replaced an older one, previousValue
+    is included. Returns a retrieval_id for use with POST /v1/validate.
 
     Security: scope filter is in the SQL WHERE clause (enforced server-side,
     tested by test_v1_brain_id_not_in_principal_scopes_returns_404,
@@ -392,10 +391,13 @@ def list_sources(
 def brain_ask(
     body: BrainAskRequest, p: Principal = Depends(csrf_protected)
 ) -> BrainAskResponse:
-    """Run the full /api/ask pipeline and return the result with a retrieval_id.
+    """Primary tool: passage-level Q&A with structured citations.
 
-    Identical to POST /api/ask but at the /v1/ prefix and returns retrieval_id
-    for use with POST /v1/validate (structural citation invariant, A4).
+    Runs the full retrieval-augmented pipeline (embed → search → rerank →
+    refusal gate → LLM answer with [claim:N] citations). Returns a
+    retrieval_id for POST /v1/validate (structural citation invariant).
+    Use this endpoint for answering questions; use /v1/search only for
+    browsing individual claims.
 
     Security: claim_ids recorded are ALL retrieved claim IDs (before model
     selection), not just the model's cited claims. This ensures validate() can

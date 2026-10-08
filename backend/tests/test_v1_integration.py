@@ -240,6 +240,57 @@ def test_v1_validate_cross_tenant(client, as_user):
 
 
 @pytest.mark.integration
+def test_v1_retrieval_chunks_all_in_scope(client, as_user):
+    """Every chunk_id in a retrieval record belongs to the principal's scopes.
+
+    A finance-related query may match finance-scoped chunks in the embedding
+    space. The WHERE c.scope_id = ANY(%(scopes)s) clause must exclude them
+    before reranking, so they never enter the retrieval record.
+
+    This test reads the control DB retrieval row and verifies each chunk_id
+    has a scope_id in priya's scope list.
+
+    FAIL-WITHOUT-FIX: neutralising the /v1/search WHERE clause lets
+    finance-scoped chunks enter reranking and the retrieval record, which
+    flips refused→not-refused for a finance-only query (side channel).
+    """
+    from app.db import control_conn, tenant_conn
+
+    resp = client.post(
+        "/v1/search",
+        json={"query": "payment terms finance annual contract"},
+        headers=as_user("priya"),
+    )
+    assert resp.status_code == 200
+    rid = resp.json()["retrieval_id"]
+
+    with control_conn() as conn:
+        row = conn.execute(
+            "SELECT chunk_ids FROM retrievals WHERE id = %s", (rid,)
+        ).fetchone()
+    assert row is not None, f"retrieval {rid} not found in control DB"
+    chunk_ids = row["chunk_ids"]
+
+    if not chunk_ids:
+        return
+
+    priya_scopes_resp = client.get("/v1/sources", headers=as_user("priya"))
+    priya_scope_ids = {s["scope"] for s in priya_scopes_resp.json()}
+
+    with tenant_conn("brindlewood") as tconn:
+        rows = tconn.execute(
+            "SELECT id, scope_id FROM chunks WHERE id = ANY(%s)", (chunk_ids,)
+        ).fetchall()
+
+    for r in rows:
+        assert r["scope_id"] in priya_scope_ids, (
+            f"Chunk {r['id']} has scope_id={r['scope_id']} which is not in "
+            f"priya's scopes {priya_scope_ids}. Out-of-scope chunks entered "
+            "reranking/retrieval — the WHERE clause filter is broken."
+        )
+
+
+@pytest.mark.integration
 def test_v1_search_cross_scope_real(client, as_user):
     """User with scope [company-wide, operations] does not see finance-scoped content.
 
