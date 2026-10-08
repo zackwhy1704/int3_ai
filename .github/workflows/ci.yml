@@ -136,6 +136,8 @@ jobs:
           APP_CONTROL_PASSWORD=ci-test-password
           ADMIN_DB_PASSWORD=ci-admin-password
           TENANT_DB_KEY=ci-tenant-key-32chars-padded-here
+          MOCK_OIDC_URL=http://mock-oidc:8080
+          MOCK_OIDC_PUBLIC_URL=http://mock-oidc:8080
           EOF
 
       - name: Build and start pilot services
