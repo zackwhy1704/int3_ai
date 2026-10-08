@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "authcore"
+version = "0.1.0"
+description = "Shared RS256 JWT verifier for Company Brain services (authlib-based)."
+requires-python = ">=3.11"
+dependencies = [
+    # authlib>=1.6.0 ships joserfc as its JWT backend; we depend on authlib for
+    # the package but use joserfc directly for the RS256 operations (D3).
+    "authlib>=1.6.0",
+    "joserfc>=1.0.0",
+    "httpx>=0.28.0",
+    "cryptography>=44.0.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["authcore*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+markers = [
+    "unit: marks tests as unit tests (no external deps)",
+]
