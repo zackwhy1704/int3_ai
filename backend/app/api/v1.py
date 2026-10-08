@@ -154,7 +154,7 @@ _PREV_VALUE_SQL = """
 
 
 @router.post("/search", response_model=SearchResponse)
-def search(body: SearchRequest, p: Principal = Depends(principal)) -> SearchResponse:
+def search(body: SearchRequest, p: Principal = Depends(csrf_protected)) -> SearchResponse:
     """
     Semantic search returning CURRENT claims only, with cross-encoder refusal gate.
 
@@ -167,8 +167,9 @@ def search(body: SearchRequest, p: Principal = Depends(principal)) -> SearchResp
     that cited claim IDs came from this retrieval (structural citation invariant).
 
     Security: scope filter is in the SQL WHERE clause (enforced server-side,
-    tested by test_v1_cross_tenant_search_returns_404,
-    test_v1_cross_scope_search_excluded).
+    tested by test_v1_brain_id_not_in_principal_scopes_returns_404,
+    test_v1_cross_scope_excluded_unit, test_v1_search_cross_tenant_excluded,
+    test_v1_search_cross_scope_real).
     Refusal gate: cross-encoder threshold = REFUSE_THRESHOLD = 0 (measured;
     tested by test_v1_refusal_gate_applied).
     """
@@ -193,6 +194,7 @@ def search(body: SearchRequest, p: Principal = Depends(principal)) -> SearchResp
             cl.condition    AS condition,
             cl.valid_from   AS as_of,
             cl.superseded_by AS superseded_by,
+            cl.scope_id     AS scope_id,
             d.id            AS doc_id,
             d.title         AS doc_title,
             d.source        AS source,
@@ -224,7 +226,7 @@ def search(body: SearchRequest, p: Principal = Depends(principal)) -> SearchResp
                 "chunk_id": cid,
                 "doc_title": row["doc_title"],
                 "text": row["chunk_text"] or "",
-                "scope": row.get("scope_id", ""),
+                "scope": row["scope_id"] or "",
                 "document_id": row["doc_id"],
                 "source": row["source"],
                 "owner": row["owner"],
@@ -381,6 +383,17 @@ def brain_ask(body: BrainAskRequest, p: Principal = Depends(csrf_protected)) -> 
 
     Identical to POST /api/ask but at the /v1/ prefix and returns retrieval_id
     for use with POST /v1/validate (structural citation invariant, A4).
+
+    Security: claim_ids recorded are ALL retrieved claim IDs (before model
+    selection), not just the model's cited claims. This ensures validate() can
+    check any claim the model might cite. Tested by:
+      test_brain_ask_retrieval_validates_own_citations — cited claims are valid
+      test_brain_ask_retrieval_rejects_foreign_claim  — non-retrieved claim is invalid
+    FAIL-WITHOUT-FIX: if we used result.get("citations") chunk_ids instead of
+    retrieved_claim_ids, the retrieval set would only contain model-cited chunks;
+    a claim from a retrieved-but-not-cited chunk would be rejected even though it
+    came from a legitimate retrieval. The test_brain_ask_retrieval_validates_own_citations
+    test would catch this by checking claims from the full retrieved set.
     """
     scopes = p.resolve(body.brain_id)
     try:
@@ -392,16 +405,17 @@ def brain_ask(body: BrainAskRequest, p: Principal = Depends(csrf_protected)) -> 
             "answer to this question for your access to fall back on.",
         )
 
-    # Extract claim IDs and chunk IDs from the answer for retrieval recording.
-    claim_ids: list[int] = []
-    chunk_ids: list[int] = []
-    for citation in result.get("citations", []) or []:
-        if "chunk_id" in citation:
-            chunk_ids.append(citation["chunk_id"])
-    for fact in result.get("facts", []) or []:
-        # facts come from the claims table, but we don't have claim IDs in the
-        # standard answer output; use chunk_ids as a reasonable approximation.
-        pass
+    # Use ALL retrieved claim IDs (before model selection), not just cited ones.
+    # answer_mod.ask passes through retrieved_claim_ids and retrieved_chunk_ids
+    # from answer_live (S4). On a cached answer these may be absent; fall back to
+    # extracting chunk IDs from citations (cached answer has the model's cited set).
+    claim_ids: list[int] = result.get("retrieved_claim_ids") or []
+    chunk_ids: list[int] = result.get("retrieved_chunk_ids") or []
+    if not chunk_ids:
+        # Cached answer path — extract chunk IDs from citations as best-effort.
+        for citation in result.get("citations", []) or []:
+            if "chunk_id" in citation:
+                chunk_ids.append(citation["chunk_id"])
 
     rid = _record_retrieval(p.session_id, p.tenant_id, claim_ids, chunk_ids)
 
@@ -431,7 +445,7 @@ def brain_ask(body: BrainAskRequest, p: Principal = Depends(csrf_protected)) -> 
 # ---------------------------------------------------------------------------
 
 @router.post("/validate", response_model=ValidateResponse)
-def validate(body: ValidateRequest, p: Principal = Depends(principal)) -> ValidateResponse:
+def validate(body: ValidateRequest, p: Principal = Depends(csrf_protected)) -> ValidateResponse:
     """Check that claim IDs came from a previous retrieval by this principal.
 
     The retrieval must:

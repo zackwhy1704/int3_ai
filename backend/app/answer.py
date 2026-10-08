@@ -38,11 +38,21 @@ def _fact(row: dict) -> dict:
             "chunk_id": row["chunk_id"], "doc_title": row["doc_title"]}
 
 
-def facts(conn, chunk_ids: list[int], scopes: list[str]) -> list[dict]:
+def facts(conn, chunk_ids: list[int], scopes: list[str]) -> tuple[list[dict], list[int]]:
     """Current claims touched by these chunks, each with its predecessor if any.
 
     A superseded claim in a chunk is followed forward to the current one. Every
-    lookup is filtered by the asker's scopes, like retrieval."""
+    lookup is filtered by the asker's scopes, like retrieval.
+
+    Returns (fact_list, claim_ids_list).
+    claim_ids_list contains ALL claim IDs retrieved from the DB for these chunks
+    (before model selection). This is used to record the retrieval in brain_ask
+    so that validate can check citations against the full retrieved set (S4).
+
+    Security invariant: claim_ids are from the DB query with scope filter, never
+    from the model output (tested by test_brain_ask_retrieval_validates_own_citations,
+    test_brain_ask_retrieval_rejects_foreign_claim).
+    """
     def one(where: str, **params) -> dict | None:
         return conn.execute(FACT_SQL.format(where=where), {"scopes": scopes, **params}).fetchone()
 
@@ -62,7 +72,9 @@ def facts(conn, chunk_ids: list[int], scopes: list[str]) -> list[dict]:
             "condition": head["condition"], "scope": head["scope_id"],
             "current": _fact(head), "previous": _fact(prev) if prev else None,
         })
-    return sorted(result, key=lambda f: (f["subject"], f["attribute"], f["condition"] or ""))
+    sorted_result = sorted(result, key=lambda f: (f["subject"], f["attribute"], f["condition"] or ""))
+    # Return all retrieved claim IDs (the keys of heads), not just cited ones.
+    return sorted_result, list(heads.keys())
 
 
 def ledger_text(fs: list[dict]) -> str:
@@ -137,15 +149,21 @@ def answer_live(conn, question: str, scopes: list[str]) -> dict:
     if not context:
         return refusal(hits[0] if hits else None)
 
+    context_chunk_ids = [h["chunk_id"] for h in context]
+
     passages = "\n\n".join(
         f"[id {h['chunk_id']}] {h['doc_title']} ({h['source']}, {h['effective_date']})\n{h['text']}"
         for h in context
     )
-    ledger = ledger_text(facts(conn, [h["chunk_id"] for h in context], scopes))
+    # facts() now returns (fact_list, claim_ids_list). We compute the full retrieved
+    # claim set here (before the model) so brain_ask can record ALL retrieved claim IDs,
+    # not just the model's citations (security invariant: S4).
+    ledger_facts, retrieved_claim_ids = facts(conn, context_chunk_ids, scopes)
+    ledger = ledger_text(ledger_facts)
     out = llm.structured(
         SYSTEM,
         f"Passages:\n\n{passages}\n\nFact ledger:\n{ledger}\n\nQuestion: {question}",
-        answer_schema([h["chunk_id"] for h in context]),
+        answer_schema(context_chunk_ids),
     )
 
     by_id = {h["chunk_id"]: h for h in context}
@@ -156,6 +174,8 @@ def answer_live(conn, question: str, scopes: list[str]) -> dict:
         return refusal(context[0])
     if not out["supported"] or not cited:
         return refusal(context[0])
+
+    cited_facts, _ = facts(conn, cited, scopes)
 
     return {
         "refused": False,
@@ -169,5 +189,10 @@ def answer_live(conn, question: str, scopes: list[str]) -> dict:
         ],
         "answered_from": sorted({by_id[c]["scope"] for c in cited}),
         # From the claims table, not from the model: what is current, and what it replaced.
-        "facts": facts(conn, cited, scopes),
+        "facts": cited_facts,
+        # ALL claim IDs from retrieval (before model selection). Used by brain_ask to
+        # record the full retrieved set so validate can check any cited claim (S4).
+        "retrieved_claim_ids": retrieved_claim_ids,
+        # All retrieved chunk IDs (for the retrieval record).
+        "retrieved_chunk_ids": context_chunk_ids,
     }
