@@ -2,10 +2,10 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Copy shared libs first (authcore) so gateway can import authcore.verifier.
+# Copy shared authcore package (not entire libs/ to avoid test files).
 # Build context must be the repo root (context: . in docker-compose.yml).
-COPY libs/ /app/libs/
-RUN pip install --no-cache-dir -e libs/authcore
+COPY libs/authcore/ /app/libs/authcore/
+RUN pip install --no-cache-dir /app/libs/authcore
 
 COPY gateway/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt

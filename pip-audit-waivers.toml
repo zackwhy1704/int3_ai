@@ -5,134 +5,95 @@
 # CI uses this file to skip known-waived IDs.
 
 # --- starlette ---
-# fastapi 0.115.14 (latest 0.115.x) requires starlette>=0.40.0,<0.47.0.
-# The starlette advisories below require >=0.47.2 / >=0.49.1 / >=1.0.1 / >=1.1.0 / >=1.3.0 / >=1.3.1.
-# Upgrading fastapi past 0.132.x to drop the <0.47 cap is a major version jump
-# that changes APIs (adds opentelemetry-api, annotated-doc as required deps,
-# drops starlette upper bound). Accepting until the project migrates to fastapi >=0.134.
-
-[[waivers]]
-id = "PYSEC-2026-1941"
-package = "starlette"
-reason = "fastapi 0.115.x pins starlette<0.47; fix requires >=0.47.2; upgrade to fastapi>=0.134 planned"
-
-[[waivers]]
-id = "PYSEC-2026-1942"
-package = "starlette"
-reason = "fastapi 0.115.x pins starlette<0.47; fix requires >=0.49.1; upgrade to fastapi>=0.134 planned"
-
-[[waivers]]
-id = "PYSEC-2026-161"
-package = "starlette"
-reason = "fastapi 0.115.x pins starlette<0.47; fix requires >=1.0.1; upgrade to fastapi>=0.134 planned"
-
-[[waivers]]
-id = "PYSEC-2026-2281"
-package = "starlette"
-reason = "fastapi 0.115.x pins starlette<0.47; fix requires >=1.1.0; upgrade to fastapi>=0.134 planned"
-
-[[waivers]]
-id = "PYSEC-2026-2280"
-package = "starlette"
-reason = "fastapi 0.115.x pins starlette<0.47; fix requires >=1.1.0; upgrade to fastapi>=0.134 planned"
-
-[[waivers]]
-id = "PYSEC-2026-249"
-package = "starlette"
-reason = "fastapi 0.115.x pins starlette<0.47; fix requires >=1.3.1; upgrade to fastapi>=0.134 planned"
-
-[[waivers]]
-id = "PYSEC-2026-248"
-package = "starlette"
-reason = "fastapi 0.115.x pins starlette<0.47; fix requires >=1.3.0; upgrade to fastapi>=0.134 planned"
+# REMOVED: fastapi 0.142.x resolves starlette>=1.7.0 (patched). No waivers needed.
 
 # --- pillow ---
 # fastembed 0.4.2 requires pillow<11.0.0,>=10.3.0.
 # The pillow advisories below require >=12.1.1 / >=12.2.0 / >=12.3.0.
-# pillow is used only for image preprocessing in fastembed (embedding model);
-# it does NOT process untrusted user uploads in the backend.
+# Text-only models (bge-small, ms-marco-MiniLM); no image decode path reachable.
+# fastembed upgrade requires re-running app.calibrate and supersede_eval.
 
 [[waivers]]
 id = "PYSEC-2026-2249"
 package = "pillow"
-reason = "fastembed 0.4.2 pins pillow<11; fix requires >=12.1.1; pillow only used for embedding model preprocessing, not user uploads"
+reason = "text-only models (bge-small, ms-marco-MiniLM); no image decode path reachable. fastembed upgrade requires re-running app.calibrate and supersede_eval."
 
 [[waivers]]
 id = "PYSEC-2026-2250"
 package = "pillow"
-reason = "fastembed 0.4.2 pins pillow<11; fix requires >=12.2.0"
+reason = "text-only models (bge-small, ms-marco-MiniLM); no image decode path reachable. fastembed upgrade requires re-running app.calibrate and supersede_eval."
 
 [[waivers]]
 id = "PYSEC-2026-165"
 package = "pillow"
-reason = "fastembed 0.4.2 pins pillow<11; fix requires >=12.2.0"
+reason = "text-only models (bge-small, ms-marco-MiniLM); no image decode path reachable. fastembed upgrade requires re-running app.calibrate and supersede_eval."
 
 [[waivers]]
 id = "PYSEC-2026-2874"
 package = "pillow"
-reason = "fastembed 0.4.2 pins pillow<11; fix requires >=12.2.0"
+reason = "text-only models (bge-small, ms-marco-MiniLM); no image decode path reachable. fastembed upgrade requires re-running app.calibrate and supersede_eval."
 
 [[waivers]]
 id = "PYSEC-2026-2252"
 package = "pillow"
-reason = "fastembed 0.4.2 pins pillow<11; fix requires >=12.2.0"
+reason = "text-only models (bge-small, ms-marco-MiniLM); no image decode path reachable. fastembed upgrade requires re-running app.calibrate and supersede_eval."
 
 [[waivers]]
 id = "PYSEC-2026-2253"
 package = "pillow"
-reason = "fastembed 0.4.2 pins pillow<11; fix requires >=12.3.0"
+reason = "text-only models (bge-small, ms-marco-MiniLM); no image decode path reachable. fastembed upgrade requires re-running app.calibrate and supersede_eval."
 
 [[waivers]]
 id = "PYSEC-2026-2254"
 package = "pillow"
-reason = "fastembed 0.4.2 pins pillow<11; fix requires >=12.3.0"
+reason = "text-only models (bge-small, ms-marco-MiniLM); no image decode path reachable. fastembed upgrade requires re-running app.calibrate and supersede_eval."
 
 [[waivers]]
 id = "PYSEC-2026-2255"
 package = "pillow"
-reason = "fastembed 0.4.2 pins pillow<11; fix requires >=12.3.0"
+reason = "text-only models (bge-small, ms-marco-MiniLM); no image decode path reachable. fastembed upgrade requires re-running app.calibrate and supersede_eval."
 
 [[waivers]]
 id = "PYSEC-2026-2256"
 package = "pillow"
-reason = "fastembed 0.4.2 pins pillow<11; fix requires >=12.3.0"
+reason = "text-only models (bge-small, ms-marco-MiniLM); no image decode path reachable. fastembed upgrade requires re-running app.calibrate and supersede_eval."
 
 [[waivers]]
 id = "PYSEC-2026-2257"
 package = "pillow"
-reason = "fastembed 0.4.2 pins pillow<11; fix requires >=12.3.0"
+reason = "text-only models (bge-small, ms-marco-MiniLM); no image decode path reachable. fastembed upgrade requires re-running app.calibrate and supersede_eval."
 
 [[waivers]]
 id = "PYSEC-2026-3451"
 package = "pillow"
-reason = "fastembed 0.4.2 pins pillow<11; fix requires >=12.3.0"
+reason = "text-only models (bge-small, ms-marco-MiniLM); no image decode path reachable. fastembed upgrade requires re-running app.calibrate and supersede_eval."
 
 [[waivers]]
 id = "PYSEC-2026-3453"
 package = "pillow"
-reason = "fastembed 0.4.2 pins pillow<11; fix requires >=12.3.0"
+reason = "text-only models (bge-small, ms-marco-MiniLM); no image decode path reachable. fastembed upgrade requires re-running app.calibrate and supersede_eval."
 
 [[waivers]]
 id = "PYSEC-2026-3454"
 package = "pillow"
-reason = "fastembed 0.4.2 pins pillow<11; fix requires >=12.3.0"
+reason = "text-only models (bge-small, ms-marco-MiniLM); no image decode path reachable. fastembed upgrade requires re-running app.calibrate and supersede_eval."
 
 [[waivers]]
 id = "PYSEC-2026-3493"
 package = "pillow"
-reason = "fastembed 0.4.2 pins pillow<11; fix requires >=12.3.0"
+reason = "text-only models (bge-small, ms-marco-MiniLM); no image decode path reachable. fastembed upgrade requires re-running app.calibrate and supersede_eval."
 
 [[waivers]]
 id = "PYSEC-2026-3494"
 package = "pillow"
-reason = "fastembed 0.4.2 pins pillow<11; fix requires >=12.3.0"
+reason = "text-only models (bge-small, ms-marco-MiniLM); no image decode path reachable. fastembed upgrade requires re-running app.calibrate and supersede_eval."
 
 [[waivers]]
 id = "PYSEC-2026-3495"
 package = "pillow"
-reason = "fastembed 0.4.2 pins pillow<11; fix requires >=12.3.0"
+reason = "text-only models (bge-small, ms-marco-MiniLM); no image decode path reachable. fastembed upgrade requires re-running app.calibrate and supersede_eval."
 
 [[waivers]]
 id = "PYSEC-2026-3496"
 package = "pillow"
-reason = "fastembed 0.4.2 pins pillow<11; fix requires >=12.3.0"
+reason = "text-only models (bge-small, ms-marco-MiniLM); no image decode path reachable. fastembed upgrade requires re-running app.calibrate and supersede_eval."

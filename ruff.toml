@@ -1,0 +1,3 @@
+[lint.per-file-ignores]
+"backend/**" = ["B008"]  # FastAPI Depends() in function defaults is idiomatic
+"gateway/**" = ["B008"]
