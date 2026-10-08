@@ -169,56 +169,90 @@ the control DB. A revoked token returns 401 immediately, before any tenant DB qu
 tenant_id, or revoked jti) is rejected before any DB query. Tested by the cross-tenant
 suite (test_db_boundary, test_tenancy) run through this path.
 
+### Retrieval binding for bearer callers
+
+Bearer callers (desktop) do not have a `session_id` (no server-side session cookie).
+Instead, the control DB `retrievals` table uses a `token_family_id` column:
+
+```sql
+ALTER TABLE retrievals ADD COLUMN token_family_id text;
+```
+
+- `token_family_id` is the per-device/family id issued at first login (a stable UUID
+  stored in the `desktop_tokens` row, carried as a custom claim in the access token).
+- The retrieval must match `token_family_id == <from-access-token>`.
+- This means: a retrieval from device A cannot be validated from device B (even if both
+  are signed in as the same user). Revocation of one device's refresh token family also
+  invalidates that device's past retrievals.
+- Session-cookie callers (web) continue to use `session_id` (existing behavior); the
+  column is nullable for backward compatibility.
+
 ---
 
-## 5. Long-running agent token refresh
+## 5. Long-running agent token refresh — loopback proxy design
 
-The Tauri app mediates all token operations. Hermes never holds a refresh token.
+**Key insight:** Hermes is an unmodified Python process. It cannot call Tauri IPC.
+The solution is a Tauri-owned HTTP proxy that runs on `127.0.0.1:<random-port>`.
+
+### Overview
+
+Hermes never holds a real token. Instead, the Tauri app runs a tiny HTTP proxy on
+`127.0.0.1:<random-port>` (chosen at startup, communicated to Hermes via process env).
+Hermes's `model.base_url` and brain MCP `url` point at the proxy. Hermes authenticates
+to the proxy with a per-launch secret (≥16 chars of random base64, passed via process
+env — HERMES_PROXY_KEY: to be confirmed against hermes_constants.py before implementation).
 
 ### Architecture
 ```
-Hermes (Python) <--IPC--> Tauri command: get_access_token()
-                                          |
-                                     [check expiry]
-                                          |
-                              expires in <2 min?
-                             /                   \
-                          No                     Yes
-                    return cached         POST /api/auth/desktop/refresh
-                    access token          with refresh_token (keyring)
-                                                |
-                                         rotate refresh token,
-                                         issue new access token,
-                                         store both in keyring
-                                         return new access token
+Hermes (Python)
+  model.base_url = http://127.0.0.1:<port>
+  brain MCP url  = http://127.0.0.1:<port>
+        |
+        | POST /v1/chat/completions
+        | Authorization: Bearer <per-launch-secret>
+        |
+        v
+Tauri loopback proxy (127.0.0.1:<port>)
+  1. Verify per-launch secret (constant-time compare)
+  2. Replace Authorization header with Bearer <access-token>
+  3. Forward to real gateway (streaming)
+        |
+        v
+  Gateway  (POST /v1/chat/completions)
+  Authorization: Bearer <access-token>  ← real JWT, 15-min expiry
 ```
 
-### Tauri command: `get_access_token`
-- Reads the current access token from the OS keyring.
-- Decodes the `exp` claim from the JWT header (no signature verification needed here;
-  the server will verify).
-- If `exp - now() < 120s` (2 minutes), calls `POST /api/auth/desktop/refresh`.
-- Refresh call sends the refresh token (from keyring) and receives a new access token
-  + new refresh token.
-- Stores both in keyring, returns the new access token.
+### Proxy operation
 
-### Refresh endpoint: `POST /api/auth/desktop/refresh`
-```json
-{ "refresh_token": "<opaque>" }
-```
-- Verifies the refresh token in `desktop_tokens` (by SHA-256 lookup).
-- Checks `exp > now()` and `used_at IS NULL`.
-- Marks `used_at = now()` and inserts a new `desktop_tokens` row (rotation).
-- Issues a new access token (new `jti`, exp = now() + 15 min).
-- Returns `{access_token, refresh_token, expires_in}`.
+- **Hermes → proxy:** `POST /v1/chat/completions` with
+  `Authorization: Bearer <per-launch-secret>`
+- **Proxy verifies** the per-launch secret (constant-time compare)
+- **Proxy attaches the current access token:** replaces the Authorization header with
+  `Bearer <access-token>`
+- **Proxy forwards** to the real gateway; streams the response back
 
-### Sign-in required event
-If `POST /api/auth/desktop/refresh` returns 401 (refresh token revoked, expired, or
-rotated away by another device):
-1. The Tauri app emits a Tauri event: `sign-in-required`.
-2. The React UI listens for this event and shows a sign-in modal.
-3. Hermes receives a special response from `get_access_token` indicating unavailability
-   and stops making requests until the modal is dismissed and a new token is stored.
+### Token lifecycle in the proxy
+
+- The proxy holds the access token (15-min JWT) and the opaque refresh token in
+  **memory only** (never written to disk, never passed to Hermes —
+  tested by: *[name the test that will prove this in Phase B — to be added to
+  test_token_proxy.py before implementation]*)
+- When `exp - now < 120s`, the proxy fetches a fresh access token using the refresh
+  token before forwarding the next request
+- If the refresh token is expired or revoked, the proxy returns 401 to Hermes (Hermes
+  stops making requests), and the Tauri app emits a `sign-in-required` event to the UI
+
+### Sign-out
+
+- The Tauri app calls the revocation endpoint, clears the OS credential store, and
+  stops the proxy
+- Hermes's next request gets a 503 ("proxy shutting down")
+
+### MCP brain tool
+
+- The brain MCP server also points at the proxy (same `127.0.0.1:<port>`)
+- The brain server uses the same per-launch secret for authentication
+- The proxy routes `/v1/` calls to the backend and `/v1/chat/completions` to the gateway
 
 ---
 
@@ -347,6 +381,22 @@ Before Phase B begins:
    Some client IT policies block non-standard ports. (Suggested: random in 49152–65535,
    with a fallback to a fixed port if the random one is taken.)
 
-5. **Token format for Hermes IPC:** Hermes calls the Tauri `get_access_token` command.
-   This is an in-process call with no network round-trip, so the token is only in memory
-   during the Hermes request. Is this acceptable to the security review?
+5. **Token format for Hermes IPC:** ~~Hermes calls the Tauri `get_access_token` command.~~
+   **SUPERSEDED by §5 loopback proxy design (S6).** Hermes never calls Tauri IPC;
+   it speaks HTTP to the loopback proxy. The proxy holds the token in memory and
+   refreshes it before forwarding. Open question resolved: Hermes IPC mechanism is
+   the loopback proxy, not a direct Tauri command.
+
+---
+
+## 11. Owner decisions recorded
+
+The following decisions were made by the owner and recorded here for traceability.
+
+| Decision | Value | Source |
+|---|---|---|
+| Multi-device | **Yes** — one refresh token family per device, each independently revocable | HANDOFF §4 item 4 |
+| Refresh cap | **8 hours** (daily sign-in; owner accepted this) | HANDOFF §4 item 4 |
+| Loopback port | **Random ephemeral** (49152–65535); deep link preferred (`companybrain://` in tauri.conf.json); loopback is the fallback | §1 loopback fallback |
+| Hermes IPC mechanism | **Loopback proxy** (replaces the Tauri `get_access_token` command described in the original §5) | §5 this document |
+| Token family binding | **token_family_id** per device in the `retrievals` table; bearer callers do not use `session_id` | §4 retrieval binding |
