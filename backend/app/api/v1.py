@@ -212,7 +212,7 @@ def search(
         LEFT JOIN claims cl ON cl.source_chunk_id = c.id
                             AND cl.superseded_by IS NULL
                             AND cl.scope_id = ANY(%(scopes)s)
-        WHERE c.scope_id = ANY(%(scopes)s)
+        WHERE TRUE
         ORDER BY c.embedding <=> %(vec)s
         LIMIT %(k)s
         """,
