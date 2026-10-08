@@ -243,18 +243,26 @@ def test_v1_validate_cross_tenant(client, as_user):
 def test_v1_retrieval_chunks_all_in_scope(client, as_user):
     """Every chunk_id in a retrieval record belongs to the principal's scopes.
 
-    A finance-related query may match finance-scoped chunks in the embedding
-    space. The WHERE c.scope_id = ANY(%(scopes)s) clause must exclude them
-    before reranking, so they never enter the retrieval record.
+    Precondition: brindlewood has finance-scoped chunks that priya cannot see.
+    The WHERE c.scope_id = ANY(%(scopes)s) clause must exclude them before
+    reranking, so they never enter the retrieval record.
 
-    This test reads the control DB retrieval row and verifies each chunk_id
-    has a scope_id in priya's scope list.
-
-    FAIL-WITHOUT-FIX: neutralising the /v1/search WHERE clause lets
-    finance-scoped chunks enter reranking and the retrieval record, which
-    flips refused→not-refused for a finance-only query (side channel).
+    FAIL-WITHOUT-FIX: neutralising the WHERE clause to WHERE TRUE lets
+    finance-scoped chunks into the embedding search, cross-encoder reranking,
+    and the retrieval record. The scope check below catches them.
     """
     from app.db import control_conn, tenant_conn
+
+    priya_scopes = {"company-wide", "operations"}
+
+    with tenant_conn("brindlewood") as tconn:
+        finance_n = tconn.execute(
+            "SELECT count(*) AS n FROM chunks WHERE scope_id = 'finance'"
+        ).fetchone()["n"]
+    assert finance_n > 0, (
+        "No finance-scoped chunks in brindlewood seed — "
+        "test cannot verify scope exclusion"
+    )
 
     resp = client.post(
         "/v1/search",
@@ -270,12 +278,10 @@ def test_v1_retrieval_chunks_all_in_scope(client, as_user):
         ).fetchone()
     assert row is not None, f"retrieval {rid} not found in control DB"
     chunk_ids = row["chunk_ids"]
-
-    if not chunk_ids:
-        return
-
-    priya_scopes_resp = client.get("/v1/sources", headers=as_user("priya"))
-    priya_scope_ids = {s["scope"] for s in priya_scopes_resp.json()}
+    assert chunk_ids, (
+        "retrieval chunk_ids is empty — the query should match company-wide "
+        "payment-terms content for priya; if this fires, seed data changed"
+    )
 
     with tenant_conn("brindlewood") as tconn:
         rows = tconn.execute(
@@ -283,9 +289,9 @@ def test_v1_retrieval_chunks_all_in_scope(client, as_user):
         ).fetchall()
 
     for r in rows:
-        assert r["scope_id"] in priya_scope_ids, (
+        assert r["scope_id"] in priya_scopes, (
             f"Chunk {r['id']} has scope_id={r['scope_id']} which is not in "
-            f"priya's scopes {priya_scope_ids}. Out-of-scope chunks entered "
+            f"priya's scopes {priya_scopes}. Out-of-scope chunks entered "
             "reranking/retrieval — the WHERE clause filter is broken."
         )
 
