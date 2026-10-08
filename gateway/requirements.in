@@ -1,0 +1,6 @@
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+httpx>=0.28.0
+# JWT verification via shared authcore package (libs/authcore)
+# authlib is a transitive requirement of authcore
+-e ../libs/authcore

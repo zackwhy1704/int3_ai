@@ -1,0 +1,21 @@
+# Locked dev/test dependencies for the backend service.
+# Generated from requirements-dev.in — do not hand-edit.
+# Test deps are NOT copied into the production image (see Dockerfile).
+# Regenerate: pip-compile requirements-dev.in --output-file requirements-dev.txt
+
+-r requirements.txt
+
+# pytest upgraded past advisory (see RECONCILE.md §4c)
+coverage==7.6.10
+diff-cover==9.2.0
+exceptiongroup==1.2.2
+iniconfig==2.0.0
+mypy==1.13.0
+mypy-extensions==1.0.0
+packaging==24.2
+pluggy==1.5.0
+pytest==8.3.4
+pytest-asyncio==0.24.2
+pytest-cov==6.0.0
+ruff==0.9.0
+tomli==2.2.1

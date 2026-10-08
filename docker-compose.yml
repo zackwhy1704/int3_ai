@@ -66,6 +66,25 @@ services:
     depends_on:
       - backend
 
+  # LLM proxy gateway. GATEWAY_AUTH=none in the dev profile only — see gateway/auth.py.
+  # The gateway refuses to start with GATEWAY_AUTH=none when ENV=production.
+  gateway:
+    build: ./gateway
+    profiles: [dev]
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      ENV: ${ENV:-development}
+      GATEWAY_AUTH: none        # dev only — gateway/auth.py enforces ENV=production guard
+      PORT: "8001"
+      LLM_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-4-6}
+      # ANTHROPIC_API_KEY comes from .env (required in production)
+    ports:
+      - "8001:8001"
+    depends_on:
+      - backend
+
   # Local test identity provider. Development and tests only; the backend refuses
   # to start with MOCK_OIDC_URL set when ENV=production.
   mock-oidc:
