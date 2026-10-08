@@ -4,8 +4,9 @@ Bearer token verification for the gateway.
 GATEWAY_AUTH=none  — pass-through (dev only; must be set explicitly in compose).
                      The gateway REFUSES to start with GATEWAY_AUTH=none when
                      ENV=production (guard in main.py lifespan).
-GATEWAY_AUTH=oidc  — Phase B: full RS256 verification via authcore.verify_async.
-                     Not yet wired; rejects every request until Phase B is complete.
+                     Tested by: test_gateway_auth_none_rejected_in_production.
+GATEWAY_AUTH=oidc  — Full RS256 verification via authcore.verify_async (async,
+                     non-blocking). OIDC_AUDIENCE must be set.
 
 Any other value — 501 Not Implemented (fail safe, not fail open).
 
@@ -27,6 +28,10 @@ log = logging.getLogger("auth")
 GATEWAY_AUTH = os.getenv("GATEWAY_AUTH", "")
 OIDC_AUDIENCE = os.getenv("OIDC_AUDIENCE", "")
 
+# Google JWKS and issuers for Phase B bearer token verification.
+_GOOGLE_JWKS_URL = "https://www.googleapis.com/oauth2/v3/certs"
+_GOOGLE_ISSUERS = ["accounts.google.com", "https://accounts.google.com"]
+
 _security = HTTPBearer(auto_error=False)
 
 
@@ -36,8 +41,9 @@ async def verify_token(
     """
     Returns caller identity on success. Raises 401/501 on failure.
 
-    Phase A: only GATEWAY_AUTH=none is functional (dev compose profile).
-    Phase B: GATEWAY_AUTH=oidc will call authcore.verify_async.
+    GATEWAY_AUTH=none: dev pass-through (blocked in production by lifespan guard).
+    GATEWAY_AUTH=oidc: full RS256 OIDC verification via authcore.verify_async
+                       (async, non-blocking — tested by test_no_blocking_call_in_async_path).
     """
     if GATEWAY_AUTH == "none":
         return "dev"
@@ -45,14 +51,19 @@ async def verify_token(
     if GATEWAY_AUTH == "oidc":
         if not credentials:
             raise HTTPException(status_code=401, detail="Missing Authorization header")
-        # Phase B: wire authcore.verify_async here.
-        raise HTTPException(
-            status_code=501,
-            detail=(
-                "GATEWAY_AUTH=oidc is not yet implemented. "
-                "Bearer token support is planned for Phase B."
-            ),
-        )
+        from authcore.verifier import AuthCoreError, verify_async
+        try:
+            claims = await verify_async(
+                credentials.credentials,
+                OIDC_AUDIENCE,
+                _GOOGLE_JWKS_URL,
+                _GOOGLE_ISSUERS,
+            )
+        except AuthCoreError as exc:
+            log.warning("bearer token rejected: %s", exc.reason)
+            raise HTTPException(status_code=401, detail="Invalid bearer token") from exc
+        # Return the subject claim as the caller identity.
+        return claims.get("sub", "unknown")
 
     # Unknown or unset mode — reject everything (fail safe).
     raise HTTPException(

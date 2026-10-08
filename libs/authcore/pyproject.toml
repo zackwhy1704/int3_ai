@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.backends.legacy:build"
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "authcore"
@@ -8,12 +8,21 @@ version = "0.1.0"
 description = "Shared RS256 JWT verifier for Company Brain services (authlib-based)."
 requires-python = ">=3.11"
 dependencies = [
-    # authlib>=1.6.0 ships joserfc as its JWT backend; we depend on authlib for
-    # the package but use joserfc directly for the RS256 operations (D3).
-    "authlib>=1.6.0",
-    "joserfc>=1.0.0",
+    # authlib>=1.6.12 is the first release without the 7 advisories found in
+    # authlib==1.6.0 (D3 owner decision). joserfc is pinned explicitly because
+    # it is NOT a declared dependency of authlib's distribution metadata; we use
+    # it directly for RS256 operations (verifier.py).
+    "authlib==1.6.12",
+    "joserfc==0.12.0",
     "httpx>=0.28.0",
-    "cryptography>=44.0.0",
+    "cryptography>=44.0.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.0.3",
+    "pytest-asyncio>=0.24.0",
+    "respx>=0.22.0",
 ]
 
 [tool.setuptools.packages.find]

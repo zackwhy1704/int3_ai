@@ -68,8 +68,11 @@ services:
 
   # LLM proxy gateway. GATEWAY_AUTH=none in the dev profile only — see gateway/auth.py.
   # The gateway refuses to start with GATEWAY_AUTH=none when ENV=production.
+  # Build context is repo root so COPY libs/ can reach libs/authcore (S2).
   gateway:
-    build: ./gateway
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
     profiles: [dev]
     env_file:
       - path: .env

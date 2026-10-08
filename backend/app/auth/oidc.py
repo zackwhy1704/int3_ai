@@ -9,6 +9,12 @@ Two provider kinds, with different trust rules for the email claim:
 - microsoft: Entra's email claim is not guaranteed verified and can be user-editable
              ("nOAuth"), so the identity is bound to tid + oid, and the tenant must
              name the Entra tenant (tid) it accepts. Subject = "<tid>:<oid>".
+
+Phase B bearer token path:
+- verify(token, audience) uses authcore.verify_sync (RS256, kid-gated JWKS caching,
+  no HS256, no "none"). Maps AuthCoreError -> LoginRejected.
+- verify_id_token() is the OIDC code-flow path (authlib); unchanged so that
+  test_id_token.py continues to pass unchanged.
 """
 import base64
 import hashlib
@@ -23,6 +29,35 @@ from authlib.jose import JsonWebKey, JsonWebToken
 from authlib.jose.errors import JoseError
 
 from .. import config
+
+# ---------------------------------------------------------------------------
+# Phase B: authcore-based bearer token verification (Google RS256 JWTs).
+#
+# GOOGLE_JWKS_URL and GOOGLE_ISSUERS are the correct values for Google OIDC.
+# verify() is the entry point used by principal.py (Phase B); it does NOT
+# replace verify_id_token() (which handles the OIDC code flow and is tested
+# by test_id_token.py, which must continue to pass unchanged).
+# ---------------------------------------------------------------------------
+from authcore.verifier import AuthCoreError, verify_sync as _authcore_verify_sync  # noqa: E402
+
+GOOGLE_JWKS_URL = "https://www.googleapis.com/oauth2/v3/certs"
+GOOGLE_ISSUERS = ["accounts.google.com", "https://accounts.google.com"]
+
+
+def verify(token: str, audience: str) -> dict:
+    """Verify a Google RS256 bearer token using authcore.
+
+    Returns the verified claims dict on success.
+    Raises LoginRejected on any failure.
+
+    This is the Phase B bearer token path; it uses authcore's kid-gated JWKS
+    cache (no HS256, no 'none', RS256 only). The OIDC code-flow path
+    (verify_id_token) is separate and unchanged.
+    """
+    try:
+        return _authcore_verify_sync(token, audience, GOOGLE_JWKS_URL, GOOGLE_ISSUERS)
+    except AuthCoreError as exc:
+        raise LoginRejected("rejected", f"bearer token invalid: {exc.reason}") from exc
 
 JWT = JsonWebToken(["RS256"])
 LEEWAY_SECONDS = 60

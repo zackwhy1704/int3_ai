@@ -1,6 +1,7 @@
 # Locked dev/test dependencies for the gateway service.
 # Generated from requirements-dev.in — do not hand-edit.
 # Regenerate: pip-compile requirements-dev.in --output-file requirements-dev.txt
+# S3: pytest bumped to 9.0.3 (advisory: pytest<9.0.3).
 
 -r requirements.txt
 
@@ -12,7 +13,7 @@ mypy==1.13.0
 mypy-extensions==1.0.0
 packaging==24.2
 pluggy==1.5.0
-pytest==8.3.4
+pytest==9.0.3
 pytest-asyncio==0.24.2
 pytest-cov==6.0.0
 ruff==0.9.0

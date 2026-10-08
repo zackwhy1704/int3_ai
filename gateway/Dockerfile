@@ -2,11 +2,16 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-COPY requirements.txt .
+# Copy shared libs first (authcore) so gateway can import authcore.verifier.
+# Build context must be the repo root (context: . in docker-compose.yml).
+COPY libs/ /app/libs/
+RUN pip install --no-cache-dir -e libs/authcore
+
+COPY gateway/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy gateway source into /app so absolute imports (from auth, from translate, …) work.
-COPY . .
+COPY gateway/ .
 
 # PORT is injected by Cloud Run; default to 8001 for docker compose.
 ENV PORT=8001

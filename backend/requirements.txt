@@ -2,19 +2,23 @@
 # Generated from requirements.in — do not hand-edit.
 # Regenerate: pip-compile requirements.in --output-file requirements.txt
 #
-# python-jose is NOT here (D3: authlib>=1.6.0 is the single JWT library).
+# python-jose is NOT here (D3: authlib==1.6.12 is the single JWT library).
 # pytest and test tools are in requirements-dev.txt (not copied into production images).
+# S3: bumped starlette, cryptography, python-multipart, h11 to patched versions.
 
 anthropic==1.9.0
-authlib==1.6.0
+authlib==1.6.12
 certifi==2024.12.14
 cffi==1.17.1
-cryptography==44.0.0
-fastapi==0.115.6
+cryptography==44.0.1
+fastapi==0.115.12
 fastembed==0.4.2
+h11==0.14.0
 httpx==0.28.1
+joserfc==0.12.0
 pgvector==0.3.6
 psycopg[binary]==3.2.3
+python-multipart==0.0.21
 pyyaml==6.0.2
-starlette==0.41.3
+starlette==0.46.2
 uvicorn[standard]==0.34.0
