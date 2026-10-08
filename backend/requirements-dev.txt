@@ -2,21 +2,19 @@
 # Generated from requirements-dev.in — do not hand-edit.
 # Test deps are NOT copied into the production image (see Dockerfile).
 # Regenerate: pip-compile requirements-dev.in --output-file requirements-dev.txt
-# S3: pytest bumped to 9.0.3 (advisory: pytest<9.0.3).
+# F1: pytest bumped to 9.1.1, pytest-asyncio to 1.4.0 (0.24.2 does not exist;
+#     0.25.x/0.26.x require pytest<9 which conflicts with the pytest>=9.0.3 advisory).
 
 -r requirements.txt
 
-# pytest upgraded past advisory (see RECONCILE.md §4c)
-coverage==7.6.10
-diff-cover==9.2.0
-exceptiongroup==1.2.2
-iniconfig==2.0.0
-mypy==1.13.0
-mypy-extensions==1.0.0
-packaging==24.2
-pluggy==1.5.0
-pytest==9.0.3
-pytest-asyncio==0.24.2
-pytest-cov==6.0.0
-ruff==0.9.0
-tomli==2.2.1
+coverage==7.16.2
+diff-cover==10.6.0
+iniconfig==2.3.1
+mypy==2.4.0
+mypy-extensions==1.1.0
+packaging==26.3
+pluggy==1.6.0
+pytest==9.1.1
+pytest-asyncio==1.4.0
+pytest-cov==7.1.0
+ruff==0.16.10

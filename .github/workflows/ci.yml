@@ -71,22 +71,34 @@ jobs:
       - name: Install authcore (needed for authcore audit)
         run: pip install -e libs/authcore
 
+      - name: Build waiver flags from pip-audit-waivers.toml
+        id: waivers
+        run: |
+          # Extract all waiver IDs and build --ignore-vuln flags
+          IGNORE_FLAGS=$(python -c "
+          import tomli, pathlib
+          data = tomli.loads(pathlib.Path('pip-audit-waivers.toml').read_text())
+          ids = sorted(set(w['id'] for w in data['waivers']))
+          print(' '.join(f'--ignore-vuln {i}' for i in ids))
+          ")
+          echo "flags=$IGNORE_FLAGS" >> "$GITHUB_OUTPUT"
+
       - name: Audit backend/requirements.txt
-        run: pip-audit -r backend/requirements.txt --desc
+        run: pip-audit -r backend/requirements.txt --desc ${{ steps.waivers.outputs.flags }}
 
       - name: Audit gateway/requirements.txt
-        run: pip-audit -r gateway/requirements.txt --desc
+        run: pip-audit -r gateway/requirements.txt --desc ${{ steps.waivers.outputs.flags }}
 
       - name: Audit backend/requirements-dev.txt
-        run: pip-audit -r backend/requirements-dev.txt --desc
+        run: pip-audit -r backend/requirements-dev.txt --desc ${{ steps.waivers.outputs.flags }}
 
       - name: Audit gateway/requirements-dev.txt
-        run: pip-audit -r gateway/requirements-dev.txt --desc
+        run: pip-audit -r gateway/requirements-dev.txt --desc ${{ steps.waivers.outputs.flags }}
 
       - name: Audit libs/authcore
         run: |
           cd libs/authcore
-          pip-audit --desc
+          pip-audit --desc ${{ steps.waivers.outputs.flags }}
 
   gateway-unit:
     name: Gateway unit tests
