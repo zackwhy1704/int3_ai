@@ -208,8 +208,23 @@ Hermes's `model.base_url` and brain MCP `url` point at the proxy.
    app-owned `config.yaml` (or passes the env var) to the per-launch secret.
    Hermes then sends `Authorization: Bearer <per-launch-secret>` to
    `model.base_url` (the proxy).
-   *Source: `providers/base.py:416-417` — `if api_key: req.add_header("Authorization", f"Bearer {api_key}")`*
+   *Source: `agent/agent_runtime_helpers.py:2240` — `agent._client_kwargs = {"api_key": api_key or agent.api_key, "base_url": effective_base}`*
+   *Source: `agent/agent_runtime_helpers.py:1980` — `create_openai_client(agent, client_kwargs, ...)` constructs an `openai.OpenAI(api_key=..., base_url=...)` client; the SDK sends `Authorization: Bearer {api_key}` on every `POST /chat/completions` request.*
    *Source: `cli-config.yaml.example:111` — `# api_key: "your-key-here"`*
+
+   **Per-launch loopback secret as `model.api_key`:** The Tauri app writes
+   `model.api_key` in the app-owned `config.yaml` to a per-launch random
+   secret (generated at each app startup). This is acceptable because:
+   (a) the secret is only valid on `127.0.0.1` — the proxy binds exclusively
+   to loopback, so the secret cannot authenticate against any remote endpoint;
+   (b) it is rotated on every app launch — a new random value each time;
+   (c) it becomes useless after the app exits (the proxy is gone, and no
+   remote service ever accepted it).
+   The `model` config section does not support `${VAR}` interpolation
+   (that syntax is specific to `mcp_servers` headers — see
+   `tools/mcp_tool_config.py:157`), so the literal secret value is written
+   directly into `config.yaml`. This is safe because the app-owned
+   `HERMES_HOME` directory is wiped on sign-out (see §12).
 
 2. **For MCP tools (brain MCP server):** Hermes reads `headers` from the
    `mcp_servers.<name>` entry in `config.yaml`. Values support `${VAR}`
@@ -477,34 +492,44 @@ app sets to an app-owned directory — see §5 "App-owned HERMES_HOME"):
 | **Auth credentials** | `auth.json` (OAuth tokens for provider auth) | `hermes_constants.py:318` — listed in `_PROFILE_IDENTITY_MARKERS` |
 | **Cache/scratch** | `cache/scratch/` (temporary files, pruned on idle) | `hermes_constants.py:736` |
 
-### Owner decision required: two options
+### Owner decision: Option A (recorded 2026-10-08)
 
-**Option A: Disable/redirect local persistence**
+**Choice:** Option A — disable/redirect local persistence for the pilot.
+Memory and skill learning are disabled; sessions live in the app-owned
+`HERMES_HOME` and are wiped on sign-out.
 
-Set `HERMES_HOME` to a temporary directory (e.g. `%TEMP%\companybrain-hermes-<session>`)
-that is cleared on sign-out. Write a minimal `config.yaml` with only the model provider
-and brain MCP config. Disable features that persist across sessions:
-- State.db: set `database.journal_mode: delete` and accept that session history is lost
-  on sign-out (the brain is the authoritative store; agent conversations are ephemeral).
-- Skills: do not install persistent skills; use only the bundled skill set.
-- Logs: accept loss on sign-out (or redirect to the app's own log directory).
+**Config keys written by the Tauri app into the app-owned `config.yaml`:**
 
-**Pros:** Enforces "clients never hold a copy of a shared brain" strictly.
-**Cons:** No cross-session agent memory; every launch is a cold start; user loses
-conversation history when they sign out.
+```yaml
+# §12 Option A — ephemeral agent, no cross-session persistence
 
-**Option B: Accept local agent data with reworded invariant**
+memory:
+  memory_enabled: false       # disable MEMORY.md (agent's persistent notes)
+  user_profile_enabled: false # disable USER.md (user profile learning)
 
-Keep `HERMES_HOME` as a persistent app-owned directory. Agent working memory
-(conversations, local skills, logs) is **derived from** brain content (via the
-MCP brain tool and the LLM gateway), not a **copy of** it. Reword the invariant:
+agent:
+  disabled_toolsets:
+    - skill_manage            # prevent the agent from creating/editing skills
 
-> "Clients never hold a plaintext copy of brain claims or documents. Local agent
-> working memory (conversation history, tool outputs, agent-generated skills) is
-> derived content that does not constitute a second source of truth. The brain
-> remains the authoritative store."
+database:
+  journal_mode: delete        # no WAL; simpler cleanup on sign-out
+```
 
-**Pros:** Better UX (session continuity, agent learning across sessions).
-**Cons:** Derived content (conversation transcripts) may quote brain claims
-verbatim; a stolen laptop with an unlocked `HERMES_HOME` leaks those quotes
-(mitigated by OS-level disk encryption, which is assumed).
+**Why each key:**
+
+| Key | Effect | Source |
+|---|---|---|
+| `memory.memory_enabled: false` | `get_builtin_memory_store_flags()` returns `(False, ...)` — MEMORY.md is never loaded or written | `tools/memory_tool.py:297-300` |
+| `memory.user_profile_enabled: false` | `get_builtin_memory_store_flags()` returns `(..., False)` — USER.md is never loaded or written | `tools/memory_tool.py:297-300` |
+| `agent.disabled_toolsets: [skill_manage]` | The `skill_manage` tool is removed from the agent's tool list; it cannot create, edit, or delete skills | `hermes_cli/config_defaults.py:279` — `"disabled_toolsets": []`; `acp_adapter/session.py:528-529` — subtracted at tool granularity |
+| `database.journal_mode: delete` | `resolve_journal_mode()` returns `"delete"` — no WAL files; state.db is a single file, easy to wipe | `hermes_state_wal.py:157-167`; `hermes_cli/config_defaults.py:43-46` |
+
+**Lifecycle:**
+
+- `HERMES_HOME` is set to an app-owned directory (§5 "App-owned HERMES_HOME").
+- On sign-out, the Tauri app deletes the entire `HERMES_HOME` directory
+  (state.db, config.yaml, .env, logs/, skills/, cache/).
+- Every app launch writes a fresh `config.yaml` with the above keys, plus the
+  model provider and brain MCP config (§5).
+- The bundled skill set (read-only, shipped with the app) remains available;
+  only user-created skills are blocked via `disabled_toolsets`.
