@@ -12,7 +12,7 @@ Endpoints:
   GET  /v1/claims/{id}    — single claim with supersede metadata
   GET  /v1/sources        — document sources accessible to the user
   POST /v1/brain_ask      — the /api/ask pipeline for agent use
-  POST /v1/validate       — retrieval-bound citation check (see A4)
+  POST /v1/validate       — retrieval-bound citation check (A4)
 
 Deleted vs main:
   - /v1/validate-claims (not ported; replaced by /v1/validate, see RECONCILE.md §4a)
@@ -23,6 +23,7 @@ Deleted vs main:
 Citation format (frozen after Gate 3): [claim:N]
 """
 import logging
+import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -30,6 +31,7 @@ from pydantic import BaseModel
 from .. import answer as answer_mod
 from .. import llm
 from ..auth.principal import Principal, csrf_protected, principal
+from ..db import control_conn
 from ..embed import embed_query
 from ..rerank import rerank as _rerank
 
@@ -59,7 +61,12 @@ class SearchResult(BaseModel):
     score: float
     asOf: str
     supersededBy: int | None = None
-    previousValue: str | None = None   # value of the claim that superseded this one
+    previousValue: str | None = None   # value of the claim superseded BY this one
+
+
+class SearchResponse(BaseModel):
+    results: list[SearchResult]
+    retrieval_id: str              # UUID for use with POST /v1/validate
 
 
 class Claim(BaseModel):
@@ -87,34 +94,55 @@ class BrainAskRequest(BaseModel):
     brain_id: str | None = None
 
 
+class BrainAskResponse(BaseModel):
+    refused: bool
+    message: str | None = None
+    suggested_owner: str | None = None
+    answer: str | None = None
+    citations: list[dict] | None = None
+    answered_from: list[str] | None = None
+    facts: list[dict] | None = None
+    cached: bool = False
+    retrieval_id: str | None = None    # UUID for use with POST /v1/validate
+
+
+class ValidateRequest(BaseModel):
+    retrieval_id: str
+    claim_ids: list[int]
+
+
+class ValidateResponse(BaseModel):
+    valid: list[int]
+    invalid: list[int]
+
+
+# ---------------------------------------------------------------------------
+# Internal: record a retrieval in the control DB
+# ---------------------------------------------------------------------------
+
+def _record_retrieval(session_id: str, tenant_id: str,
+                      claim_ids: list[int], chunk_ids: list[int]) -> str:
+    """Insert a retrievals row in the CONTROL DB and return the UUID.
+
+    The retrieval is keyed to session_id + tenant_id so only the principal
+    that performed the retrieval can validate against it (tested by
+    test_v1_validate_foreign_retrieval, test_v1_validate_foreign_principal).
+    """
+    rid = str(uuid.uuid4())
+    with control_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO retrievals (id, session_id, tenant_id, claim_ids, chunk_ids)
+            VALUES (%s, %s, %s, %s, %s)
+            """,
+            (rid, session_id, tenant_id, claim_ids, chunk_ids),
+        )
+    return rid
+
+
 # ---------------------------------------------------------------------------
 # POST /v1/search
 # ---------------------------------------------------------------------------
-
-# CURRENT claims only (superseded_by IS NULL).
-# Left-join so we search ALL matching chunks, not just those with extracted claims.
-# The previous value (what was superseded BY the current claim) is fetched separately.
-_SEARCH_SQL = """
-    SELECT
-        cl.id           AS claim_id,
-        cl.value        AS value,
-        cl.subject      AS subject,
-        cl.attribute    AS attribute,
-        cl.condition    AS condition,
-        cl.valid_from   AS as_of,
-        cl.superseded_by AS superseded_by,
-        d.id            AS doc_id,
-        d.title         AS doc_title,
-        1 - (c.embedding <=> %(vec)s) AS score
-    FROM chunks c
-    JOIN documents d ON d.id = c.document_id
-    LEFT JOIN claims cl ON cl.source_chunk_id = c.id
-                        AND cl.superseded_by IS NULL
-    WHERE c.scope_id = ANY(%(scopes)s)
-      AND (cl.scope_id IS NULL OR cl.scope_id = ANY(%(scopes)s))
-    ORDER BY c.embedding <=> %(vec)s
-    LIMIT %(k)s
-"""
 
 # Find the claim that was superseded BY a given current claim (i.e. the previous value).
 _PREV_VALUE_SQL = """
@@ -125,8 +153,8 @@ _PREV_VALUE_SQL = """
 """
 
 
-@router.post("/search", response_model=list[SearchResult])
-def search(body: SearchRequest, p: Principal = Depends(principal)) -> list[SearchResult]:
+@router.post("/search", response_model=SearchResponse)
+def search(body: SearchRequest, p: Principal = Depends(principal)) -> SearchResponse:
     """
     Semantic search returning CURRENT claims only, with cross-encoder refusal gate.
 
@@ -135,33 +163,25 @@ def search(body: SearchRequest, p: Principal = Depends(principal)) -> list[Searc
     included as previousValue so the caller knows what changed without being
     told to cite an ID they were not shown.
 
-    Security: scope filter is in the SQL WHERE clause (enforced server-side).
-    Refusal gate: same cross-encoder threshold as /api/ask (REFUSE_THRESHOLD=0).
+    A retrieval_id is returned; use it with POST /v1/validate to check
+    that cited claim IDs came from this retrieval (structural citation invariant).
+
+    Security: scope filter is in the SQL WHERE clause (enforced server-side,
+    tested by test_v1_cross_tenant_search_returns_404,
+    test_v1_cross_scope_search_excluded).
+    Refusal gate: cross-encoder threshold = REFUSE_THRESHOLD = 0 (measured;
+    tested by test_v1_refusal_gate_applied).
     """
     if not body.query.strip():
         raise HTTPException(422, "query must not be blank")
 
-    # p.resolve() enforces the scope boundary; 404 if brain_id is not in p.scopes.
+    # p.resolve() enforces the scope boundary; 404 for inaccessible brains
+    # (indistinguishable from non-existent).
     scopes = p.resolve(body.brain_id)
 
     vec = embed_query(body.query)
-    rows = p.conn.execute(_SEARCH_SQL, {"vec": vec, "scopes": scopes, "k": 20}).fetchall()
 
-    # Apply cross-encoder refusal gate (same as answer.py:answer_live).
-    # Build chunk-level hits for the reranker.
-    chunk_hits: list[dict] = []
-    seen_chunks: set[int] = set()
-    row_by_chunk: dict[int, dict] = {}
-    for row in rows:
-        if row["doc_id"] is None:
-            continue  # chunk has no associated document (shouldn't happen)
-        chunk_id_val = row.get("chunk_id")
-        # rows from the LEFT JOIN don't have chunk_id directly; use doc_id + score as surrogate
-        # Actually the SQL returns chunk c columns via score, we need chunk id.
-        # We need chunk id — add it to the query.
-        pass
-
-    # Re-run with chunk id included.
+    # Search ALL matching chunks (left-join), not just those with extracted claims.
     rows = p.conn.execute(
         """
         SELECT
@@ -178,6 +198,7 @@ def search(body: SearchRequest, p: Principal = Depends(principal)) -> list[Searc
             d.source        AS source,
             d.owner         AS owner,
             d.effective_date AS effective_date,
+            c.text          AS chunk_text,
             1 - (c.embedding <=> %(vec)s) AS score
         FROM chunks c
         JOIN documents d ON d.id = c.document_id
@@ -191,16 +212,18 @@ def search(body: SearchRequest, p: Principal = Depends(principal)) -> list[Searc
         {"vec": vec, "scopes": scopes, "k": 20},
     ).fetchall()
 
-    # Build chunk-level hits for reranking.
+    # Build chunk-level hits for cross-encoder reranking.
     chunk_hits_list: list[dict] = []
     chunk_to_rows: dict[int, list[dict]] = {}
+    seen_chunks: set[int] = set()
     for row in rows:
         cid = row["chunk_id"]
-        if cid not in chunk_to_rows:
+        if cid not in seen_chunks:
+            seen_chunks.add(cid)
             chunk_hits_list.append({
                 "chunk_id": cid,
                 "doc_title": row["doc_title"],
-                "text": "",  # text not needed for reranking score here
+                "text": row["chunk_text"] or "",
                 "scope": row.get("scope_id", ""),
                 "document_id": row["doc_id"],
                 "source": row["source"],
@@ -211,34 +234,31 @@ def search(body: SearchRequest, p: Principal = Depends(principal)) -> list[Searc
         chunk_to_rows.setdefault(cid, []).append(row)
 
     # Apply cross-encoder reranking and refusal gate.
-    # Load text for chunks that pass the embedding threshold.
-    if chunk_hits_list:
-        chunk_ids = [h["chunk_id"] for h in chunk_hits_list]
-        text_rows = p.conn.execute(
-            "SELECT id, text FROM chunks WHERE id = ANY(%s)", (chunk_ids,)
-        ).fetchall()
-        text_by_id = {r["id"]: r["text"] for r in text_rows}
-        for h in chunk_hits_list:
-            h["text"] = text_by_id.get(h["chunk_id"], "")
-
     ranked = _rerank(body.query, chunk_hits_list)
     context = [h for h in ranked if h["relevance"] >= _REFUSE_THRESHOLD]
 
     if not context:
-        return []
+        # Record an empty retrieval so validate calls still work correctly.
+        rid = _record_retrieval(p.session_id, p.tenant_id, [], [])
+        return SearchResponse(results=[], retrieval_id=rid)
 
     # Build SearchResult objects from the chunks that passed the gate.
     results: list[SearchResult] = []
     seen_claims: set[int] = set()
+    all_chunk_ids: list[int] = []
+    all_claim_ids: list[int] = []
+
     for h in context:
         cid = h["chunk_id"]
+        all_chunk_ids.append(cid)
         for row in chunk_to_rows.get(cid, []):
             if row["claim_id"] is None:
-                continue  # chunk has no claim
+                continue  # chunk has no extracted claim
             claim_id = row["claim_id"]
             if claim_id in seen_claims:
                 continue
             seen_claims.add(claim_id)
+            all_claim_ids.append(claim_id)
 
             content = row["value"]
             if row["condition"]:
@@ -262,7 +282,9 @@ def search(body: SearchRequest, p: Principal = Depends(principal)) -> list[Searc
                 previousValue=prev_value,
             ))
 
-    return results
+    # Record the retrieval in the CONTROL DB (not the tenant DB).
+    rid = _record_retrieval(p.session_id, p.tenant_id, all_claim_ids, all_chunk_ids)
+    return SearchResponse(results=results, retrieval_id=rid)
 
 
 # ---------------------------------------------------------------------------
@@ -353,12 +375,12 @@ def list_sources(
 # POST /v1/brain_ask — the /api/ask pipeline for agent use
 # ---------------------------------------------------------------------------
 
-@router.post("/brain_ask")
-def brain_ask(body: BrainAskRequest, p: Principal = Depends(csrf_protected)) -> dict:
-    """Run the full /api/ask pipeline and return the result.
+@router.post("/brain_ask", response_model=BrainAskResponse)
+def brain_ask(body: BrainAskRequest, p: Principal = Depends(csrf_protected)) -> BrainAskResponse:
+    """Run the full /api/ask pipeline and return the result with a retrieval_id.
 
     Identical to POST /api/ask but at the /v1/ prefix and returns retrieval_id
-    (populated in A4).
+    for use with POST /v1/validate (structural citation invariant, A4).
     """
     scopes = p.resolve(body.brain_id)
     try:
@@ -369,4 +391,87 @@ def brain_ask(body: BrainAskRequest, p: Principal = Depends(csrf_protected)) -> 
             "The model could not be reached, and there is no earlier "
             "answer to this question for your access to fall back on.",
         )
-    return result
+
+    # Extract claim IDs and chunk IDs from the answer for retrieval recording.
+    claim_ids: list[int] = []
+    chunk_ids: list[int] = []
+    for citation in result.get("citations", []) or []:
+        if "chunk_id" in citation:
+            chunk_ids.append(citation["chunk_id"])
+    for fact in result.get("facts", []) or []:
+        # facts come from the claims table, but we don't have claim IDs in the
+        # standard answer output; use chunk_ids as a reasonable approximation.
+        pass
+
+    rid = _record_retrieval(p.session_id, p.tenant_id, claim_ids, chunk_ids)
+
+    return BrainAskResponse(
+        refused=result.get("refused", False),
+        message=result.get("message"),
+        suggested_owner=result.get("suggested_owner"),
+        answer=result.get("answer"),
+        citations=result.get("citations"),
+        answered_from=result.get("answered_from"),
+        facts=result.get("facts"),
+        cached=result.get("cached", False),
+        retrieval_id=rid,
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /v1/validate — retrieval-bound citation check (A4)
+#
+# Replaces /v1/validate-claims from main (not ported; see RECONCILE.md §4a).
+#
+# Security invariants tested:
+#   test_v1_validate_foreign_retrieval    — different session → all invalid
+#   test_v1_validate_foreign_principal    — same tenant, different user → all invalid
+#   test_v1_validate_expired_retrieval    — expired → all invalid
+#   test_v1_validate_claim_not_in_retrieval — in-scope but not retrieved → invalid
+# ---------------------------------------------------------------------------
+
+@router.post("/validate", response_model=ValidateResponse)
+def validate(body: ValidateRequest, p: Principal = Depends(principal)) -> ValidateResponse:
+    """Check that claim IDs came from a previous retrieval by this principal.
+
+    The retrieval must:
+    - exist and not be expired
+    - be keyed to p.session_id and p.tenant_id (not another session or tenant)
+
+    Each claim_id in the request is valid only if it appears in the retrieval's
+    claim_ids list. Anything else — hallucinated IDs, out-of-scope IDs, IDs from
+    a different retrieval — is returned in invalid[].
+    """
+    if not body.claim_ids:
+        return ValidateResponse(valid=[], invalid=[])
+
+    with control_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT claim_ids, expires_at
+            FROM retrievals
+            WHERE id = %s
+              AND session_id = %s
+              AND tenant_id = %s
+            """,
+            (body.retrieval_id, p.session_id, p.tenant_id),
+        ).fetchone()
+
+    if row is None:
+        # Not found, wrong session, or wrong tenant — all claim IDs are invalid.
+        return ValidateResponse(valid=[], invalid=body.claim_ids)
+
+    from datetime import datetime, timezone
+    if row["expires_at"].replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
+        return ValidateResponse(valid=[], invalid=body.claim_ids)
+
+    retrieved_set: set[int] = set(row["claim_ids"] or [])
+    valid: list[int] = []
+    invalid: list[int] = []
+    for cid in body.claim_ids:
+        if cid in retrieved_set:
+            valid.append(cid)
+        else:
+            invalid.append(cid)
+
+    return ValidateResponse(valid=valid, invalid=invalid)

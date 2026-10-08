@@ -43,3 +43,25 @@ CREATE TABLE IF NOT EXISTS sessions (
     last_seen   timestamptz NOT NULL DEFAULT now(),
     expires_at  timestamptz NOT NULL
 );
+
+-- Retrieval-bound citation tracking (A4).
+-- Stores the set of claim_ids and chunk_ids returned by /v1/search or
+-- /v1/brain_ask, keyed to session_id + tenant_id. The /v1/validate endpoint
+-- checks that a cited claim_id is in the retrieval set for the current
+-- session, preventing hallucinated or out-of-retrieval citations.
+--
+-- Security: session_id and tenant_id bind the retrieval to the principal
+-- that performed it. A different session or tenant cannot validate against
+-- this row (tested by test_v1_validate_foreign_retrieval,
+-- test_v1_validate_foreign_principal).
+CREATE TABLE IF NOT EXISTS retrievals (
+    id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    session_id  text NOT NULL,
+    tenant_id   text NOT NULL,
+    claim_ids   integer[] NOT NULL,
+    chunk_ids   integer[] NOT NULL,
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    expires_at  timestamptz NOT NULL DEFAULT now() + interval '1 hour'
+);
+CREATE INDEX IF NOT EXISTS retrievals_session ON retrievals(session_id, tenant_id);
+CREATE INDEX IF NOT EXISTS retrievals_expires ON retrievals(expires_at);
