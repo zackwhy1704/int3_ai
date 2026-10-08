@@ -40,7 +40,10 @@ services:
       retries: 30
 
   init:
-    build: ./backend
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      target: production
     command: ["python", "-m", "app.tenants.admin", "init"]
     environment:
       <<: [*runtime-env, *admin-env]
@@ -49,7 +52,10 @@ services:
         condition: service_healthy
 
   backend:
-    build: ./backend
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      target: production
     environment: *runtime-env
     ports:
       - "8000:8000"
@@ -99,7 +105,10 @@ services:
       - "8081:8080"
 
   tools:
-    build: ./backend
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      target: test
     profiles: [tools]
     environment:
       <<: [*runtime-env, *admin-env]
