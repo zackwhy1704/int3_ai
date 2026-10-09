@@ -266,7 +266,7 @@ def test_v1_retrieval_chunks_all_in_scope(client, as_user):
 
     resp = client.post(
         "/v1/search",
-        json={"query": "payment terms finance annual contract"},
+        json={"query": "What is our refund window for enterprise customers"},
         headers=as_user("priya"),
     )
     assert resp.status_code == 200
@@ -280,7 +280,7 @@ def test_v1_retrieval_chunks_all_in_scope(client, as_user):
     chunk_ids = row["chunk_ids"]
     assert chunk_ids, (
         "retrieval chunk_ids is empty — the query should match company-wide "
-        "payment-terms content for priya; if this fires, seed data changed"
+        "refund-policy content for priya; if this fires, seed data changed"
     )
 
     with tenant_conn("brindlewood") as tconn:
