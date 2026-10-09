@@ -531,8 +531,8 @@ database:
   (state.db, config.yaml, .env, logs/, skills/, cache/).
 - Every app launch writes a fresh `config.yaml` with the above keys, plus the
   model provider and brain MCP config (§5).
-- The bundled skill set (read-only, shipped with the app) remains available;
-  only user-created skills are blocked via `disabled_toolsets`.
+- All skill tools (`skills_list`, `skill_view`, `skill_manage`) are disabled.
+  The pilot agent answers from the brain over MCP and needs no bundled skills.
 
 ### §12 Bug correction: `skill_manage` is a tool, not a toolset
 
@@ -564,30 +564,36 @@ keeping the others via config. A per-tool block would require a code change
 or a runtime whitelist approach similar to what the background review agent
 uses (`hermes_cli/plugins.py:set_thread_tool_whitelist`).
 
-### Background review agent and skill creation
+### Owner decision (2026-10-09): option (i) — disable entire `skills` toolset
 
-The background review agent **can call `skill_manage`**. Its runtime whitelist
-(enforced via `set_thread_tool_whitelist`, tested at
-`tests/agent/test_background_review_toolset_restriction.py:88-141`) explicitly
-includes `skill_manage`, `skill_view`, `skills_list`, `memory`, `read_file`,
-and `search_files`. It blocks `terminal`, `write_file`, `send_message`,
-`delegate_task`, and other dangerous tools.
+**Rationale:** the pilot agent answers from the brain over MCP and needs no
+bundled skills. Adding a `disabled_tools` key means patching a borrowed MIT
+runtime, which breaks "we wrap it, we don't write one" and creates a fork to
+maintain upstream. Read-only skill access is NOT needed.
 
-This means even with `disabled_toolsets: [skills]`, the background review
-agent inherits the parent's toolset config
-(`tests/agent/test_background_review_toolset_restriction.py:57-85`) — so
-`disabled_toolsets: [skills]` would strip skills from the parent **and** the
-background review fork's schema. However, the runtime whitelist is a separate
-gate (`agent/background_review.py:1105-1119`); whether the schema-level
-removal fully prevents background skill creation needs verification.
+### Background review agent: verified safe with `disabled_toolsets: [skills]`
 
-**STOP — owner decision required:**
+The background review fork **cannot call skill tools** when the parent has
+`disabled_toolsets: [skills]`. Verified by tracing the code path at commit
+`0e219331`:
 
-1. Is disabling all three skill tools (option i) acceptable, or must
-   `skills_list`/`skill_view` remain available for read-only access to
-   bundled skills?
-2. If read-only access is needed, a code change is required (no existing
-   per-tool disable config exists). Should we implement `disabled_tools`?
-3. Confirm that the background review agent's `disabled_toolsets` inheritance
-   (via parent config passthrough) is sufficient to prevent skill creation
-   in background review forks.
+1. **Schema-level removal:** `_fork_init_kwargs` (`background_review.py:926`)
+   passes `disabled_toolsets=["skills"]` to the fork's `AIAgent.__init__`.
+   On the same-model path, `_inherit_parent_tool_surface`
+   (`background_review.py:950`) copies the parent's `tools[]` (which already
+   excludes skills) and freezes the snapshot generation. On the routed path,
+   `AIAgent.__init__` builds tools via `get_tool_definitions(disabled_toolsets=
+   ["skills"])`, which calls `_apply_toolset_selection` (`model_tools.py:310`)
+   to subtract `skills_list`, `skill_view`, `skill_manage`.
+
+2. **Runtime whitelist is allow-only, not advertise:**
+   `_review_tool_whitelist` (`background_review.py:1090`) builds an
+   independent allow-set that includes `skill_manage`. But this only gates
+   dispatch — it does not add tools to the schema. The model never sees
+   `skill_manage` in its available tools, so it cannot call it. If it
+   hallucinated the call, `valid_tool_names` (`background_review.py:951`)
+   would reject it before dispatch.
+
+3. **Test coverage:** `test_background_review_matches_parent_toolset_config`
+   (`test_background_review_toolset_restriction.py:57-85`) asserts the fork
+   receives the parent's `disabled_toolsets`.
