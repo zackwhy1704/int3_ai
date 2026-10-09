@@ -597,3 +597,7 @@ The background review fork **cannot call skill tools** when the parent has
 3. **Test coverage:** `test_background_review_matches_parent_toolset_config`
    (`test_background_review_toolset_restriction.py:57-85`) asserts the fork
    receives the parent's `disabled_toolsets`.
+
+**Method note:** this conclusion comes from tracing the inheritance path in
+source (`hermes-agent` commit `0e219331`), not from an executed test with
+`disabled_toolsets: [skills]` in place. The reasoning is sound but untested.
