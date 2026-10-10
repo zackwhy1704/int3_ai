@@ -166,15 +166,32 @@ def service_principal(request: Request) -> Iterator[Principal]:
 
 
 def v1_principal(request: Request) -> Iterator[Principal]:
-    """Auth for the /v1/ machine surface: a service bearer token when present,
-    otherwise the Phase-A session cookie. CSRF is NOT enforced here — /v1/ is
-    called by machine clients (the MCP server), not a browser. Authentication
-    and tenant/user scoping are unchanged; only the CSRF check is dropped,
-    relative to the browser routes that keep csrf_protected."""
+    """Auth for the /v1/ machine surface.
+
+    Bearer path (the MCP sidecar): a service token, no CSRF — a machine client
+    has no cookie and no browser origin, so CSRF is neither available nor
+    meaningful; the bearer token itself is the credential.
+
+    Cookie path (a browser hitting /v1/ directly): CSRF IS required, exactly as
+    on the browser routes. Dropping it only for the bearer path keeps the
+    machine surface usable without weakening cookie-authenticated requests —
+    otherwise /v1/ would be a CSRF-exempt hole for any logged-in browser."""
     if _bearer(request) is not None:
         yield from service_principal(request)
-    else:
-        yield from principal(request)
+        return
+    # Cookie-authenticated: enforce the same CSRF gate as csrf_protected
+    # (same-origin + matching per-session token) before yielding the principal.
+    gen = principal(request)
+    p = next(gen)
+    try:
+        if request.headers.get("origin") != config.APP_ORIGIN:
+            raise HTTPException(403, "cross-origin request refused")
+        token = request.headers.get("x-csrf-token", "")
+        if not secrets.compare_digest(token, p.csrf_token):
+            raise HTTPException(403, "missing or invalid CSRF token")
+        yield p
+    finally:
+        gen.close()
 
 
 def csrf_protected(request: Request, p: Principal = Depends(principal)) -> Principal:

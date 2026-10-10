@@ -107,3 +107,37 @@ def test_v1_service_token_tenant_isolation(client):
     assert any("Hollowmere" in t for t in b_titles), (
         f"tenant B token listed no hollowmere document — positive control failed: {b_titles}"
     )
+
+
+# ---------------------------------------------------------------------------
+# CSRF on the cookie path (Item 3).
+# v1_principal drops CSRF only for the bearer (machine) path; a cookie-
+# authenticated browser request to /v1/ must still present Origin + a matching
+# x-csrf-token, exactly like the browser routes. Otherwise /v1/ would be a
+# CSRF-exempt hole for any logged-in browser.
+# ---------------------------------------------------------------------------
+
+_ASK = {"question": "What's our refund window for enterprise customers?"}
+
+
+@pytest.mark.integration
+def test_v1_cookie_without_csrf_is_403(client, as_user):
+    # cookie present, X-CSRF-Token stripped -> rejected
+    h = {k: v for k, v in as_user("priya").items() if k != "X-CSRF-Token"}
+    r = client.post("/v1/brain_ask", json=_ASK, headers=h)
+    assert r.status_code == 403, r.text
+    assert "CSRF" in r.json()["detail"]
+
+
+@pytest.mark.integration
+def test_v1_cookie_with_valid_csrf_is_200(client, as_user):
+    r = client.post("/v1/brain_ask", json=_ASK, headers=as_user("priya"))
+    assert r.status_code == 200, r.text
+
+
+@pytest.mark.integration
+def test_v1_bearer_without_csrf_is_200(client):
+    # machine path: a service token, no cookie, no CSRF header -> allowed
+    token = _mint("brindlewood", "priya")
+    r = client.post("/v1/brain_ask", json=_ASK, headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 200, r.text
