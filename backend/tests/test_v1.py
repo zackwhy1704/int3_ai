@@ -22,7 +22,7 @@ from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
 
-from app.auth.principal import Principal, csrf_protected, principal
+from app.auth.principal import Principal, v1_principal
 from app.main import app
 
 
@@ -88,9 +88,9 @@ def test_v1_brain_id_not_in_principal_scopes_returns_404():
     p = _fake_principal(tenant_id="tenant_a", scopes=["scope_a"])
 
     with TestClient(app) as client:
-        # /v1/search now uses csrf_protected; override both
-        app.dependency_overrides[principal] = _override_principal(p)
-        app.dependency_overrides[csrf_protected] = _override_principal(p)
+        # /v1 routes use v1_principal; override it
+        app.dependency_overrides[v1_principal] = _override_principal(p)
+        app.dependency_overrides[v1_principal] = _override_principal(p)
         try:
             resp = client.post(
                 "/v1/search",
@@ -136,9 +136,9 @@ def test_v1_cross_scope_excluded_unit():
     p = _fake_principal(scopes=["scope_a"], conn=conn)
 
     with TestClient(app) as client:
-        # /v1/search now uses csrf_protected; override both
-        app.dependency_overrides[principal] = _override_principal(p)
-        app.dependency_overrides[csrf_protected] = _override_principal(p)
+        # /v1 routes use v1_principal; override it
+        app.dependency_overrides[v1_principal] = _override_principal(p)
+        app.dependency_overrides[v1_principal] = _override_principal(p)
         try:
             with patch("app.api.v1.embed_query", return_value=[0.1] * 384):
                 with patch("app.api.v1._rerank", return_value=[]):
@@ -214,9 +214,9 @@ def test_v1_refusal_gate_applied():
     }
 
     with TestClient(app) as client:
-        # /v1/search now uses csrf_protected; override both
-        app.dependency_overrides[principal] = _override_principal(p)
-        app.dependency_overrides[csrf_protected] = _override_principal(p)
+        # /v1 routes use v1_principal; override it
+        app.dependency_overrides[v1_principal] = _override_principal(p)
+        app.dependency_overrides[v1_principal] = _override_principal(p)
         try:
             with patch("app.api.v1.embed_query", return_value=[0.1] * 384):
                 with patch("app.api.v1._rerank", return_value=[low_score_hit]):
@@ -252,9 +252,9 @@ def test_v1_validate_foreign_retrieval():
     # Simulate: the retrieval row exists but belongs to session_b (not session_a).
     # The SQL WHERE session_id = %s AND tenant_id = %s will return no row.
     with TestClient(app) as client:
-        # /v1/validate now uses csrf_protected; override both
-        app.dependency_overrides[principal] = _override_principal(p)
-        app.dependency_overrides[csrf_protected] = _override_principal(p)
+        # /v1 routes use v1_principal; override it
+        app.dependency_overrides[v1_principal] = _override_principal(p)
+        app.dependency_overrides[v1_principal] = _override_principal(p)
         try:
             with patch("app.api.v1.control_conn") as mock_ctrl:
                 mock_ctx = MagicMock()
@@ -295,9 +295,9 @@ def test_v1_validate_foreign_principal():
     rid = str(uuid.uuid4())
 
     with TestClient(app) as client:
-        # /v1/validate now uses csrf_protected; override both
-        app.dependency_overrides[principal] = _override_principal(p)
-        app.dependency_overrides[csrf_protected] = _override_principal(p)
+        # /v1 routes use v1_principal; override it
+        app.dependency_overrides[v1_principal] = _override_principal(p)
+        app.dependency_overrides[v1_principal] = _override_principal(p)
         try:
             with patch("app.api.v1.control_conn") as mock_ctrl:
                 mock_ctx = MagicMock()
@@ -334,9 +334,9 @@ def test_v1_validate_expired_retrieval():
     past = datetime.now(timezone.utc) - timedelta(hours=2)
 
     with TestClient(app) as client:
-        # /v1/validate now uses csrf_protected; override both
-        app.dependency_overrides[principal] = _override_principal(p)
-        app.dependency_overrides[csrf_protected] = _override_principal(p)
+        # /v1 routes use v1_principal; override it
+        app.dependency_overrides[v1_principal] = _override_principal(p)
+        app.dependency_overrides[v1_principal] = _override_principal(p)
         try:
             with patch("app.api.v1.control_conn") as mock_ctrl:
                 mock_ctx = MagicMock()
@@ -378,9 +378,9 @@ def test_v1_validate_claim_not_in_retrieval():
 
     # Retrieval contains claim_ids [1, 2]. Claim 3 is in scope but not retrieved.
     with TestClient(app) as client:
-        # /v1/validate now uses csrf_protected; override both
-        app.dependency_overrides[principal] = _override_principal(p)
-        app.dependency_overrides[csrf_protected] = _override_principal(p)
+        # /v1 routes use v1_principal; override it
+        app.dependency_overrides[v1_principal] = _override_principal(p)
+        app.dependency_overrides[v1_principal] = _override_principal(p)
         try:
             with patch("app.api.v1.control_conn") as mock_ctrl:
                 mock_ctx = MagicMock()
@@ -454,8 +454,8 @@ def test_brain_ask_retrieval_validates_own_citations():
     }
 
     with TestClient(app) as client:
-        app.dependency_overrides[principal] = _override_principal(p)
-        app.dependency_overrides[csrf_protected] = _override_principal(p)
+        app.dependency_overrides[v1_principal] = _override_principal(p)
+        app.dependency_overrides[v1_principal] = _override_principal(p)
         try:
             with patch("app.api.v1.answer_mod.ask", return_value=answer_result):
                 with patch(
@@ -495,8 +495,8 @@ def test_brain_ask_retrieval_rejects_foreign_claim():
 
     # Retrieval contains [10, 20] — NOT 99.
     with TestClient(app) as client:
-        app.dependency_overrides[principal] = _override_principal(p)
-        app.dependency_overrides[csrf_protected] = _override_principal(p)
+        app.dependency_overrides[v1_principal] = _override_principal(p)
+        app.dependency_overrides[v1_principal] = _override_principal(p)
         try:
             with patch("app.api.v1.control_conn") as mock_ctrl:
                 mock_ctx = MagicMock()
@@ -572,8 +572,8 @@ def test_v1_search_scope_populated():
     }
 
     with TestClient(app) as client:
-        app.dependency_overrides[principal] = _override_principal(p)
-        app.dependency_overrides[csrf_protected] = _override_principal(p)
+        app.dependency_overrides[v1_principal] = _override_principal(p)
+        app.dependency_overrides[v1_principal] = _override_principal(p)
         try:
             with patch("app.api.v1.embed_query", return_value=[0.1] * 384):
                 with patch("app.api.v1._rerank", return_value=[reranked_hit]):

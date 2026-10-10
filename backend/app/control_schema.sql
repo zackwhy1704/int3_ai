@@ -44,6 +44,22 @@ CREATE TABLE IF NOT EXISTS sessions (
     expires_at  timestamptz NOT NULL
 );
 
+-- Service tokens: non-interactive bearer credentials for the /v1/ machine
+-- surface (the MCP server). A token maps to exactly one tenant + acting user;
+-- scopes are still resolved per-request from that user's memberships, so the
+-- token's reach is never broader than the user's. Only the SHA-256 of the token
+-- is stored, as with sessions. No session row is created — the token resolves
+-- straight to (tenant, user). Revoked by setting revoked_at (kept, not deleted,
+-- for audit).
+CREATE TABLE IF NOT EXISTS service_tokens (
+    token_hash  text PRIMARY KEY,
+    tenant_id   text NOT NULL REFERENCES tenants(id),
+    user_id     text NOT NULL,
+    label       text NOT NULL,
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    revoked_at  timestamptz
+);
+
 -- Retrieval-bound citation tracking (A4).
 -- Stores the set of claim_ids and chunk_ids returned by /v1/search or
 -- /v1/brain_ask, keyed to session_id + tenant_id. The /v1/validate endpoint

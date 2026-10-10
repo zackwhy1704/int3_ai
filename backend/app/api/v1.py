@@ -1,10 +1,13 @@
 """
 /v1/ API — used by the desktop MCP server (RemoteBrainProvider).
 
-Auth: ALL endpoints use Principal = Depends(principal) from app.auth.principal.
-No Bearer token, no BRAIN_AUTH, no BRAIN_DEV_USER. In Phase A the /v1 routes
-accept pilot's session cookie (same as /api/ask). Bearer token support comes
-in Phase B.
+Auth: ALL endpoints use Principal = Depends(v1_principal) from
+app.auth.principal. v1_principal accepts a service bearer token (the machine
+path — no cookie, no CSRF) when an Authorization: Bearer header is present, and
+otherwise falls back to the Phase-A session cookie. CSRF is not enforced on
+/v1/ because it is a machine surface, not a browser one; authentication and
+tenant/user scoping are unchanged. Browser routes (/api/ask, /auth/logout)
+keep csrf_protected.
 
 Endpoints:
   POST /v1/brain_ask      — PRIMARY tool: full passage-level Q&A pipeline with
@@ -34,7 +37,7 @@ from pydantic import BaseModel
 
 from .. import answer as answer_mod
 from .. import llm
-from ..auth.principal import Principal, csrf_protected, principal
+from ..auth.principal import Principal, v1_principal
 from ..db import control_conn
 from ..embed import embed_query
 from ..rerank import rerank as _rerank
@@ -162,7 +165,7 @@ _PREV_VALUE_SQL = """
 
 @router.post("/search", response_model=SearchResponse)
 def search(
-    body: SearchRequest, p: Principal = Depends(csrf_protected)
+    body: SearchRequest, p: Principal = Depends(v1_principal)
 ) -> SearchResponse:
     """
     Secondary tool: claim-level semantic search. Use brain_ask for answering questions.
@@ -316,7 +319,7 @@ _CLAIM_SQL = """
 
 
 @router.get("/claims/{claim_id}", response_model=Claim)
-def get_claim(claim_id: str, p: Principal = Depends(principal)) -> Claim:
+def get_claim(claim_id: str, p: Principal = Depends(v1_principal)) -> Claim:
     try:
         cid = int(claim_id)
     except ValueError:
@@ -359,7 +362,7 @@ _SOURCES_SQL = """
 @router.get("/sources", response_model=list[Source])
 def list_sources(
     scope: list[str] = Query(default=[]),
-    p: Principal = Depends(principal),
+    p: Principal = Depends(v1_principal),
 ) -> list[Source]:
     if scope:
         scopes = [s for s in scope if s in p.scopes]
@@ -389,7 +392,7 @@ def list_sources(
 
 @router.post("/brain_ask", response_model=BrainAskResponse)
 def brain_ask(
-    body: BrainAskRequest, p: Principal = Depends(csrf_protected)
+    body: BrainAskRequest, p: Principal = Depends(v1_principal)
 ) -> BrainAskResponse:
     """Primary tool: passage-level Q&A with structured citations.
 
@@ -462,7 +465,7 @@ def brain_ask(
 
 @router.post("/validate", response_model=ValidateResponse)
 def validate(
-    body: ValidateRequest, p: Principal = Depends(csrf_protected)
+    body: ValidateRequest, p: Principal = Depends(v1_principal)
 ) -> ValidateResponse:
     """Check that claim IDs came from a previous retrieval by this principal.
 

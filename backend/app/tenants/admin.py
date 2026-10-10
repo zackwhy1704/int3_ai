@@ -103,6 +103,7 @@ def init() -> None:
             GRANT SELECT ON identities TO {r};
             GRANT UPDATE (google_sub, ms_subject) ON identities TO {r};
             GRANT SELECT, INSERT, UPDATE, DELETE ON login_attempts, sessions TO {r};
+            GRANT SELECT, INSERT, UPDATE, DELETE ON service_tokens TO {r};
             GRANT SELECT, INSERT ON retrievals TO {r};
         """).format(r=sql.Identifier(config.CONTROL_ROLE))
         )

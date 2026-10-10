@@ -26,6 +26,22 @@ from translate import (
 ANTHROPIC_BASE = "https://api.anthropic.com/v1"
 ANTHROPIC_VERSION = "2023-06-01"
 
+# Spike instrumentation: append per-call token usage so a harness can attribute
+# tokens to each question (OpenAI-shaped usage is not emitted on the stream
+# path, and Hermes does not record usage for custom providers). Off unless
+# GATEWAY_USAGE_LOG is set, so production behaviour is unchanged.
+_USAGE_LOG = os.environ.get("GATEWAY_USAGE_LOG", "")
+
+
+def _log_usage(input_tokens, output_tokens) -> None:
+    if not _USAGE_LOG:
+        return
+    try:
+        with open(_USAGE_LOG, "a", encoding="utf-8") as fh:
+            fh.write(f"USAGE in={input_tokens or 0} out={output_tokens or 0}\n")
+    except OSError:
+        pass
+
 
 def _headers() -> dict[str, str]:
     return {
@@ -48,7 +64,10 @@ async def complete(openai_body: dict) -> dict:
         )
     if resp.status_code != 200:
         raise HTTPException(status_code=resp.status_code, detail=resp.text)
-    return anthropic_response_to_openai(resp.json(), model)
+    body = resp.json()
+    usage = body.get("usage", {}) or {}
+    _log_usage(usage.get("input_tokens"), usage.get("output_tokens"))
+    return anthropic_response_to_openai(body, model)
 
 
 async def stream(openai_body: dict) -> AsyncGenerator[bytes, None]:
@@ -67,6 +86,8 @@ async def stream(openai_body: dict) -> AsyncGenerator[bytes, None]:
 
     active_tool_index: int | None = None
     tool_counter = 0
+    usage_in = 0
+    usage_out = 0
 
     async with httpx.AsyncClient(timeout=120) as client:
         async with client.stream(
@@ -96,6 +117,15 @@ async def stream(openai_body: dict) -> AsyncGenerator[bytes, None]:
                     continue
 
                 etype = event.get("type")
+
+                if etype == "message_start":
+                    usage_in = (event.get("message", {}).get("usage", {}) or {}).get(
+                        "input_tokens", 0
+                    ) or 0
+                elif etype == "message_delta":
+                    usage_out = (event.get("usage", {}) or {}).get(
+                        "output_tokens", usage_out
+                    ) or usage_out
 
                 if etype == "content_block_start":
                     block = event.get("content_block", {})
@@ -127,5 +157,6 @@ async def stream(openai_body: dict) -> AsyncGenerator[bytes, None]:
                         yield finish_chunk(stop_reason)
 
                 elif etype == "message_stop":
+                    _log_usage(usage_in, usage_out)
                     yield b"data: [DONE]\n\n"
                     return

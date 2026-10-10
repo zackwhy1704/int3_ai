@@ -17,7 +17,7 @@ from fastapi import Depends, HTTPException, Request
 
 from .. import config
 from ..db import control_conn, tenant_conn
-from . import sessions
+from . import service_tokens, sessions
 
 
 @dataclass
@@ -45,27 +45,37 @@ class Principal:
 UNAUTHENTICATED = HTTPException(401, "not signed in")
 
 
-def principal(request: Request) -> Iterator[Principal]:
-    session_id = request.cookies.get(config.SESSION_COOKIE)
-    if not session_id:
-        raise UNAUTHENTICATED
-    with control_conn() as control:
-        s = sessions.lookup(control, session_id)
-        tenant = (
-            s
-            and control.execute(
-                "SELECT name FROM tenants WHERE id = %s", (s["tenant_id"],)
-            ).fetchone()
-        )
-    if not s or not tenant:
-        raise UNAUTHENTICATED
+def _principal_for(
+    tenant_id: str,
+    tenant_name: str,
+    user_id: str,
+    *,
+    email: str | None,
+    session_id: str,
+    csrf_token: str,
+) -> Iterator[Principal]:
+    """Open the tenant db as the tenant's role, load the active user and their
+    scopes, and yield a Principal; close the connection on the way out.
 
-    conn = tenant_conn(s["tenant_id"])
+    The identity has already been established by the caller (a session cookie,
+    or a service token). ``email`` is cross-checked against the user row only on
+    the cookie path, where the session carries an email that must still match
+    the user_id; the service-token path passes None and takes the row's email.
+    Scopes are resolved here on every request, so a revoked membership takes
+    effect immediately regardless of how the caller authenticated.
+    """
+    conn = tenant_conn(tenant_id)
     try:
-        user = conn.execute(
-            "SELECT id, name FROM users WHERE id = %s AND email = %s AND active",
-            (s["user_id"], s["email"]),
-        ).fetchone()
+        if email is None:
+            user = conn.execute(
+                "SELECT id, name, email FROM users WHERE id = %s AND active",
+                (user_id,),
+            ).fetchone()
+        else:
+            user = conn.execute(
+                "SELECT id, name, email FROM users WHERE id = %s AND email = %s AND active",
+                (user_id, email),
+            ).fetchone()
         if user is None:
             raise UNAUTHENTICATED
         scopes = [
@@ -76,18 +86,95 @@ def principal(request: Request) -> Iterator[Principal]:
             )
         ]
         yield Principal(
-            s["tenant_id"],
-            tenant["name"],
+            tenant_id,
+            tenant_name,
             user["id"],
-            s["email"],
+            user["email"],
             user["name"],
             scopes,
-            s["csrf_token"],
+            csrf_token,
             session_id,
             conn,
         )
     finally:
         conn.close()
+
+
+def _tenant_name(tenant_id: str) -> str | None:
+    with control_conn() as control:
+        row = control.execute(
+            "SELECT name FROM tenants WHERE id = %s", (tenant_id,)
+        ).fetchone()
+    return row["name"] if row else None
+
+
+def principal(request: Request) -> Iterator[Principal]:
+    session_id = request.cookies.get(config.SESSION_COOKIE)
+    if not session_id:
+        raise UNAUTHENTICATED
+    with control_conn() as control:
+        s = sessions.lookup(control, session_id)
+    if not s:
+        raise UNAUTHENTICATED
+    tenant_name = _tenant_name(s["tenant_id"])
+    if tenant_name is None:
+        raise UNAUTHENTICATED
+    yield from _principal_for(
+        s["tenant_id"],
+        tenant_name,
+        s["user_id"],
+        email=s["email"],
+        session_id=session_id,
+        csrf_token=s["csrf_token"],
+    )
+
+
+def _bearer(request: Request) -> str | None:
+    auth = request.headers.get("authorization", "")
+    scheme, _, value = auth.partition(" ")
+    return value.strip() if scheme.lower() == "bearer" and value.strip() else None
+
+
+def service_principal(request: Request) -> Iterator[Principal]:
+    """Identity from a service bearer token (the /v1/ machine surface).
+
+    No cookie, no CSRF. The token resolves to (tenant, acting user); scopes come
+    from that user's memberships. session_id is synthesised from the token hash
+    so retrieval binding (/v1/validate) works per token, without a session row.
+    """
+    token = _bearer(request)
+    if token is None:
+        raise UNAUTHENTICATED
+    with control_conn() as control:
+        row = service_tokens.resolve(control, token)
+        tenant = (
+            row
+            and control.execute(
+                "SELECT name FROM tenants WHERE id = %s", (row["tenant_id"],)
+            ).fetchone()
+        )
+    if not row or not tenant:
+        raise UNAUTHENTICATED
+    yield from _principal_for(
+        row["tenant_id"],
+        tenant["name"],
+        row["user_id"],
+        email=None,
+        session_id="svc:" + service_tokens._hash(token)[:16],
+        csrf_token="",
+    )
+
+
+def v1_principal(request: Request) -> Iterator[Principal]:
+    """Auth for the /v1/ machine surface: a service bearer token when present,
+    otherwise the Phase-A session cookie. CSRF is NOT enforced here — /v1/ is
+    called by machine clients (the MCP server), not a browser. Authentication
+    and tenant/user scoping are unchanged; only the CSRF check is dropped,
+    relative to the browser routes that keep csrf_protected."""
+    if _bearer(request) is not None:
+        yield from service_principal(request)
+    else:
+        yield from principal(request)
 
 
 def csrf_protected(request: Request, p: Principal = Depends(principal)) -> Principal:
