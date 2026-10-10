@@ -141,3 +141,12 @@ def test_v1_bearer_without_csrf_is_200(client):
     token = _mint("brindlewood", "priya")
     r = client.post("/v1/brain_ask", json=_ASK, headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 200, r.text
+
+
+@pytest.mark.integration
+def test_v1_cookie_valid_csrf_wrong_origin_is_403(client, as_user):
+    # a matching x-csrf-token does not rescue a foreign Origin
+    h = {**as_user("priya"), "Origin": "https://evil.example"}
+    r = client.post("/v1/brain_ask", json=_ASK, headers=h)
+    assert r.status_code == 403, r.text
+    assert "cross-origin" in r.json()["detail"]

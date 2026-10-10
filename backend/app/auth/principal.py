@@ -179,26 +179,30 @@ def v1_principal(request: Request) -> Iterator[Principal]:
     if _bearer(request) is not None:
         yield from service_principal(request)
         return
-    # Cookie-authenticated: enforce the same CSRF gate as csrf_protected
-    # (same-origin + matching per-session token) before yielding the principal.
+    # Cookie-authenticated: enforce the same CSRF gate as the browser routes
+    # before yielding the principal.
     gen = principal(request)
     p = next(gen)
     try:
-        if request.headers.get("origin") != config.APP_ORIGIN:
-            raise HTTPException(403, "cross-origin request refused")
-        token = request.headers.get("x-csrf-token", "")
-        if not secrets.compare_digest(token, p.csrf_token):
-            raise HTTPException(403, "missing or invalid CSRF token")
+        _check_csrf(request, p)
         yield p
     finally:
         gen.close()
 
 
-def csrf_protected(request: Request, p: Principal = Depends(principal)) -> Principal:
-    """For state-changing requests: same-origin and a matching per-session token."""
+def _check_csrf(request: Request, p: Principal) -> None:
+    """Same-origin + matching per-session token. Raises 403 on failure.
+
+    The one CSRF gate, shared by csrf_protected (browser routes) and
+    v1_principal's cookie path so the two can never drift apart."""
     if request.headers.get("origin") != config.APP_ORIGIN:
         raise HTTPException(403, "cross-origin request refused")
     token = request.headers.get("x-csrf-token", "")
     if not secrets.compare_digest(token, p.csrf_token):
         raise HTTPException(403, "missing or invalid CSRF token")
+
+
+def csrf_protected(request: Request, p: Principal = Depends(principal)) -> Principal:
+    """For state-changing requests: same-origin and a matching per-session token."""
+    _check_csrf(request, p)
     return p
