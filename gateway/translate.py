@@ -23,8 +23,30 @@ from __future__ import annotations
 import json
 import os
 
-DEFAULT_MODEL = os.getenv("LLM_MODEL", "claude-sonnet-4-6")
 DEFAULT_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "4096"))
+
+
+def pinned_model() -> str:
+    """The model the gateway forces on every request, from config (LLM_MODEL,
+    falling back to the backend's ANTHROPIC_MODEL). No hardcoded model id: an
+    unset config fails closed rather than silently serving a stale default, and
+    the client's requested ``model`` is ignored entirely (server pins it)."""
+    model = os.getenv("LLM_MODEL") or os.getenv("ANTHROPIC_MODEL")
+    if not model:
+        raise RuntimeError(
+            "LLM_MODEL (or ANTHROPIC_MODEL) must be set — the gateway pins the model server-side"
+        )
+    return model
+
+
+def clamp_max_tokens(requested: object) -> int:
+    """Client may ask for fewer tokens than the cap, never more."""
+    cap = DEFAULT_MAX_TOKENS
+    try:
+        want = int(requested)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return cap
+    return min(want, cap) if want > 0 else cap
 
 _STOP_REASON_MAP: dict[str, str] = {
     "end_turn": "stop",
@@ -132,9 +154,12 @@ def openai_request_to_anthropic(openai_body: dict) -> dict:
 
     system = next((m["content"] for m in messages if m["role"] == "system"), None)
 
+    # Server pins the model and caps max_tokens: the client's `model` is
+    # ignored (a compromised caller cannot escalate to a bigger/other model),
+    # and max_tokens is clamped to the cap (it may request less, never more).
     body: dict = {
-        "model": openai_body.get("model") or DEFAULT_MODEL,
-        "max_tokens": openai_body.get("max_tokens") or DEFAULT_MAX_TOKENS,
+        "model": pinned_model(),
+        "max_tokens": clamp_max_tokens(openai_body.get("max_tokens")),
         "messages": openai_messages_to_anthropic(messages),
     }
 

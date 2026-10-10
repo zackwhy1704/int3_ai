@@ -33,12 +33,23 @@ ANTHROPIC_VERSION = "2023-06-01"
 _USAGE_LOG = os.environ.get("GATEWAY_USAGE_LOG", "")
 
 
-def _log_usage(input_tokens, output_tokens) -> None:
+def _log_usage(usage: dict, caller: str = "-") -> None:
+    """Append one per-call usage line: plain + cache tokens + the resolved
+    caller (tenant/user from GATEWAY_AUTH=service). Cache tokens are logged
+    because prompt caching makes plain input_tokens undercount real cost — a
+    cache-read turn bills cache_read at a fraction, and the first turn bills
+    cache_creation at a premium; item-5 numbers are meaningless without them."""
     if not _USAGE_LOG:
         return
     try:
         with open(_USAGE_LOG, "a", encoding="utf-8") as fh:
-            fh.write(f"USAGE in={input_tokens or 0} out={output_tokens or 0}\n")
+            fh.write(
+                f"USAGE caller={caller} "
+                f"in={usage.get('input_tokens') or 0} "
+                f"out={usage.get('output_tokens') or 0} "
+                f"cache_write={usage.get('cache_creation_input_tokens') or 0} "
+                f"cache_read={usage.get('cache_read_input_tokens') or 0}\n"
+            )
     except OSError:
         pass
 
@@ -51,10 +62,10 @@ def _headers() -> dict[str, str]:
     }
 
 
-async def complete(openai_body: dict) -> dict:
+async def complete(openai_body: dict, caller: str = "-") -> dict:
     """Non-streaming: send request, return OpenAI-format dict."""
     anthropic_body = openai_request_to_anthropic(openai_body)
-    model: str = openai_body.get("model") or anthropic_body["model"]
+    model: str = anthropic_body["model"]  # server-pinned; client model ignored
 
     async with httpx.AsyncClient(timeout=120) as client:
         resp = await client.post(
@@ -65,12 +76,11 @@ async def complete(openai_body: dict) -> dict:
     if resp.status_code != 200:
         raise HTTPException(status_code=resp.status_code, detail=resp.text)
     body = resp.json()
-    usage = body.get("usage", {}) or {}
-    _log_usage(usage.get("input_tokens"), usage.get("output_tokens"))
+    _log_usage(body.get("usage", {}) or {}, caller)
     return anthropic_response_to_openai(body, model)
 
 
-async def stream(openai_body: dict) -> AsyncGenerator[bytes, None]:
+async def stream(openai_body: dict, caller: str = "-") -> AsyncGenerator[bytes, None]:
     """
     Streaming: yields OpenAI-format SSE bytes.
 
@@ -88,6 +98,8 @@ async def stream(openai_body: dict) -> AsyncGenerator[bytes, None]:
     tool_counter = 0
     usage_in = 0
     usage_out = 0
+    cache_write = 0
+    cache_read = 0
 
     async with httpx.AsyncClient(timeout=120) as client:
         async with client.stream(
@@ -119,9 +131,10 @@ async def stream(openai_body: dict) -> AsyncGenerator[bytes, None]:
                 etype = event.get("type")
 
                 if etype == "message_start":
-                    usage_in = (event.get("message", {}).get("usage", {}) or {}).get(
-                        "input_tokens", 0
-                    ) or 0
+                    mu = event.get("message", {}).get("usage", {}) or {}
+                    usage_in = mu.get("input_tokens", 0) or 0
+                    cache_write = mu.get("cache_creation_input_tokens", 0) or 0
+                    cache_read = mu.get("cache_read_input_tokens", 0) or 0
                 elif etype == "message_delta":
                     usage_out = (event.get("usage", {}) or {}).get(
                         "output_tokens", usage_out
@@ -157,6 +170,14 @@ async def stream(openai_body: dict) -> AsyncGenerator[bytes, None]:
                         yield finish_chunk(stop_reason)
 
                 elif etype == "message_stop":
-                    _log_usage(usage_in, usage_out)
+                    _log_usage(
+                        {
+                            "input_tokens": usage_in,
+                            "output_tokens": usage_out,
+                            "cache_creation_input_tokens": cache_write,
+                            "cache_read_input_tokens": cache_read,
+                        },
+                        caller,
+                    )
                     yield b"data: [DONE]\n\n"
                     return

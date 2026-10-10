@@ -1,12 +1,17 @@
 """
 Bearer token verification for the gateway.
 
-GATEWAY_AUTH=none  — pass-through (dev only; must be set explicitly in compose).
-                     The gateway REFUSES to start with GATEWAY_AUTH=none when
-                     ENV=production (guard in main.py lifespan).
-                     Tested by: test_gateway_auth_none_rejected_in_production.
-GATEWAY_AUTH=oidc  — Full RS256 verification via authcore.verify_async (async,
-                     non-blocking). OIDC_AUDIENCE must be set.
+GATEWAY_AUTH=none    — pass-through (dev only; must be set explicitly in compose).
+                       The gateway REFUSES to start with GATEWAY_AUTH=none when
+                       ENV=production (guard in main.py lifespan).
+                       Tested by: test_gateway_auth_none_rejected_in_production.
+GATEWAY_AUTH=service — per-user machine token (this topology's real mode: the
+                       caller is an agent in a per-user container, not a human).
+                       Verified against the control-DB service_tokens table;
+                       resolves to "tenant/user". See service_auth.py.
+GATEWAY_AUTH=oidc    — Full RS256 verification via authcore.verify_async (async,
+                       non-blocking). OIDC_AUDIENCE must be set. For human
+                       browser callers, not this agent topology.
 
 Any other value — 501 Not Implemented (fail safe, not fail open).
 
@@ -48,6 +53,19 @@ async def verify_token(
     """
     if GATEWAY_AUTH == "none":
         return "dev"
+
+    if GATEWAY_AUTH == "service":
+        # Per-user machine token (the MCP/Hermes caller is an agent, not a human,
+        # so there is no OIDC ID token). Resolves to "tenant/user" for cost
+        # attribution; 401 on missing / unknown / revoked.
+        if not credentials:
+            raise HTTPException(status_code=401, detail="Missing Authorization header")
+        import service_auth
+
+        identity = service_auth.resolve(credentials.credentials)
+        if identity is None:
+            raise HTTPException(status_code=401, detail="Invalid or revoked service token")
+        return identity
 
     if GATEWAY_AUTH == "oidc":
         if not credentials:

@@ -61,5 +61,5 @@ async def chat_completions(
 ):
     body = await request.json()
     if body.get("stream"):
-        return StreamingResponse(stream(body), media_type="text/event-stream")
-    return await complete(body)
+        return StreamingResponse(stream(body, _caller), media_type="text/event-stream")
+    return await complete(body, _caller)
