@@ -122,3 +122,57 @@ def test_dev_mode_routes_to_env_anthropic(monkeypatch):
     monkeypatch.setenv("LLM_MODEL", "claude-sonnet-5-5")
     r = routing.resolve("dev", None)
     assert r.provider == "anthropic" and r.api_key == "env-key" and r.model == "claude-sonnet-5-5"
+
+
+# --- item d: per-tenant allowlist (400 on miss, no substitution) + /v1/models -
+
+def _cfg(provider, allowlist, *, key_owner="theirs", cap=None, key="sk-t"):
+    from provider_config import ProviderConfig
+
+    return ProviderConfig(
+        tenant_id="brindlewood", provider=provider, base_url="https://x/v1",
+        key_owner=key_owner, model_allowlist=allowlist, daily_cap_usd=cap, api_key=key,
+    )
+
+
+def test_allowlist_miss_is_400_and_hit_keeps_exact_model(monkeypatch):
+    cfg = _cfg("anthropic", ["claude-opus-4-8"])
+    monkeypatch.setattr(routing.provider_config, "load", lambda t, p: cfg if p == "anthropic" else None)
+
+    # A model not on the allowlist is rejected — never silently substituted.
+    with pytest.raises(routing.HTTPException) as ei:
+        routing.resolve("brindlewood/priya", "claude-opus-4-7-not-allowed")
+    assert ei.value.status_code == 400 and "not on an allowlist" in ei.value.detail
+
+    # A model on the allowlist resolves to that exact model (no rewrite).
+    r = routing.resolve("brindlewood/priya", "claude-opus-4-8")
+    assert r.model == "claude-opus-4-8" and r.provider == "anthropic" and r.api_key == "sk-t"
+
+
+def test_list_models_is_sorted_deduped_union(monkeypatch):
+    a = _cfg("anthropic", ["claude-b", "claude-a"])
+    o = _cfg("openai", ["gpt-a", "claude-a"])
+    monkeypatch.setattr(routing.provider_config, "load", lambda t, p: {"anthropic": a, "openai": o}[p])
+    assert routing.list_models("brindlewood/priya") == ["claude-a", "claude-b", "gpt-a"]
+
+
+def test_list_models_dev_mode_is_pinned(monkeypatch):
+    monkeypatch.setenv("LLM_MODEL", "claude-sonnet-5-5")
+    assert routing.list_models("dev") == ["claude-sonnet-5-5"]
+
+
+def test_v1_models_endpoint_openai_shape(monkeypatch):
+    from fastapi.testclient import TestClient
+    import main
+
+    monkeypatch.setattr(main.routing, "list_models", lambda caller: ["claude-x", "gpt-mid"])
+    main.app.dependency_overrides[main.verify_token] = lambda: "brindlewood/priya"
+    try:
+        resp = TestClient(main.app).get("/v1/models")
+    finally:
+        main.app.dependency_overrides.clear()
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["object"] == "list"
+    assert [m["id"] for m in body["data"]] == ["claude-x", "gpt-mid"]
+    assert all(m["object"] == "model" for m in body["data"])

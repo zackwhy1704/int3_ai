@@ -77,6 +77,30 @@ def resolve(caller: str, model: Optional[str]) -> Route:
     )
 
 
+def list_models(caller: str) -> list[str]:
+    """The models this caller may use — exactly the tenant's allowlist, nothing
+    more. Feeds GET /v1/models so a client's model picker can only ever offer
+    allowlisted models (the 400-on-miss in resolve() is the hard gate; this is
+    the cooperative hint). Dev/none mode has no allowlist, so it advertises just
+    the pinned model."""
+    if "/" not in caller:
+        from translate import pinned_model
+
+        try:
+            return [pinned_model()]
+        except RuntimeError:
+            return []
+
+    tenant_id = caller.split("/", 1)[0]
+    models: list[str] = []
+    for provider in ("anthropic", "openai"):
+        cfg = provider_config.load(tenant_id, provider)
+        if cfg:
+            models.extend(cfg.model_allowlist)
+    # De-dup, stable order, so the picker list is deterministic.
+    return sorted(set(models))
+
+
 def normalise_usage(provider: str, usage: dict) -> dict:
     """Collapse each provider's usage shape to {input, output, cache_read,
     cache_write}. OpenAI reports cache reads at

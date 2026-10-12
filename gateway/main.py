@@ -62,6 +62,21 @@ async def health() -> dict:
     return {"status": "ok", "version": "0.3.0"}
 
 
+@app.get("/v1/models")
+async def list_models(_caller: str = Depends(verify_token)):
+    """OpenAI-compatible model list. Returns exactly the caller's tenant
+    allowlist so a client's model picker can only offer allowlisted models.
+    This is the cooperative hint; routing.resolve() is the hard 400-on-miss
+    gate that a hand-crafted request can't get around."""
+    models = routing.list_models(_caller)
+    return {
+        "object": "list",
+        "data": [
+            {"id": m, "object": "model", "owned_by": "company-brain"} for m in models
+        ],
+    }
+
+
 @app.post("/v1/chat/completions")
 async def chat_completions(
     request: Request,
