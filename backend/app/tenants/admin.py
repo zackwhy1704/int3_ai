@@ -126,9 +126,14 @@ def init() -> None:
                         gw, sql.Literal(config.GATEWAY_DB_PASSWORD)
                     )
                 )
-            # Revoke any inherited public grants, then grant exactly SELECT on
-            # service_tokens. REVOKE ALL on the table first so a re-run that
-            # ever over-granted is corrected (idempotent, fail-safe).
+            # Grant exactly SELECT on service_tokens. The REVOKE ALL ... FROM gw
+            # only strips grants made TO gateway_auth itself (a fix-forward if a
+            # prior run over-granted) — it does NOT touch PUBLIC grants. That is
+            # acceptable here because this control DB already revokes ALL on the
+            # schema from PUBLIC (line ~98) and never grants table privileges to
+            # PUBLIC, so PUBLIC confers nothing. The exhaustive has_table_privilege
+            # test (test_gateway_db_role.py) is what actually guarantees the role
+            # holds SELECT-on-service_tokens and nothing else, PUBLIC included.
             conn.execute(
                 sql.SQL("""
                 GRANT CONNECT ON DATABASE {db} TO {g};

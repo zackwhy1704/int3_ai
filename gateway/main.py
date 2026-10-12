@@ -43,6 +43,12 @@ async def lifespan(app: FastAPI):
             "GATEWAY_AUTH=none is not allowed when ENV=production. "
             "Set GATEWAY_AUTH=oidc and configure authcore for production."
         )
+    # Fail closed if the gateway's DB role can mutate service_tokens (an env
+    # pointing at an over-privileged role must not silently enable token minting).
+    if GATEWAY_AUTH == "service":
+        import service_auth
+
+        service_auth.assert_least_privilege()
     yield
 
 

@@ -68,5 +68,38 @@ def resolve_from_db(token: str) -> Optional[str]:
     return f"{row['tenant_id']}/{row['user_id']}"
 
 
+def _gateway_dsn() -> dict:
+    return {
+        "host": os.getenv("DB_HOST", "db"),
+        "port": int(os.getenv("DB_PORT", "5432")),
+        "dbname": os.getenv("CONTROL_DB", "control"),
+        "user": os.environ["GATEWAY_DB_ROLE"],
+        "password": os.environ["GATEWAY_DB_PASSWORD"],
+    }
+
+
+def assert_least_privilege() -> None:
+    """Fail closed at boot if the gateway's DB role can MUTATE service_tokens.
+
+    An env that points the gateway at an over-privileged role (e.g. app_control,
+    which can mint tokens) must refuse to start rather than silently enabling
+    token forgery. Verifies against the live grant via has_table_privilege, so
+    it catches a misconfig the code alone cannot."""
+    import psycopg
+
+    with psycopg.connect(**_gateway_dsn(), autocommit=True) as conn:
+        for priv in ("INSERT", "UPDATE", "DELETE"):
+            has = conn.execute(
+                "SELECT has_table_privilege(current_user, 'service_tokens', %s)", (priv,)
+            ).fetchone()[0]
+            if has:
+                user = conn.execute("SELECT current_user").fetchone()[0]
+                raise RuntimeError(
+                    f"gateway DB role {user!r} has {priv} on service_tokens; "
+                    "refusing to start — the gateway needs SELECT only "
+                    "(point GATEWAY_DB_ROLE at gateway_auth, not app_control)"
+                )
+
+
 # Indirection point for tests (monkeypatch gateway.service_auth.resolve).
 resolve = resolve_from_db
