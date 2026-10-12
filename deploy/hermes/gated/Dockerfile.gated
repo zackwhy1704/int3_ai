@@ -1,0 +1,13 @@
+# Gated per-user Hermes backend image: stock Hermes + the default-deny route
+# proxy and the startup gate that refuses to serve unless every security
+# invariant holds (see startup-gate.sh).
+#
+# BASE is the stock Hermes backend packaged as a Docker image — the one external
+# dependency of this deploy. Build or pull it first and pass it as BASE:
+#   docker build -t hermes-gated --build-arg BASE=hermes-spike-img \
+#     -f deploy/hermes/gated/Dockerfile.gated deploy/hermes/gated
+ARG BASE=hermes-spike-img
+FROM ${BASE}
+USER root
+COPY route_proxy.py egress_proxy.py allowlist.txt startup-gate.sh /opt/proxy/
+RUN chmod +x /opt/proxy/startup-gate.sh

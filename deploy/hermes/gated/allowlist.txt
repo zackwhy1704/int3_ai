@@ -1,0 +1,62 @@
+# Company Brain — default-deny route allowlist for the Hermes backend.
+#
+# Format: METHOD /path   or   METHOD /prefix*        (query strings ignored)
+# Anything not listed gets 403 at the proxy and never reaches the backend.
+#
+# Derived by measurement, not by reading the source: every rule below was
+# observed in a real desktop session against stock Hermes (boot, chat, sessions,
+# artifacts, scheduled jobs, files pane, review pane), then the app was re-run
+# with only these rules to see what broke. See TASK H in the spike report.
+#
+# NOTE on /api/ws: it is ONE route but it is the gateway's JSON-RPC channel.
+# Admitting it admits every method behind it, including shell.exec. A path
+# allowlist cannot constrain what travels inside the socket.
+
+# --- app shell / boot ----------------------------------------------------
+GET  /api/status                    # boot readiness + version
+GET  /api/health                    # connection health poll
+GET  /api/config                    # composer + UI settings
+GET  /api/config/defaults           # settings defaults merged at boot
+GET  /api/profiles                  # profile list (single profile in practice)
+GET  /api/profiles/active           # which profile the window is on
+
+# --- chat ----------------------------------------------------------------
+GET  /api/ws                        # gateway WebSocket: prompts, streaming replies, tool events
+GET  /api/model/info                # composer shows the active model
+GET  /api/sessions/*                # transcript load: /{id}/messages, /{id}/timeline
+POST /api/sessions/owner-backfill   # boot-time ownership repair for the session list
+
+# --- sessions ------------------------------------------------------------
+GET  /api/profiles/sessions         # session list
+GET  /api/profiles/sessions/sidebar # sidebar session list
+
+# --- artifacts -----------------------------------------------------------
+# Artifacts are extracted from session messages: covered by GET /api/sessions/*.
+
+# --- files pane (read only) -----------------------------------------------
+GET  /api/fs/default-cwd            # pane's starting directory
+GET  /api/fs/list                   # directory listing (confined by HERMES_DASHBOARD_FILES_ROOT)
+GET  /api/fs/read-text              # text preview
+GET  /api/fs/read-data-url          # image/PDF preview
+# EXCLUDED: POST /api/fs/write-text — unconfined write (no Request, no guard,
+#           no sensitive-path denylist). Not needed: users ask, they do not edit.
+
+# --- review pane (read only) ----------------------------------------------
+GET  /api/git/status                # branch + change counts
+GET  /api/git/review/list           # changed files
+GET  /api/git/review/diff           # per-file diff
+GET  /api/git/review/ship-info      # ahead/behind summary
+GET  /api/git/review/rev-parse      # ref resolution
+GET  /api/git/file-diff             # file diff view
+# EXCLUDED: git stage / commit / push / worktree mutations.
+
+# --- scheduled jobs (read only) -------------------------------------------
+GET  /api/cron/jobs                 # job list
+GET  /api/cron/blueprints           # job templates shown on the Cron page
+# EXCLUDED: POST /api/cron/* (create/trigger jobs) — a scheduled agent run is
+#           code execution on a timer; provisioned by us, not created by users.
+
+# --- MCP tool calls ---------------------------------------------------------
+# None at this layer: the agent calls MCP tools from inside the backend process.
+# EXCLUDED: /api/mcp/servers (add/edit/delete), /api/mcp/catalog/install — the
+#           brain MCP server is provisioned container-side; users do not add tools.

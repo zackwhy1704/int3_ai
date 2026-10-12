@@ -1,0 +1,128 @@
+# Thin-client Hermes deploy (synthetic-data pilot).
+#
+#   stock Hermes Desktop ──▶ per-user gated backend ──▶ brain over MCP (per-user token)
+#                                                   └──▶ LLM over our BYOK gateway (service mode)
+#
+# This file brings up the SHARED base: control DB, one-shot init+provision, the
+# brain API, the BYOK gateway in service mode, and the default-deny egress proxy.
+# Per-user pieces (one MCP sidecar + one gated Hermes backend per user) are added
+# by provision-user.sh, not here.
+#
+#   cp .env.example .env && $EDITOR .env
+#   docker compose -f deploy/hermes/docker-compose.yml up -d --build
+#   ./deploy/hermes/provision-user.sh brindlewood marcus 9131
+#
+# Secrets come only from .env (never committed). All data is synthetic.
+name: hermes-deploy
+
+x-admin-env: &admin-env
+  ADMIN_DB_USER: ${ADMIN_DB_USER:-brain}
+  ADMIN_DB_PASSWORD: ${ADMIN_DB_PASSWORD:?set ADMIN_DB_PASSWORD in .env}
+
+networks:
+  # The internal network has NO route to the internet. User backends and MCP
+  # sidecars live here only; their one way out is edge's CONNECT proxy.
+  tenant-net:
+    name: hermes-deploy-tenant
+    internal: true
+  # Containers that must reach the DB or the model provider also join ext.
+  ext:
+    name: hermes-deploy-ext
+
+volumes:
+  pgdata:
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${ADMIN_DB_USER:-brain}
+      POSTGRES_PASSWORD: ${ADMIN_DB_PASSWORD:?set ADMIN_DB_PASSWORD in .env}
+      POSTGRES_DB: control
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks: [ext]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d control"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # One-shot: create control schema + least-privilege roles (incl. gateway_auth,
+  # created because GATEWAY_DB_PASSWORD is set) and provision the brindlewood
+  # tenant from the synthetic seed. Idempotent: re-provision is tolerated.
+  init:
+    build: {context: ../.., dockerfile: backend/Dockerfile, target: production}
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        python -m app.tenants.admin init
+        python -m app.tenants.admin provision --id brindlewood \
+          --name "Brindlewood Supply Co." --seed /seed/brindlewood \
+          || echo "[init] brindlewood already provisioned — skipping"
+    environment:
+      <<: *admin-env
+      ENV: ${ENV:-development}
+      APP_CONTROL_PASSWORD: ${APP_CONTROL_PASSWORD:?set APP_CONTROL_PASSWORD in .env}
+      TENANT_DB_KEY: ${TENANT_DB_KEY:?set TENANT_DB_KEY in .env}
+      GATEWAY_DB_PASSWORD: ${GATEWAY_DB_PASSWORD:?set GATEWAY_DB_PASSWORD in .env}
+    volumes:
+      - ../../seed:/seed:ro
+    networks: [ext]
+    depends_on:
+      db: {condition: service_healthy}
+
+  brain:
+    build: {context: ../.., dockerfile: backend/Dockerfile, target: production}
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      ENV: ${ENV:-development}
+      APP_CONTROL_PASSWORD: ${APP_CONTROL_PASSWORD:?set APP_CONTROL_PASSWORD in .env}
+      TENANT_DB_KEY: ${TENANT_DB_KEY:?set TENANT_DB_KEY in .env}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-5-5}
+    networks:
+      ext: {}
+      tenant-net:
+        aliases: [brain]        # MCP sidecars reach it at http://brain:8000
+    depends_on:
+      init: {condition: service_completed_successfully}
+
+  # BYOK gateway, service mode: resolves a per-user token -> tenant/user, injects
+  # the TENANT's provider key, enforces the per-tenant model allowlist + caps.
+  gateway:
+    build: {context: ../.., dockerfile: gateway/Dockerfile}
+    environment:
+      ENV: ${ENV:-development}
+      GATEWAY_AUTH: service
+      PORT: "8001"
+      LLM_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-5-5}
+      GATEWAY_DB_ROLE: gateway_auth
+      GATEWAY_DB_PASSWORD: ${GATEWAY_DB_PASSWORD:?set GATEWAY_DB_PASSWORD in .env}
+      CONTROL_DB: control
+      DB_HOST: db
+      TENANT_KEY_KEK: ${TENANT_KEY_KEK:?set TENANT_KEY_KEK in .env}
+    networks:
+      ext: {}                   # DB + model-provider egress live here
+      tenant-net:
+        aliases: [brain-gateway]  # Hermes model.base_url -> http://brain-gateway:8001/v1
+    depends_on:
+      init: {condition: service_completed_successfully}
+
+  # Default-deny egress proxy. User backends route all HTTP(S) through it; with
+  # EGRESS_ALLOW empty every CONNECT is refused, so a user backend can reach only
+  # the brain + gateway (direct, via no_proxy) and nothing on the internet.
+  edge:
+    image: python:3.12-slim
+    command: ["python", "/opt/egress_proxy.py"]
+    environment:
+      EGRESS_ALLOW: ${EGRESS_ALLOW:-}   # empty = deny-all (the pilot default)
+      EGRESS_PORT: "3128"
+    volumes:
+      - ./gated/egress_proxy.py:/opt/egress_proxy.py:ro
+    networks:
+      ext: {}
+      tenant-net:
+        aliases: [edge]

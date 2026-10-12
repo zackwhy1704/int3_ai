@@ -1,0 +1,3 @@
+# Never commit real secrets or per-user connect files.
+.env
+connect/
