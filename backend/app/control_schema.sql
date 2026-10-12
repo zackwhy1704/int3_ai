@@ -60,6 +60,27 @@ CREATE TABLE IF NOT EXISTS service_tokens (
     revoked_at  timestamptz
 );
 
+-- Per-tenant provider configuration for the gateway (BYOK custodian).
+-- One row per (tenant, provider): the provider's base_url, who owns the key
+-- (ours|theirs), the model allowlist, the envelope-encrypted provider key, and
+-- a daily spend cap (mandatory when key_owner='ours' — enforced by the gateway,
+-- not a DB constraint, so a bundled tenant with no cap refuses to serve).
+-- key_ciphertext is an envelope blob (gateway/keyvault.py); the plaintext key
+-- is never stored here. The gateway reads this table (SELECT only) and decrypts
+-- with the KEK from its env; the admin CLI (operator creds) writes it.
+CREATE TABLE IF NOT EXISTS tenant_providers (
+    tenant_id       text NOT NULL REFERENCES tenants(id),
+    provider        text NOT NULL,
+    base_url        text NOT NULL,
+    key_owner       text NOT NULL CHECK (key_owner IN ('ours', 'theirs')),
+    model_allowlist text[] NOT NULL DEFAULT '{}',
+    key_ciphertext  text,
+    daily_cap_usd   numeric,
+    created_at      timestamptz NOT NULL DEFAULT now(),
+    updated_at      timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, provider)
+);
+
 -- Retrieval-bound citation tracking (A4).
 -- Stores the set of claim_ids and chunk_ids returned by /v1/search or
 -- /v1/brain_ask, keyed to session_id + tenant_id. The /v1/validate endpoint

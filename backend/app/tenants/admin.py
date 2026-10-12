@@ -140,6 +140,7 @@ def init() -> None:
                 GRANT USAGE ON SCHEMA public TO {g};
                 REVOKE ALL ON ALL TABLES IN SCHEMA public FROM {g};
                 GRANT SELECT ON service_tokens TO {g};
+                GRANT SELECT ON tenant_providers TO {g};
             """).format(db=sql.Identifier(config.CONTROL_DB), g=gw)
             )
     print("control plane ready")

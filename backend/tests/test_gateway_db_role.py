@@ -51,12 +51,13 @@ def test_gateway_role_has_exactly_select_on_service_tokens_and_nothing_else(gate
             )
         ]
         assert "service_tokens" in tables
+        select_only = {"service_tokens", "tenant_providers"}  # the gateway's read set
         for t in tables:
             held = [
                 p for p in _ALL_PRIVS
                 if c.execute("SELECT has_table_privilege(%s,%s,%s) v", (role, t, p)).fetchone()["v"]
             ]
-            expected = ["SELECT"] if t == "service_tokens" else []
+            expected = ["SELECT"] if t in select_only else []
             assert held == expected, f"{role} on {t}: held {held}, expected {expected}"
         assert not c.execute(
             "SELECT has_schema_privilege(%s,'public','CREATE') v", (role,)
