@@ -15,10 +15,10 @@ GW            ?= gateway-spike
 BRAIN_URL     ?= http://brain:8000
 QUESTIONS_SRC ?= seed/brindlewood/questions.yaml
 
-# Anthropic models evaluated. IDs verified against Anthropic's live /v1/models
-# endpoint: claude-sonnet-5-5 (current default) and claude-haiku-5-5 (cheaper
-# tier, same generation).
-ANTHROPIC_MODELS ?= claude-sonnet-5-5,claude-haiku-5-5
+# MVP model, verified against Anthropic's live /v1/models endpoint. Sonnet ONLY:
+# claude-haiku-5-5 is "pending stricter eval" and is on no default allowlist
+# (see eval/README.md). Override ANTHROPIC_MODELS to evaluate others.
+ANTHROPIC_MODELS ?= claude-sonnet-5-5
 
 .PHONY: eval eval-openai _eval_stage
 

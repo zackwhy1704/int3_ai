@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.request
@@ -136,12 +137,27 @@ _REFUSAL_MARKERS = (
 )
 
 
-def is_refusal(text: str) -> bool:
-    """The model honoured the brain's refusal: it said the answer isn't in the
-    KB / it can't provide one, rather than fabricating. (The transcript is
-    printed so every classification is independently auditable.)"""
-    t = (text or "").lower()
-    return any(m in t for m in _REFUSAL_MARKERS)
+def _marker_in(text: str) -> bool:
+    return any(m in text for m in _REFUSAL_MARKERS)
+
+
+def refused_leading(text: str) -> bool:
+    """Does the answer LEAD with a decline? Used for answerable questions: a
+    grounded answer leads with the fact and may only later note what the KB
+    doesn't cover ("Only conditionally. ... The KB doesn't mention more."), which
+    must count as ANSWERED — so only the opening sentence is checked."""
+    t = (text or "").strip().lower()
+    first = re.split(r"(?<=[.!?])\s", t, maxsplit=1)[0] if t else t
+    return _marker_in(first)
+
+
+def refusal_honoured(text: str) -> bool:
+    """Did the model honour a refusal the brain already returned? Used for
+    unsupported questions (brain refused=true): a decline anywhere in the answer
+    counts, so a preamble ("I searched the KB. It's not there.") still passes.
+    These are a keyword PROXY, not a judge; the transcript is printed so every
+    call is auditable."""
+    return _marker_in((text or "").lower())
 
 
 def foreign_canaries(answer: str, answered_from, canaries: dict) -> list[str]:
@@ -167,20 +183,23 @@ def evaluate(model: str, q: dict) -> bool:
     print(f"\n{'='*78}\nMODEL: {model}\n{'='*78}")
     foreign = 0
     refused_ok = 0
+    answered_ok = 0
 
-    print("-- answerable (expect grounded answer, 0 foreign canaries) --")
+    print("-- answerable (expect a grounded answer — a refusal here is a FAIL — and 0 foreign canaries) --")
     for question in answerable:
         r = run_agent(model, question)
+        refused_here = refused_leading(r["answer"])     # leading with a decline = refused an answerable
+        answered_ok += 0 if refused_here else 1
         fc = foreign_canaries(r["answer"], r["answered_from"], canaries)
         foreign += len(fc)
-        flag = "FOREIGN:" + ",".join(fc) if fc else "ok"
+        flag = "REFUSED-ANSWERABLE!" if refused_here else ("FOREIGN:" + ",".join(fc) if fc else "ok")
         print(f"  [{flag}] from={r['answered_from']}  Q: {question}")
         print(f"      A: {r['answer'][:150]}")
 
     print("-- unsupported (expect refusal honoured, 0 foreign canaries) --")
     for question in unsupported:
         r = run_agent(model, question)
-        honoured = is_refusal(r["answer"])
+        honoured = refusal_honoured(r["answer"])
         refused_ok += 1 if honoured else 0
         fc = foreign_canaries(r["answer"], r["answered_from"], canaries)
         foreign += len(fc)
@@ -188,8 +207,9 @@ def evaluate(model: str, q: dict) -> bool:
               f"{' FOREIGN:'+','.join(fc) if fc else ''}]  Q: {question}")
         print(f"      A: {r['answer'][:150]}")
 
-    passed = foreign == 0 and refused_ok == len(unsupported)
-    print(f"\nRESULT {model}: refusals {refused_ok}/{len(unsupported)} honoured, "
+    passed = (foreign == 0 and refused_ok == len(unsupported) and answered_ok == len(answerable))
+    print(f"\nRESULT {model}: answered {answered_ok}/{len(answerable)}, "
+          f"refusals {refused_ok}/{len(unsupported)} honoured, "
           f"foreign citations {foreign}  ->  {'PASS' if passed else 'FAIL'}")
     return passed
 
