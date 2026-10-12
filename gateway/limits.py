@@ -35,13 +35,31 @@ _WINDOW_S = 60.0
 _hits: dict[str, deque] = defaultdict(deque)
 _lock = threading.Lock()
 
-# Approximate list prices, USD per 1M tokens: (input, output). GUARDRAIL
-# estimates only — not billing. Override per deployment with GATEWAY_PRICES,
-# e.g. GATEWAY_PRICES='{"claude-sonnet-5-5":[3,15]}'.
-_DEFAULT_PRICES: dict[str, tuple[float, float]] = {
-    "claude-sonnet-5-5": (3.0, 15.0),
+# USD per 1M tokens: (input, output). GUARDRAIL estimates for the daily cap, not
+# billing. Every allowlisted model MUST have an entry with a price source — a URL
+# or "UNVERIFIED" when no confirmed public price is on hand. Override per
+# deployment with GATEWAY_PRICES, e.g. GATEWAY_PRICES='{"claude-sonnet-5-5":[3,15]}'.
+_PRICE_SOURCES: dict[str, str] = {
+    # MVP allowlist is claude-sonnet-5-5 only. UNVERIFIED: no confirmed public
+    # price URL on hand; (3,15)/Mtok is a conservative placeholder. Set a real
+    # source before anything an invoice depends on reads this.
+    "claude-sonnet-5-5": "UNVERIFIED",
 }
-_FALLBACK_PRICE = (3.0, 15.0)
+_DEFAULT_PRICES: dict[str, tuple[float, float]] = {
+    "claude-sonnet-5-5": (3.0, 15.0),  # UNVERIFIED — see _PRICE_SOURCES
+}
+_FALLBACK_PRICE = (3.0, 15.0)  # UNVERIFIED — used for any model absent above
+
+# Health: set when a key_owner='ours' spend write fails. A tenant WE pay for then
+# runs with an under-counted cap, so GET /health reports it (degraded) rather
+# than only logging. Cleared on the next successful write for that tenant.
+_spend_health: dict | None = None
+
+
+def spend_health() -> dict | None:
+    """None when healthy, else {tenant, error, at} for the last ours-key spend
+    write that failed. Surfaced by the gateway's GET /health."""
+    return _spend_health
 
 
 def _prices() -> dict:
@@ -107,6 +125,13 @@ def _read_spend(tenant_id: str) -> float:
     return float(row[0]) if row else 0.0
 
 
+# Check-then-record overshoot bound: check_daily_cap() reads the spend recorded
+# BEFORE this request; record_spend() adds this request's cost AFTER it finishes.
+# So the cap can be exceeded by at most the total cost of the requests in flight
+# when the threshold is crossed — bounded per request by (input + max_tokens
+# output) * price. With one request at a time per user, overshoot <= one
+# request's cost. This is a guardrail, not a hard ceiling; a hard ceiling would
+# need a reserve-before-call debit.
 def check_daily_cap(tenant_id: str, cap_usd) -> None:
     """Raise 429 if the tenant has already reached its daily cap. No cap -> allow
     (and no DB read, so dev/none callers never touch the DB)."""
@@ -121,11 +146,17 @@ def check_daily_cap(tenant_id: str, cap_usd) -> None:
         )
 
 
-def record_spend(caller: str, model: str, usage: dict) -> None:
+def record_spend(caller: str, model: str, usage: dict, key_owner: str = "theirs") -> None:
     """Add one call's estimated cost to the tenant's daily counter. Best-effort:
-    a write failure is logged and swallowed so it never breaks the LLM response
-    (the cap then under-counts until the next successful write). No-ops for dev
-    callers (no tenant) and zero-cost calls."""
+    a write failure never breaks the LLM response (the cap then under-counts
+    until the next successful write). No-ops for dev callers (no tenant) and
+    zero-cost calls.
+
+    Failure severity depends on who pays: for key_owner='ours' a failed write
+    means a tenant WE pay for is now running with an under-counted cap, so it is
+    logged at ERROR and flips the spend health flag (GET /health -> degraded);
+    for 'theirs' it is a WARNING (the client owns their own spend)."""
+    global _spend_health
     if "/" not in caller:
         return
     tenant_id = caller.split("/", 1)[0]
@@ -147,5 +178,13 @@ def record_spend(caller: str, model: str, usage: dict) -> None:
                 "   updated_at = now()",
                 (tenant_id, _today(), cost),
             )
+        if _spend_health and _spend_health.get("tenant") == tenant_id:
+            _spend_health = None  # recovered
     except Exception as exc:  # noqa: BLE001 — best-effort; never break the response
-        log.warning("usage recording failed for tenant %s: %s", tenant_id, exc)
+        if key_owner == "ours":
+            log.error("usage recording FAILED for OURS-key tenant %s: %s — daily cap is "
+                      "now UNDER-COUNTING for a tenant we pay for", tenant_id, exc)
+            _spend_health = {"tenant": tenant_id, "error": f"{type(exc).__name__}: {exc}",
+                             "at": datetime.datetime.now(datetime.timezone.utc).isoformat()}
+        else:
+            log.warning("usage recording failed for tenant %s: %s", tenant_id, exc)

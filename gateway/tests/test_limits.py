@@ -88,3 +88,21 @@ def test_record_spend_noops_for_dev_caller(monkeypatch):
                         lambda: (_ for _ in ()).throw(AssertionError("no DB for dev caller")))
     limits.record_spend("dev", "claude-sonnet-5-5",
                         {"input": 10, "output": 10, "cache_read": 0, "cache_write": 0})
+
+
+def test_ours_key_spend_write_failure_sets_health_flag(monkeypatch):
+    # A spend-write failure is swallowed (never breaks the response), but for a
+    # tenant WE pay for (key_owner='ours') it flips the /health spend flag.
+    import service_auth
+    monkeypatch.setattr(service_auth, "_gateway_dsn",
+                        lambda: (_ for _ in ()).throw(RuntimeError("db down")))
+    limits._spend_health = None
+    usage = {"input": 1000, "output": 1000, "cache_read": 0, "cache_write": 0}
+
+    limits.record_spend("acme/u", "claude-sonnet-5-5", usage, key_owner="theirs")
+    assert limits.spend_health() is None          # client owns their spend -> warning only
+
+    limits.record_spend("acme/u", "claude-sonnet-5-5", usage, key_owner="ours")
+    h = limits.spend_health()
+    assert h and h["tenant"] == "acme" and "db down" in h["error"]
+    limits._spend_health = None                   # reset module state for other tests

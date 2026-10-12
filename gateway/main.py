@@ -60,7 +60,13 @@ app = FastAPI(title="Company Brain Gateway", version="0.3.0", lifespan=lifespan)
 
 @app.get("/health")
 async def health() -> dict:
-    return {"status": "ok", "version": "0.3.0"}
+    h = {"status": "ok", "version": "0.3.0"}
+    spend = limits.spend_health()
+    if spend is not None:
+        # A tenant we pay for is running with an under-counted daily cap.
+        h["status"] = "degraded"
+        h["spend_recording"] = spend
+    return h
 
 
 @app.get("/v1/models")

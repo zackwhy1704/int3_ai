@@ -50,12 +50,13 @@ def _log_usage(norm: dict, caller: str, provider: str, model: str) -> None:
         pass
 
 
-def _account(norm: dict, caller: str, provider: str, model: str) -> None:
+def _account(norm: dict, caller: str, provider: str, model: str, key_owner: str = "theirs") -> None:
     """One place that handles a completed call's usage: the client-facing usage
     log line AND the durable per-tenant daily spend counter. Both are
-    best-effort and must never raise into the response path."""
+    best-effort and must never raise into the response path. key_owner sets how
+    loudly a failed spend write is reported (ERROR + health flag for 'ours')."""
     _log_usage(norm, caller, provider, model)
-    limits.record_spend(caller, model, norm)
+    limits.record_spend(caller, model, norm, key_owner)
 
 
 def _anthropic_headers(api_key: str) -> dict[str, str]:
@@ -84,7 +85,7 @@ async def complete(sanitised: dict, route: routing.Route, caller: str = "-") -> 
     if resp.status_code != 200:
         raise HTTPException(status_code=resp.status_code, detail=resp.text)
     data = resp.json()
-    _account(routing.normalise_usage(route.provider, data.get("usage", {})), caller, route.provider, route.model)
+    _account(routing.normalise_usage(route.provider, data.get("usage", {})), caller, route.provider, route.model, route.key_owner)
     if route.provider == "anthropic":
         return anthropic_response_to_openai(data, route.model)
     return data  # OpenAI-compatible response passes straight back
@@ -153,7 +154,7 @@ async def _stream_anthropic(sanitised, route, caller):
                     if stop_reason:
                         yield finish_chunk(stop_reason)
                 elif etype == "message_stop":
-                    _account(norm, caller, "anthropic", route.model)
+                    _account(norm, caller, "anthropic", route.model, route.key_owner)
                     yield b"data: [DONE]\n\n"
                     return
 
@@ -178,7 +179,7 @@ async def _stream_openai(sanitised, route, caller):
                         try:
                             evt = _json.loads(raw)
                             if evt.get("usage"):
-                                _account(routing.normalise_usage("openai", evt["usage"]), caller, "openai", route.model)
+                                _account(routing.normalise_usage("openai", evt["usage"]), caller, "openai", route.model, route.key_owner)
                         except _json.JSONDecodeError:
                             pass
                     yield (line + "\n\n").encode()
