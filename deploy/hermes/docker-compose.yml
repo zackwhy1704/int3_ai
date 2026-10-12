@@ -20,12 +20,17 @@ x-admin-env: &admin-env
   ADMIN_DB_PASSWORD: ${ADMIN_DB_PASSWORD:?set ADMIN_DB_PASSWORD in .env}
 
 networks:
-  # The internal network has NO route to the internet. User backends and MCP
-  # sidecars live here only; their one way out is edge's CONNECT proxy.
-  tenant-net:
-    name: hermes-deploy-tenant
+  # Internal, no internet. ONLY the brain and the per-user MCP sidecars join it.
+  # No Hermes backend ever joins it, so no Hermes container can reach the brain
+  # directly or reach another user's sidecar. (The hole we are closing was one
+  # shared network for everything.)
+  brain-net:
+    name: hermes-deploy-brain
     internal: true
   # Containers that must reach the DB or the model provider also join ext.
+  # Per-user internal networks (u-<tenant>-<user>) are created by
+  # provision-user.sh — each holds exactly one user's Hermes backend + sidecar,
+  # with gateway and edge connected in under fixed aliases.
   ext:
     name: hermes-deploy-ext
 
@@ -85,8 +90,8 @@ services:
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-5-5}
     networks:
       ext: {}
-      tenant-net:
-        aliases: [brain]        # MCP sidecars reach it at http://brain:8000
+      brain-net:
+        aliases: [brain]        # ONLY the MCP sidecars reach it, at http://brain:8000
     depends_on:
       init: {condition: service_completed_successfully}
 
@@ -105,9 +110,9 @@ services:
       DB_HOST: db
       TENANT_KEY_KEK: ${TENANT_KEY_KEK:?set TENANT_KEY_KEK in .env}
     networks:
-      ext: {}                   # DB + model-provider egress live here
-      tenant-net:
-        aliases: [brain-gateway]  # Hermes model.base_url -> http://brain-gateway:8001/v1
+      ext: {}                   # DB + model-provider egress. provision-user.sh
+                                # connects it to each u-<tenant>-<user> net with
+                                # alias brain-gateway so that user's Hermes reaches it.
     depends_on:
       init: {condition: service_completed_successfully}
 
@@ -123,6 +128,5 @@ services:
     volumes:
       - ./gated/egress_proxy.py:/opt/egress_proxy.py:ro
     networks:
-      ext: {}
-      tenant-net:
-        aliases: [edge]
+      ext: {}                   # provision-user.sh connects it to each
+                                # u-<tenant>-<user> net with alias edge.

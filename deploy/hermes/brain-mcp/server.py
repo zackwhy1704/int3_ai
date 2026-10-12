@@ -4,28 +4,34 @@ One sidecar runs per signed-in user. Its identity is carried entirely by the
 brain service token in BRAIN_SERVICE_TOKEN (the brain resolves it to
 tenant/user and scopes every retrieval to that user's memberships). The token
 is injected only here, in the user's own sidecar — it is NEVER placed in the
-Hermes container (provision-user.sh asserts this), so a compromised Hermes
-backend cannot read the brain as the user or as anyone else.
+Hermes container (provision-user.sh asserts this).
 
-There is exactly one tool and no catalog. The MCP surface itself is unauthenticated
-but reachable only on the internal tenant network (no published port); the brain
-behind it still requires the service token.
+Two layers protect against another user reaching this sidecar:
+  * NETWORK: the sidecar shares a per-user internal network only with that one
+    user's Hermes backend (provision-user.sh); no other user's container can
+    resolve or route to it.
+  * AUTH: every request must carry X-MCP-Secret equal to this sidecar's
+    per-user MCP_SECRET (constant-time compare), else 401. provision-user.sh
+    writes the same secret into that user's Hermes mcp_servers.<name>.headers.
+    This is defence in depth: even if the network boundary were bypassed, a
+    caller without the secret gets 401 instead of an answer.
 
-Transport: streamable-HTTP (Hermes connects via `mcp_servers.<name>.url`).
-ask_brain(question) -> POST {BRAIN_URL}/v1/brain_ask with the service token.
-Response schema (int3_ai backend/app/api/v1.py): {refused, message,
-suggested_owner, answer, citations, answered_from, facts, cached, retrieval_id}.
+Transport: streamable-HTTP. ask_brain(question) -> POST {BRAIN_URL}/v1/brain_ask.
 """
 
+import hmac
 import os
 
 import httpx
+import uvicorn
 from mcp.server.fastmcp import FastMCP
 
-BRAIN_URL = os.environ["BRAIN_URL"].rstrip("/")          # e.g. http://brain:8000
-BRAIN_TOKEN = os.environ["BRAIN_SERVICE_TOKEN"]          # cb_svc_... (this user's)
+BRAIN_URL = os.environ["BRAIN_URL"].rstrip("/")
+BRAIN_TOKEN = os.environ["BRAIN_SERVICE_TOKEN"]
+MCP_SECRET = os.environ["MCP_SECRET"].encode()        # per-user; required
+PORT = int(os.environ.get("MCP_PORT", "9000"))
 
-mcp = FastMCP("company-brain", host="0.0.0.0", port=9000)
+mcp = FastMCP("company-brain", host="0.0.0.0", port=PORT)
 
 
 @mcp.tool()
@@ -45,8 +51,6 @@ def ask_brain(question: str) -> dict:
     )
     resp.raise_for_status()
     data = resp.json()
-    # Pass through exactly what the brain returned — the agent must not see a
-    # paraphrase. citations carry claim/source ids; retrieval_id binds them.
     return {
         "refused": data.get("refused", False),
         "answer": data.get("answer"),
@@ -57,5 +61,27 @@ def ask_brain(question: str) -> dict:
     }
 
 
+class RequireSecret:
+    """Pure-ASGI gate: every HTTP request must present X-MCP-Secret == MCP_SECRET
+    (constant-time). Pure ASGI (not BaseHTTPMiddleware) so SSE streaming and the
+    session-manager lifespan pass through untouched."""
+
+    def __init__(self, app, secret: bytes):
+        self.app = app
+        self.secret = secret
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            got = dict(scope.get("headers") or []).get(b"x-mcp-secret", b"")
+            if not hmac.compare_digest(got, self.secret):
+                await send({"type": "http.response.start", "status": 401,
+                            "headers": [(b"content-type", b"text/plain")]})
+                await send({"type": "http.response.body",
+                            "body": b"unauthorized: missing or invalid X-MCP-Secret\n"})
+                return
+        await self.app(scope, receive, send)
+
+
 if __name__ == "__main__":
-    mcp.run(transport="streamable-http")
+    app = RequireSecret(mcp.streamable_http_app(), MCP_SECRET)
+    uvicorn.run(app, host="0.0.0.0", port=PORT)
