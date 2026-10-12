@@ -19,14 +19,21 @@ locked-down Company Brain backend. No cloud; everything is local Docker.
 ```
 cd deploy/hermes
 cp .env.example .env && $EDITOR .env
+./build-base.sh                       # stock Hermes @ pinned commit -> hermes-base-pinned
 docker compose up -d --build
-docker build -t hermes-gated --build-arg BASE=hermes-spike-img -f gated/Dockerfile.gated gated
-./provision-user.sh brindlewood marcus 9131
-# also: docker build -t hermes-deploy-brain-mcp brain-mcp   (first time, for the sidecar image)
+docker build -t hermes-deploy-brain-mcp brain-mcp
+docker build -t hermes-gated --build-arg BASE=hermes-base-pinned -f gated/Dockerfile.gated gated
+./provision-user.sh brindlewood marcus 9131 --key-owner theirs
+./verify-isolation.sh brindlewood marcus priya   # asserts cross-user isolation
 ```
 
 ## Security properties (all enforced by mechanism, not comments)
 
+- **Per-user isolation (network + auth).** Each user's Hermes backend + sidecar
+  live on a private internal network; no Hermes backend joins the brain network,
+  so it cannot reach the brain directly, another user's sidecar, or another
+  user's backend. The sidecar also requires a per-user X-MCP-Secret (401
+  otherwise). `verify-isolation.sh` asserts both layers.
 - **Per-user brain token, never in the Hermes container.** provision-user.sh
   mints two *distinct* tokens — the brain token goes only to the MCP sidecar, the
   gateway token only to the Hermes config — and asserts the brain token is absent
@@ -49,9 +56,10 @@ docker build -t hermes-gated --build-arg BASE=hermes-spike-img -f gated/Dockerfi
 
 ## Known limitations
 
-- `hermes-spike-img` (stock Hermes packaged as an image) is an external
-  prerequisite, not built here.
-- Token minting uses `openssl` + a direct `INSERT`; a real deployment mints via a
-  secrets manager.
+- The connect file works only on the Docker host (loopback, no TLS). Partner
+  laptops need hosted TLS ingress — Phase 3.
+- Token minting uses `openssl` + a direct `INSERT` (psql `-v` bindings, validated
+  ids); a real deployment mints via a secrets manager.
 - Single gateway process; multi-replica rate limiting not implemented.
+- The base image is pinned to one upstream commit; bump deliberately.
 - All data is synthetic (Brindlewood Supply Co.); nothing here is real.
