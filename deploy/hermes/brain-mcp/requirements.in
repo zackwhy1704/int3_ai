@@ -1,0 +1,7 @@
+# Direct deps for the MCP sidecar. Compiled to requirements.txt with full
+# transitive pins + hashes via pip-compile --generate-hashes (see below), and
+# installed with pip --require-hashes so a tampered/substituted package fails
+# the build (the LiteLLM-style supply-chain lesson).
+mcp>=1.2,<2
+httpx>=0.27
+uvicorn>=0.30
