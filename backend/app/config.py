@@ -18,6 +18,13 @@ CONTROL_ROLE = "app_control"
 CONTROL_PASSWORD = os.environ.get("APP_CONTROL_PASSWORD", "")
 TENANT_DB_KEY = os.environ.get("TENANT_DB_KEY", "")
 
+# Least-privilege role for the GATEWAY's token verification: SELECT on
+# service_tokens only (no mint, no session access). The gateway is the tier
+# nearest the per-user container; with app_control it could mint a token for
+# any user and read their brain. admin.init() creates this role and its grant.
+GATEWAY_DB_ROLE = "gateway_auth"
+GATEWAY_DB_PASSWORD = os.environ.get("GATEWAY_DB_PASSWORD", "")
+
 SESSION_IDLE_MINUTES = 30
 SESSION_ABSOLUTE_HOURS = 8
 SESSION_COOKIE = "__Host-session"

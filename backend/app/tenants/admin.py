@@ -107,6 +107,36 @@ def init() -> None:
             GRANT SELECT, INSERT ON retrievals TO {r};
         """).format(r=sql.Identifier(config.CONTROL_ROLE))
         )
+
+        # Least-privilege gateway role: verify tokens (SELECT service_tokens)
+        # and nothing else. No INSERT/UPDATE/DELETE anywhere, no sessions, no
+        # identities. A compromised gateway cannot mint a token or read a
+        # session. Created only when a password is configured.
+        if config.GATEWAY_DB_PASSWORD:
+            gw = sql.Identifier(config.GATEWAY_DB_ROLE)
+            if not role_exists(conn, config.GATEWAY_DB_ROLE):
+                conn.execute(
+                    sql.SQL("CREATE ROLE {} LOGIN PASSWORD {}").format(
+                        gw, sql.Literal(config.GATEWAY_DB_PASSWORD)
+                    )
+                )
+            else:
+                conn.execute(
+                    sql.SQL("ALTER ROLE {} PASSWORD {}").format(
+                        gw, sql.Literal(config.GATEWAY_DB_PASSWORD)
+                    )
+                )
+            # Revoke any inherited public grants, then grant exactly SELECT on
+            # service_tokens. REVOKE ALL on the table first so a re-run that
+            # ever over-granted is corrected (idempotent, fail-safe).
+            conn.execute(
+                sql.SQL("""
+                GRANT CONNECT ON DATABASE {db} TO {g};
+                GRANT USAGE ON SCHEMA public TO {g};
+                REVOKE ALL ON ALL TABLES IN SCHEMA public FROM {g};
+                GRANT SELECT ON service_tokens TO {g};
+            """).format(db=sql.Identifier(config.CONTROL_DB), g=gw)
+            )
     print("control plane ready")
 
 

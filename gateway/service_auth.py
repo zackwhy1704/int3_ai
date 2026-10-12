@@ -47,12 +47,15 @@ def resolve_from_db(token: str) -> Optional[str]:
     import psycopg
     from psycopg.rows import dict_row
 
+    # Connect as the least-privilege gateway role (SELECT on service_tokens
+    # only). The gateway must NOT hold app_control, which can mint tokens and
+    # read sessions — a compromised gateway could then impersonate any user.
     dsn = {
         "host": os.getenv("DB_HOST", "db"),
         "port": int(os.getenv("DB_PORT", "5432")),
         "dbname": os.getenv("CONTROL_DB", "control"),
-        "user": os.getenv("CONTROL_ROLE", "app_control"),
-        "password": os.environ["APP_CONTROL_PASSWORD"],
+        "user": os.environ["GATEWAY_DB_ROLE"],
+        "password": os.environ["GATEWAY_DB_PASSWORD"],
     }
     with psycopg.connect(**dsn, row_factory=dict_row, autocommit=True) as conn:
         row = conn.execute(
