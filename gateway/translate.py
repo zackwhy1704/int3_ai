@@ -48,6 +48,26 @@ def clamp_max_tokens(requested: object) -> int:
         return cap
     return min(want, cap) if want > 0 else cap
 
+
+# The ONLY client fields the gateway forwards upstream. Everything else is
+# dropped — in particular anything that makes the provider persist the
+# request/response (OpenAI `store`, `metadata`), attributes it to a caller-
+# chosen identity (`user`), or steers provider-side routing/retention
+# (`service_tier`, `prompt_cache_key`, `safety_identifier`, ...). Routing is a
+# rebuild from this allowlist, never a verbatim forward of the client body.
+_ALLOWED_FIELDS = (
+    "messages", "tools", "tool_choice", "temperature", "max_tokens", "stream", "model",
+)
+
+
+def sanitise_request(openai_body: dict) -> dict:
+    """Return a new body containing only the allowlisted fields, max_tokens
+    clamped. `model` is kept as-is here; the allowlist check / pin happens in
+    routing. Dropped fields never reach any provider."""
+    out = {k: openai_body[k] for k in _ALLOWED_FIELDS if k in openai_body}
+    out["max_tokens"] = clamp_max_tokens(openai_body.get("max_tokens"))
+    return out
+
 _STOP_REASON_MAP: dict[str, str] = {
     "end_turn": "stop",
     "max_tokens": "length",
@@ -154,11 +174,12 @@ def openai_request_to_anthropic(openai_body: dict) -> dict:
 
     system = next((m["content"] for m in messages if m["role"] == "system"), None)
 
-    # Server pins the model and caps max_tokens: the client's `model` is
-    # ignored (a compromised caller cannot escalate to a bigger/other model),
-    # and max_tokens is clamped to the cap (it may request less, never more).
+    # The model is whatever routing validated against the tenant's allowlist
+    # (routing.resolve rejects anything not on it — no silent substitution);
+    # pinned_model() is only a fallback for direct unit calls with no model.
+    # max_tokens is already clamped by sanitise_request; clamp again defensively.
     body: dict = {
-        "model": pinned_model(),
+        "model": openai_body.get("model") or pinned_model(),
         "max_tokens": clamp_max_tokens(openai_body.get("max_tokens")),
         "messages": openai_messages_to_anthropic(messages),
     }

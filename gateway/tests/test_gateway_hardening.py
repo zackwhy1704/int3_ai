@@ -18,7 +18,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import auth
 import service_auth
 import translate
-import upstream
 
 
 # ---------------------------------------------------------------------------
@@ -38,56 +37,7 @@ def test_oversized_max_tokens_clamped_and_small_passes_through():
     assert under["max_tokens"] == 7, "a smaller client request must pass through"
 
 
-class _FakeResponse:
-    status_code = 200
-
-    def json(self):
-        return {
-            "id": "msg_x",
-            "model": "whatever",
-            "role": "assistant",
-            "content": [{"type": "text", "text": "ok"}],
-            "stop_reason": "end_turn",
-            "usage": {"input_tokens": 1, "output_tokens": 1},
-        }
-
-
-class _CapturingClient:
-    """Stands in for httpx.AsyncClient; records the body posted upstream."""
-
-    captured: dict = {}
-
-    def __init__(self, *a, **k):
-        pass
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, *a):
-        return False
-
-    async def post(self, url, headers=None, json=None):
-        _CapturingClient.captured = json
-        return _FakeResponse()
-
-
-def test_client_model_ignored_in_upstream_body():
-    """The body actually sent upstream carries the server-pinned model, not the
-    client's requested one. Asserted from a mocked upstream (captured post body)."""
-    pinned = translate.pinned_model()
-    _CapturingClient.captured = {}
-    with patch.object(upstream, "httpx") as hx:
-        hx.AsyncClient = _CapturingClient
-        asyncio.run(
-            upstream.complete(
-                {
-                    "model": "attacker/giant-model",
-                    "messages": [{"role": "user", "content": "hi"}],
-                }
-            )
-        )
-    assert _CapturingClient.captured.get("model") == pinned
-    assert _CapturingClient.captured.get("model") != "attacker/giant-model"
+# Model/allowlist enforcement moved to routing (item c/d); see test_routing.py.
 
 
 # ---------------------------------------------------------------------------

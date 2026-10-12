@@ -29,7 +29,9 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import StreamingResponse
 
+import routing
 from auth import GATEWAY_AUTH, verify_token
+from translate import sanitise_request
 from upstream import complete, stream
 
 ENV = os.getenv("ENV", "development")
@@ -66,6 +68,8 @@ async def chat_completions(
     _caller: str = Depends(verify_token),
 ):
     body = await request.json()
+    sanitised = sanitise_request(body)              # field allowlist; drops store/metadata/user/...
+    route = routing.resolve(_caller, sanitised.get("model"))  # 400 if model not on the tenant's allowlist
     if body.get("stream"):
-        return StreamingResponse(stream(body, _caller), media_type="text/event-stream")
-    return await complete(body, _caller)
+        return StreamingResponse(stream(sanitised, route, _caller), media_type="text/event-stream")
+    return await complete(sanitised, route, _caller)

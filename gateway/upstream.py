@@ -1,18 +1,22 @@
 """
-Upstream Anthropic API calls.
+Upstream provider calls (Anthropic + OpenAI-compatible).
 
-All httpx I/O lives here. translate.py handles the pure dict conversion;
-this module handles connection, error propagation, and streaming.
+Routing is a rebuild from the sanitised request (translate.sanitise_request),
+never a verbatim forward of the client body. The tenant's key is injected here;
+no client-supplied key is ever used. Usage is normalised per provider
+(routing.normalise_usage) and logged with the resolved caller.
 """
 
 from __future__ import annotations
 
+import json as _json
 import os
 from typing import AsyncGenerator
 
 import httpx
 from fastapi import HTTPException
 
+import routing
 from translate import (
     anthropic_response_to_openai,
     error_chunk,
@@ -23,96 +27,86 @@ from translate import (
     tool_call_start_chunk,
 )
 
-ANTHROPIC_BASE = "https://api.anthropic.com/v1"
 ANTHROPIC_VERSION = "2023-06-01"
-
-# Spike instrumentation: append per-call token usage so a harness can attribute
-# tokens to each question (OpenAI-shaped usage is not emitted on the stream
-# path, and Hermes does not record usage for custom providers). Off unless
-# GATEWAY_USAGE_LOG is set, so production behaviour is unchanged.
 _USAGE_LOG = os.environ.get("GATEWAY_USAGE_LOG", "")
 
 
-def _log_usage(usage: dict, caller: str = "-") -> None:
-    """Append one per-call usage line: plain + cache tokens + the resolved
-    caller (tenant/user from GATEWAY_AUTH=service). Cache tokens are logged
-    because prompt caching makes plain input_tokens undercount real cost — a
-    cache-read turn bills cache_read at a fraction, and the first turn bills
-    cache_creation at a premium; item-5 numbers are meaningless without them."""
+def _log_usage(norm: dict, caller: str, provider: str, model: str) -> None:
+    """One normalised usage line per call (input/output/cache_write/cache_read)
+    plus provider, model and the resolved caller. Cache tokens are recorded
+    because caching makes plain input undercount real cost. Feeds the
+    client-facing usage view, not an invoice."""
     if not _USAGE_LOG:
         return
     try:
         with open(_USAGE_LOG, "a", encoding="utf-8") as fh:
             fh.write(
-                f"USAGE caller={caller} "
-                f"in={usage.get('input_tokens') or 0} "
-                f"out={usage.get('output_tokens') or 0} "
-                f"cache_write={usage.get('cache_creation_input_tokens') or 0} "
-                f"cache_read={usage.get('cache_read_input_tokens') or 0}\n"
+                f"USAGE caller={caller} provider={provider} model={model} "
+                f"in={norm['input']} out={norm['output']} "
+                f"cache_write={norm['cache_write']} cache_read={norm['cache_read']}\n"
             )
     except OSError:
         pass
 
 
-def _headers() -> dict[str, str]:
-    return {
-        "x-api-key": os.environ["ANTHROPIC_API_KEY"],
-        "anthropic-version": ANTHROPIC_VERSION,
-        "content-type": "application/json",
-    }
+def _anthropic_headers(api_key: str) -> dict[str, str]:
+    return {"x-api-key": api_key, "anthropic-version": ANTHROPIC_VERSION, "content-type": "application/json"}
 
 
-async def complete(openai_body: dict, caller: str = "-") -> dict:
-    """Non-streaming: send request, return OpenAI-format dict."""
-    anthropic_body = openai_request_to_anthropic(openai_body)
-    model: str = anthropic_body["model"]  # server-pinned; client model ignored
+def _openai_headers(api_key: str) -> dict[str, str]:
+    return {"authorization": f"Bearer {api_key}", "content-type": "application/json"}
+
+
+async def complete(sanitised: dict, route: routing.Route, caller: str = "-") -> dict:
+    """Non-streaming. Anthropic: translate then POST /messages. OpenAI-compatible:
+    POST the sanitised body to /chat/completions. Tenant key injected here."""
+    if route.api_key is None:
+        raise HTTPException(status_code=502, detail=f"no key configured for provider {route.provider}")
+
+    if route.provider == "anthropic":
+        body = openai_request_to_anthropic(sanitised)
+        url, headers, payload = f"{route.base_url}/messages", _anthropic_headers(route.api_key), body
+    else:
+        url = f"{route.base_url}/chat/completions"
+        headers, payload = _openai_headers(route.api_key), {**sanitised, "stream": False}
 
     async with httpx.AsyncClient(timeout=120) as client:
-        resp = await client.post(
-            f"{ANTHROPIC_BASE}/messages",
-            headers=_headers(),
-            json=anthropic_body,
-        )
+        resp = await client.post(url, headers=headers, json=payload)
     if resp.status_code != 200:
         raise HTTPException(status_code=resp.status_code, detail=resp.text)
-    body = resp.json()
-    _log_usage(body.get("usage", {}) or {}, caller)
-    return anthropic_response_to_openai(body, model)
+    data = resp.json()
+    _log_usage(routing.normalise_usage(route.provider, data.get("usage", {})), caller, route.provider, route.model)
+    if route.provider == "anthropic":
+        return anthropic_response_to_openai(data, route.model)
+    return data  # OpenAI-compatible response passes straight back
 
 
-async def stream(openai_body: dict, caller: str = "-") -> AsyncGenerator[bytes, None]:
-    """
-    Streaming: yields OpenAI-format SSE bytes.
+async def stream(sanitised: dict, route: routing.Route, caller: str = "-") -> AsyncGenerator[bytes, None]:
+    if route.api_key is None:
+        yield error_chunk(502, f"no key configured for provider {route.provider}")
+        return
+    if route.provider == "anthropic":
+        async for chunk in _stream_anthropic(sanitised, route, caller):
+            yield chunk
+    else:
+        async for chunk in _stream_openai(sanitised, route, caller):
+            yield chunk
 
-    Anthropic streaming event flow:
-      message_start
-      content_block_start  (type: text | tool_use)
-      content_block_delta  (type: text_delta | input_json_delta)
-      content_block_stop
-      message_delta        (carries stop_reason)
-      message_stop
-    """
-    anthropic_body = openai_request_to_anthropic({**openai_body, "stream": True})
 
+async def _stream_anthropic(sanitised, route, caller):
+    anthropic_body = openai_request_to_anthropic({**sanitised, "stream": True})
     active_tool_index: int | None = None
     tool_counter = 0
-    usage_in = 0
-    usage_out = 0
-    cache_write = 0
-    cache_read = 0
+    norm = {"input": 0, "output": 0, "cache_write": 0, "cache_read": 0}
 
     async with httpx.AsyncClient(timeout=120) as client:
         async with client.stream(
-            "POST",
-            f"{ANTHROPIC_BASE}/messages",
-            headers=_headers(),
-            json=anthropic_body,
+            "POST", f"{route.base_url}/messages", headers=_anthropic_headers(route.api_key), json=anthropic_body
         ) as resp:
             if resp.status_code != 200:
                 body = await resp.aread()
                 yield error_chunk(resp.status_code, body.decode())
                 return
-
             async for line in resp.aiter_lines():
                 if not line.startswith("data: "):
                     continue
@@ -120,64 +114,62 @@ async def stream(openai_body: dict, caller: str = "-") -> AsyncGenerator[bytes, 
                 if raw == "[DONE]":
                     yield b"data: [DONE]\n\n"
                     return
-
-                import json as _json
-
                 try:
                     event = _json.loads(raw)
                 except _json.JSONDecodeError:
                     continue
-
                 etype = event.get("type")
-
                 if etype == "message_start":
-                    mu = event.get("message", {}).get("usage", {}) or {}
-                    usage_in = mu.get("input_tokens", 0) or 0
-                    cache_write = mu.get("cache_creation_input_tokens", 0) or 0
-                    cache_read = mu.get("cache_read_input_tokens", 0) or 0
+                    norm = routing.normalise_usage("anthropic", event.get("message", {}).get("usage", {}))
                 elif etype == "message_delta":
-                    usage_out = (event.get("usage", {}) or {}).get(
-                        "output_tokens", usage_out
-                    ) or usage_out
-
+                    out = (event.get("usage", {}) or {}).get("output_tokens")
+                    if out:
+                        norm["output"] = out
                 if etype == "content_block_start":
                     block = event.get("content_block", {})
                     if block.get("type") == "tool_use":
                         active_tool_index = tool_counter
                         tool_counter += 1
-                        yield tool_call_start_chunk(
-                            active_tool_index, block["id"], block["name"]
-                        )
-
+                        yield tool_call_start_chunk(active_tool_index, block["id"], block["name"])
                 elif etype == "content_block_delta":
                     delta = event.get("delta", {})
                     if delta.get("type") == "text_delta":
                         yield text_delta_chunk(delta.get("text", ""))
-                    elif (
-                        delta.get("type") == "input_json_delta"
-                        and active_tool_index is not None
-                    ):
-                        yield tool_call_delta_chunk(
-                            active_tool_index, delta.get("partial_json", "")
-                        )
-
+                    elif delta.get("type") == "input_json_delta" and active_tool_index is not None:
+                        yield tool_call_delta_chunk(active_tool_index, delta.get("partial_json", ""))
                 elif etype == "content_block_stop":
                     active_tool_index = None
-
                 elif etype == "message_delta":
                     stop_reason = event.get("delta", {}).get("stop_reason")
                     if stop_reason:
                         yield finish_chunk(stop_reason)
-
                 elif etype == "message_stop":
-                    _log_usage(
-                        {
-                            "input_tokens": usage_in,
-                            "output_tokens": usage_out,
-                            "cache_creation_input_tokens": cache_write,
-                            "cache_read_input_tokens": cache_read,
-                        },
-                        caller,
-                    )
+                    _log_usage(norm, caller, "anthropic", route.model)
                     yield b"data: [DONE]\n\n"
                     return
+
+
+async def _stream_openai(sanitised, route, caller):
+    """OpenAI-compatible pass-through stream: relay SSE bytes unchanged, and if
+    the provider emits a usage chunk, normalise + log it. (Built, not called
+    live — exercised by mocked tests.)"""
+    payload = {**sanitised, "stream": True}
+    async with httpx.AsyncClient(timeout=120) as client:
+        async with client.stream(
+            "POST", f"{route.base_url}/chat/completions", headers=_openai_headers(route.api_key), json=payload
+        ) as resp:
+            if resp.status_code != 200:
+                body = await resp.aread()
+                yield error_chunk(resp.status_code, body.decode())
+                return
+            async for line in resp.aiter_lines():
+                if line.startswith("data: "):
+                    raw = line[6:]
+                    if raw != "[DONE]":
+                        try:
+                            evt = _json.loads(raw)
+                            if evt.get("usage"):
+                                _log_usage(routing.normalise_usage("openai", evt["usage"]), caller, "openai", route.model)
+                        except _json.JSONDecodeError:
+                            pass
+                    yield (line + "\n\n").encode()
