@@ -102,3 +102,26 @@ CREATE TABLE IF NOT EXISTS retrievals (
 );
 CREATE INDEX IF NOT EXISTS retrievals_session ON retrievals(session_id, tenant_id);
 CREATE INDEX IF NOT EXISTS retrievals_expires ON retrievals(expires_at);
+
+-- Per-tenant daily spend counter (item e: per-tenant daily cap).
+-- The gateway reads this before each call (fail-fast 429 when the tenant has
+-- reached its daily_cap_usd) and increments it after, so the cap survives a
+-- gateway restart — an in-memory counter would reset and let spend run past the
+-- cap, which matters most when key_owner='ours' (we pay).
+--
+-- spend_usd is an ESTIMATE from an approximate per-model price table: the cap is
+-- a guardrail and this feeds the client-facing usage view, not an invoice.
+--
+-- Privilege: this is the ONLY control-DB table the least-privilege gateway role
+-- may write (GRANT SELECT, INSERT, UPDATE in admin.init()). The gateway still
+-- holds no write on service_tokens or tenant_providers — a compromised gateway
+-- can inflate a usage row but cannot mint a token or rewrite a key/allowlist
+-- (enforced at boot by service_auth.assert_least_privilege).
+CREATE TABLE IF NOT EXISTS tenant_usage (
+    tenant_id       text NOT NULL REFERENCES tenants(id),
+    day             date NOT NULL,
+    spend_usd       numeric NOT NULL DEFAULT 0,
+    request_count   integer NOT NULL DEFAULT 0,
+    updated_at      timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, day)
+);

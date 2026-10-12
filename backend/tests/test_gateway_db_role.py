@@ -1,9 +1,13 @@
-"""The gateway's DB role is least-privilege: SELECT on service_tokens, nothing
-more. Real Postgres integration test (needs the tools container's admin creds).
+"""The gateway's DB role is least-privilege: SELECT on service_tokens +
+tenant_providers, SELECT/INSERT/UPDATE on tenant_usage (the daily-cap counter),
+and nothing else. Real Postgres integration test (needs the tools container's
+admin creds).
 
 Required-fix invariant: the gateway (the tier nearest the per-user container)
-must not be able to MINT a service token or touch sessions. If it could, a
-compromised gateway could impersonate any user and read their brain via /v1.
+must not be able to MINT a service token, rewrite a key/allowlist, or touch
+sessions. If it could, a compromised gateway could impersonate any user and read
+their brain via /v1. Writing the usage counter is the one exception and cannot
+be escalated into any of those.
 """
 
 from __future__ import annotations
@@ -51,13 +55,21 @@ def test_gateway_role_has_exactly_select_on_service_tokens_and_nothing_else(gate
             )
         ]
         assert "service_tokens" in tables
-        select_only = {"service_tokens", "tenant_providers"}  # the gateway's read set
+        # The gateway's exact control-DB privilege set: SELECT on its read tables,
+        # SELECT/INSERT/UPDATE on the tenant_usage counter alone (item e), nothing
+        # anywhere else — and in particular NO write on service_tokens or
+        # tenant_providers (cannot mint a token or rewrite a key/allowlist).
+        expected_by_table = {
+            "service_tokens": ["SELECT"],
+            "tenant_providers": ["SELECT"],
+            "tenant_usage": ["SELECT", "INSERT", "UPDATE"],
+        }
         for t in tables:
             held = [
                 p for p in _ALL_PRIVS
                 if c.execute("SELECT has_table_privilege(%s,%s,%s) v", (role, t, p)).fetchone()["v"]
             ]
-            expected = ["SELECT"] if t in select_only else []
+            expected = expected_by_table.get(t, [])
             assert held == expected, f"{role} on {t}: held {held}, expected {expected}"
         assert not c.execute(
             "SELECT has_schema_privilege(%s,'public','CREATE') v", (role,)

@@ -108,10 +108,15 @@ def init() -> None:
         """).format(r=sql.Identifier(config.CONTROL_ROLE))
         )
 
-        # Least-privilege gateway role: verify tokens (SELECT service_tokens)
-        # and nothing else. No INSERT/UPDATE/DELETE anywhere, no sessions, no
-        # identities. A compromised gateway cannot mint a token or read a
-        # session. Created only when a password is configured.
+        # Least-privilege gateway role: SELECT on service_tokens (verify tokens)
+        # and tenant_providers (routing/keys), plus SELECT/INSERT/UPDATE on the
+        # tenant_usage counter ALONE (item e: durable daily cap). No write on
+        # service_tokens or tenant_providers, no sessions, no identities, no
+        # DELETE anywhere. A compromised gateway can inflate a usage row but
+        # cannot mint a token, read a session, or rewrite a key/allowlist — the
+        # boot self-check (service_auth.assert_least_privilege) refuses to start
+        # if the role can mutate either sensitive table. Created only when a
+        # password is configured.
         if config.GATEWAY_DB_PASSWORD:
             gw = sql.Identifier(config.GATEWAY_DB_ROLE)
             if not role_exists(conn, config.GATEWAY_DB_ROLE):
@@ -126,14 +131,16 @@ def init() -> None:
                         gw, sql.Literal(config.GATEWAY_DB_PASSWORD)
                     )
                 )
-            # Grant exactly SELECT on service_tokens. The REVOKE ALL ... FROM gw
-            # only strips grants made TO gateway_auth itself (a fix-forward if a
-            # prior run over-granted) — it does NOT touch PUBLIC grants. That is
+            # Grant the minimal set below. The REVOKE ALL ... FROM gw first
+            # strips grants made TO gateway_auth itself (a fix-forward if a prior
+            # run over-granted) — it does NOT touch PUBLIC grants. That is
             # acceptable here because this control DB already revokes ALL on the
             # schema from PUBLIC (line ~98) and never grants table privileges to
             # PUBLIC, so PUBLIC confers nothing. The exhaustive has_table_privilege
             # test (test_gateway_db_role.py) is what actually guarantees the role
-            # holds SELECT-on-service_tokens and nothing else, PUBLIC included.
+            # holds exactly these privileges (SELECT on service_tokens +
+            # tenant_providers; SELECT/INSERT/UPDATE on tenant_usage) and nothing
+            # else, PUBLIC included.
             conn.execute(
                 sql.SQL("""
                 GRANT CONNECT ON DATABASE {db} TO {g};
@@ -141,6 +148,7 @@ def init() -> None:
                 REVOKE ALL ON ALL TABLES IN SCHEMA public FROM {g};
                 GRANT SELECT ON service_tokens TO {g};
                 GRANT SELECT ON tenant_providers TO {g};
+                GRANT SELECT, INSERT, UPDATE ON tenant_usage TO {g};
             """).format(db=sql.Identifier(config.CONTROL_DB), g=gw)
             )
     print("control plane ready")

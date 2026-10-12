@@ -29,6 +29,7 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import StreamingResponse
 
+import limits
 import routing
 from auth import GATEWAY_AUTH, verify_token
 from translate import sanitise_request
@@ -85,6 +86,8 @@ async def chat_completions(
     body = await request.json()
     sanitised = sanitise_request(body)              # field allowlist; drops store/metadata/user/...
     route = routing.resolve(_caller, sanitised.get("model"))  # 400 if model not on the tenant's allowlist
+    limits.check_rate_limit(_caller)                # 429 per-user, fail fast before any upstream call
+    limits.check_daily_cap(_caller.split("/", 1)[0], route.daily_cap_usd)  # 429 per-tenant daily cap
     if body.get("stream"):
         return StreamingResponse(stream(sanitised, route, _caller), media_type="text/event-stream")
     return await complete(sanitised, route, _caller)

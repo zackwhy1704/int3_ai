@@ -161,6 +161,20 @@ def test_list_models_dev_mode_is_pinned(monkeypatch):
     assert routing.list_models("dev") == ["claude-sonnet-5-5"]
 
 
+def test_key_owner_ours_requires_a_cap_else_503(monkeypatch):
+    # key_owner='ours' means we pay — routing refuses to serve without a cap.
+    no_cap = _cfg("anthropic", ["claude-sonnet-5-5"], key_owner="ours", cap=None)
+    monkeypatch.setattr(routing.provider_config, "load", lambda t, p: no_cap if p == "anthropic" else None)
+    with pytest.raises(routing.HTTPException) as ei:
+        routing.resolve("brindlewood/priya", "claude-sonnet-5-5")
+    assert ei.value.status_code == 503 and "no daily cap" in ei.value.detail
+
+    with_cap = _cfg("anthropic", ["claude-sonnet-5-5"], key_owner="ours", cap=10.0)
+    monkeypatch.setattr(routing.provider_config, "load", lambda t, p: with_cap if p == "anthropic" else None)
+    r = routing.resolve("brindlewood/priya", "claude-sonnet-5-5")
+    assert r.key_owner == "ours" and r.daily_cap_usd == 10.0
+
+
 def test_v1_models_endpoint_openai_shape(monkeypatch):
     from fastapi.testclient import TestClient
     import main
