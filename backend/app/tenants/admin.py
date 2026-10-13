@@ -172,6 +172,7 @@ def _grant_tenant_base(tconn, db: str) -> None:
 
 
 _FN = "approve_workflow_proposal(uuid, text, boolean, vector)"
+_CS = "capture_statement(text, text, text, text)"
 
 
 def apply_capture_grants(tconn, db: str) -> None:
@@ -192,12 +193,17 @@ def apply_capture_grants(tconn, db: str) -> None:
         GRANT UPDATE ON proposals TO {wr};
         GRANT USAGE ON SEQUENCE chunks_id_seq, claims_id_seq TO {wr};
         ALTER FUNCTION {fn} OWNER TO {wr};
+        -- EXECUTE is default-DENY: revoke PUBLIC, grant only the roles that need it.
+        REVOKE EXECUTE ON FUNCTION {fn} FROM PUBLIC;
+        REVOKE EXECUTE ON FUNCTION {cs} FROM PUBLIC;
         GRANT EXECUTE ON FUNCTION {fn} TO {r};
+        GRANT EXECUTE ON FUNCTION {cs} TO {r};
+        GRANT EXECUTE ON FUNCTION {cs} TO {wr};
         REVOKE INSERT ON documents FROM {r};
         REVOKE INSERT ON chunks FROM {r};
         REVOKE INSERT, UPDATE ON claims FROM {r};
         REVOKE USAGE ON SEQUENCE chunks_id_seq, claims_id_seq FROM {r};
-    """).format(wr=sql.Identifier(wr), r=sql.Identifier(db), fn=sql.SQL(_FN))
+    """).format(wr=sql.Identifier(wr), r=sql.Identifier(db), fn=sql.SQL(_FN), cs=sql.SQL(_CS))
     )
 
 

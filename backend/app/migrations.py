@@ -11,7 +11,9 @@ one is a no-op. The control DB has no Phase 2 change (proposals live per tenant)
 it only gets the schema_migrations bookkeeping.
 """
 
-TENANT_VERSION = 1
+# v1: capture schema + the SECURITY DEFINER write path.
+# v2: REVOKE EXECUTE on the capture functions FROM PUBLIC (default-deny execute).
+TENANT_VERSION = 2
 CONTROL_VERSION = 1
 
 

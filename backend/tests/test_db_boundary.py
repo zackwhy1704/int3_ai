@@ -79,6 +79,18 @@ def test_tenant_role_capture_boundary(client):
         ).fetchone()[0] is True
 
 
+def test_public_has_no_execute_on_capture_functions(client):
+    """EXECUTE on the capture functions is default-DENY: PUBLIC has none (a
+    non-NULL proacl with no empty-grantee entry means PUBLIC was revoked)."""
+    with connect(A, A, tenant_password("brindlewood")) as conn:
+        for fn in ("approve_workflow_proposal", "capture_statement"):
+            acl = conn.execute(
+                "SELECT proacl::text[] FROM pg_proc WHERE proname = %s", (fn,)
+            ).fetchone()[0]
+            assert acl is not None, f"{fn}: proacl is default (PUBLIC implicitly has EXECUTE)"
+            assert not any(e.startswith("=") for e in acl), f"{fn}: PUBLIC EXECUTE present: {acl}"
+
+
 def test_control_role_cannot_rewrite_tenancy(client):
     with connect("control", "app_control", config.CONTROL_PASSWORD) as conn:
         for stmt in (
