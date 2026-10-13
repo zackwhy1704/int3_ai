@@ -35,8 +35,13 @@ CREATE TABLE IF NOT EXISTS documents (
 
 -- How much a source is trusted as the record of a fact: a formal document
 -- outranks a chat message, which outranks an unattributed note.
-ALTER TABLE documents ADD COLUMN IF NOT EXISTS authority text NOT NULL DEFAULT 'document'
-    CHECK (authority IN ('document', 'chat', 'note'));
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS authority text NOT NULL DEFAULT 'document';
+-- 'workflow' = a fact captured in a Hermes workflow and approved by the scope
+-- owner (Phase 2); ranked below a formal document. Managed as a named constraint
+-- so the allowed set can change idempotently even where the column pre-exists.
+ALTER TABLE documents DROP CONSTRAINT IF EXISTS documents_authority_check;
+ALTER TABLE documents ADD CONSTRAINT documents_authority_check
+    CHECK (authority IN ('document', 'chat', 'note', 'workflow'));
 
 -- scope_id is copied from the document so retrieval filters on the chunk row itself.
 CREATE TABLE IF NOT EXISTS chunks (
@@ -97,3 +102,36 @@ CREATE TABLE IF NOT EXISTS answer_cache (
 DROP TRIGGER IF EXISTS claims_append_only ON claims;
 CREATE TRIGGER claims_append_only BEFORE UPDATE ON claims
     FOR EACH ROW EXECUTE FUNCTION claims_append_only();
+
+-- Phase 2 capture: a fact proposed during a workflow, pending the scope owner's
+-- approval. Lives in the TENANT database (the isolation boundary). A pending
+-- proposal is NOT a claim and is never retrieved by brain_ask; only the scope's
+-- owner may list/approve/reject it. On approval the backend writes a workflow
+-- record (a documents row with authority='workflow', one embedded chunk, and a
+-- claim pointing at that chunk) so the normal passage-first retrieval path finds
+-- and cites it with ZERO changes to answer.py.
+--
+-- Provenance is server-derived: proposer_user_id and timestamps come from the
+-- request principal / server clock, never from the model. session_label is
+-- model-supplied DISPLAY-ONLY text and is never used for authorisation.
+CREATE TABLE IF NOT EXISTS proposals (
+    id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    scope_id          text NOT NULL REFERENCES scopes(id),
+    subject           text NOT NULL,
+    attribute         text NOT NULL,
+    condition         text,
+    value             text NOT NULL,
+    quote             text NOT NULL,
+    proposer_user_id  text NOT NULL REFERENCES users(id),
+    session_label     text,
+    status            text NOT NULL DEFAULT 'pending'
+                          CHECK (status IN ('pending', 'approved', 'rejected')),
+    created_at        timestamptz NOT NULL DEFAULT now(),
+    -- free text so it can honestly hold the owner's user id (MCP path) OR
+    -- 'operator:<name>' (admin CLI fallback); not an FK for that reason.
+    decided_by        text,
+    decided_at        timestamptz,
+    resulting_claim_id int REFERENCES claims(id)
+);
+CREATE INDEX IF NOT EXISTS proposals_scope_status ON proposals(scope_id, status);
+CREATE INDEX IF NOT EXISTS proposals_proposer_time ON proposals(proposer_user_id, created_at);

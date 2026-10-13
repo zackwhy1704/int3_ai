@@ -13,6 +13,9 @@ APP_ORIGIN = os.environ.get("APP_ORIGIN", "http://localhost:5173")
 
 DB_HOST = os.environ.get("DB_HOST", "db")
 DB_PORT = int(os.environ.get("DB_PORT", "5432"))
+
+# Phase 2 capture: per-user cap on propose_claim calls per hour (0 disables).
+PROPOSAL_RATE_PER_HOUR = int(os.environ.get("PROPOSAL_RATE_PER_HOUR", "30"))
 CONTROL_DB = "control"
 CONTROL_ROLE = "app_control"
 CONTROL_PASSWORD = os.environ.get("APP_CONTROL_PASSWORD", "")

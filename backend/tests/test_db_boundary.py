@@ -47,21 +47,36 @@ def test_wrong_tenant_password_is_refused(client):
         connect(A, A, tenant_password("hollowmere"))
 
 
-def test_tenant_role_is_read_only_on_content(client):
+def test_tenant_role_capture_boundary(client):
+    """Phase 2 widened the runtime role to APPEND captured knowledge (proposals +
+    workflow records), but the hard limits still hold: claims are append-only
+    (editing a value is blocked by the trigger, not a grant), there is no DELETE
+    on content, and identities/memberships/schema stay untouchable."""
     with connect(A, A, tenant_password("brindlewood")) as conn:
         assert conn.execute("SELECT count(*) FROM documents").fetchone()[0] > 0
+        # Editing a claim value is blocked by the append-only TRIGGER (the role
+        # now holds UPDATE on claims, for supersede only).
+        with pytest.raises(psycopg.errors.RaiseException):
+            conn.execute("UPDATE claims SET value = 'x'")
+        # Still forbidden by grant: no DELETE on content, no identity/schema writes.
         for stmt in (
-            "UPDATE claims SET value = 'x'",
             "DELETE FROM claims",
-            "UPDATE claims SET superseded_by = NULL",
-            "INSERT INTO documents (id, scope_id, title, source, owner, effective_date, body)"
-            " VALUES ('x', 'company-wide', 'x', 'x', 'x', '2026-01-01', 'x')",
+            "DELETE FROM documents",
+            "DELETE FROM proposals",
             "UPDATE memberships SET scope_id = 'finance'",
             "UPDATE users SET active = true",
             "CREATE TABLE sneaky (id int)",
         ):
             with pytest.raises(psycopg.errors.InsufficientPrivilege):
                 conn.execute(stmt)
+        # Capture IS allowed: the role holds INSERT on the capture tables and no DELETE.
+        for tbl in ("proposals", "documents", "chunks", "claims"):
+            assert conn.execute(
+                "SELECT has_table_privilege(current_user, %s, 'INSERT')", (tbl,)
+            ).fetchone()[0] is True
+        assert conn.execute(
+            "SELECT has_table_privilege(current_user, 'claims', 'DELETE')"
+        ).fetchone()[0] is False
 
 
 def test_control_role_cannot_rewrite_tenancy(client):

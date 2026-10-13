@@ -227,6 +227,15 @@ def _provision_database(
             GRANT USAGE ON SCHEMA public TO {r};
             GRANT SELECT ON users, scopes, memberships, documents, chunks, claims TO {r};
             GRANT SELECT, INSERT, UPDATE ON answer_cache TO {r};
+            -- Phase 2 capture: the runtime role may record proposals and, on the
+            -- owner's approval, write a workflow record (documents + chunk + claim).
+            -- No DELETE anywhere; claims stay append-only (trigger). documents.id
+            -- and proposals.id are text/uuid (no sequence); chunks/claims are serial.
+            GRANT SELECT, INSERT, UPDATE ON proposals TO {r};
+            GRANT INSERT ON documents TO {r};
+            GRANT INSERT ON chunks TO {r};
+            GRANT INSERT, UPDATE ON claims TO {r};
+            GRANT USAGE ON SEQUENCE chunks_id_seq, claims_id_seq TO {r};
         """).format(r=sql.Identifier(db))
         )
 

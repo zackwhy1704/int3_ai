@@ -36,6 +36,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from .. import answer as answer_mod
+from .. import capture
 from .. import llm
 from ..auth.principal import Principal, v1_principal
 from ..db import control_conn
@@ -511,3 +512,54 @@ def validate(
             invalid.append(cid)
 
     return ValidateResponse(valid=valid, invalid=invalid)
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 capture: propose / list / approve / reject (service-principal auth).
+# Scope membership is required to propose; scope OWNERSHIP to list/approve/reject
+# (enforced in app.capture). Human confirmation is enforced at the MCP sidecar by
+# elicitation before these are ever called.
+# ---------------------------------------------------------------------------
+
+
+class ProposeClaimRequest(BaseModel):
+    scope: str
+    subject: str
+    attribute: str
+    value: str
+    quote: str
+    condition: str | None = None
+    session_label: str | None = None  # display-only; never used for authorisation
+
+
+@router.post("/propose_claim")
+def propose_claim(body: ProposeClaimRequest, p: Principal = Depends(v1_principal)) -> dict:
+    return capture.propose(
+        p, scope=body.scope, subject=body.subject, attribute=body.attribute,
+        value=body.value, quote=body.quote, condition=body.condition,
+        session_label=body.session_label,
+    )
+
+
+@router.get("/proposals")
+def list_proposals(scope: str = Query(...), p: Principal = Depends(v1_principal)) -> dict:
+    return {"proposals": capture.list_proposals(p, scope=scope)}
+
+
+class ApproveRequest(BaseModel):
+    proposal_id: str
+    supersede_anyway: bool = False
+
+
+@router.post("/approve_proposal")
+def approve_proposal(body: ApproveRequest, p: Principal = Depends(v1_principal)) -> dict:
+    return capture.approve(p, proposal_id=body.proposal_id, supersede_anyway=body.supersede_anyway)
+
+
+class RejectRequest(BaseModel):
+    proposal_id: str
+
+
+@router.post("/reject_proposal")
+def reject_proposal(body: RejectRequest, p: Principal = Depends(v1_principal)) -> dict:
+    return capture.reject(p, proposal_id=body.proposal_id)
