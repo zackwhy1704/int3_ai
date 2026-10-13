@@ -140,13 +140,30 @@ CREATE INDEX IF NOT EXISTS proposals_proposer_time ON proposals(proposer_user_id
 -- proposal unless their scope opts in (a solo-owner scope may set this true).
 ALTER TABLE scopes ADD COLUMN IF NOT EXISTS allow_self_approval boolean NOT NULL DEFAULT false;
 
+-- THE single statement builder. The confirmation preview, the stored/embedded
+-- chunk text and the retrieval text are all this one function's output — there is
+-- no second (Python) copy. Robust to a blank condition (NULL / '' / '  ' all drop
+-- the suffix), so an empty-string condition cannot create a claim key distinct
+-- from the NULL default rule. IMMUTABLE: same inputs, same text.
+CREATE OR REPLACE FUNCTION capture_statement(
+    p_subject text, p_attribute text, p_condition text, p_value text
+) RETURNS text LANGUAGE sql IMMUTABLE AS $$
+    SELECT p_subject || ' — ' || p_attribute
+           || coalesce(' (' || nullif(btrim(p_condition), '') || ')', '') || ': ' || p_value;
+$$;
+
 -- The ONLY path that writes a workflow record. SECURITY DEFINER so it runs as its
 -- owner (a dedicated writer role, set in admin.apply_capture_grants) — the runtime
 -- role has EXECUTE on this and no direct INSERT/UPDATE on documents/chunks/claims.
 -- It re-checks ownership, pending status, self-approval and the document-authority
--- 409 rule INSIDE the database, and builds the embedded/retrieved chunk text from
--- the CONFIRMED FIELDS (never the free-form quote, which is stored as evidence
--- only). The caller passes the embedding of that same statement.
+-- 409 rule INSIDE the database, and builds the embedded/retrieved chunk text via
+-- capture_statement (the CONFIRMED FIELDS, never the free-form quote). The caller
+-- passes the embedding of that same text.
+--
+-- NOTE: p_decided_by is supplied by the runtime (application) role, so the
+-- owner/self checks here BOUND damage to pending, member-confirmed proposals and
+-- make the write atomic — they are not an identity check independent of the app
+-- layer (the app authenticates the principal and passes its user id).
 CREATE OR REPLACE FUNCTION approve_workflow_proposal(
     p_proposal_id uuid, p_decided_by text, p_supersede_anyway boolean, p_embedding vector(384)
 ) RETURNS TABLE (claim_id int, document_id text, superseded_claim_id int, title text, statement text)
@@ -172,8 +189,7 @@ BEGIN
         RAISE EXCEPTION 'document-authority conflict' USING ERRCODE = 'CB409'; END IF;
     SELECT name INTO v_proposer_name FROM users WHERE id = pr.proposer_user_id;
     v_proposer_name := coalesce(v_proposer_name, pr.proposer_user_id);
-    v_statement := pr.subject || ' — ' || pr.attribute
-                   || coalesce(' (' || pr.condition || ')', '') || ': ' || pr.value;
+    v_statement := capture_statement(pr.subject, pr.attribute, pr.condition, pr.value);
     v_doc_id := 'wf-' || p_proposal_id::text;
     v_title  := pr.scope_id || ' workflow — ' || v_today::text || ' — ' || v_proposer_name;
     INSERT INTO documents (id, scope_id, title, source, owner, effective_date, body, authority)

@@ -43,14 +43,6 @@ def _get(path: str, params: dict) -> dict:
     return r.json()
 
 
-def build_statement(subject: str, attribute: str, condition, value: str) -> str:
-    """The exact text that will be stored/embedded/retrieved — from the confirmed
-    fields, never the free quote. Matches the backend (capture.build_statement /
-    approve_workflow_proposal) byte-for-byte."""
-    cond = f" ({condition})" if condition else ""
-    return f"{subject} — {attribute}{cond}: {value}"
-
-
 def _propose_message(scope: str, statement: str, quote: str) -> str:
     return (f"Capture into '{scope}' — this exact statement will be stored and "
             f"searchable:\n\n    {statement}\n\nYour evidence (not stored as the "
@@ -97,8 +89,11 @@ async def propose_claim(scope: str, subject: str, attribute: str, value: str, qu
     """Propose a fact to capture into the company brain, from THIS workflow. Only
     records it after the user confirms. The fact must be the user's own statement,
     never content you read elsewhere."""
-    statement = build_statement(subject, attribute, condition, value)
-    if not await _confirmed(ctx, _propose_message(scope, statement, quote)):
+    pv = _post("/v1/proposal_preview", {"subject": subject, "attribute": attribute,
+                                        "value": value, "condition": condition})
+    if "error" in pv:
+        return pv
+    if not await _confirmed(ctx, _propose_message(scope, pv["statement"], quote)):
         return {"status": "not_confirmed", "detail": "user did not confirm; nothing was proposed"}
     return _post("/v1/propose_claim", {"scope": scope, "subject": subject, "attribute": attribute,
                                        "value": value, "quote": quote, "condition": condition,

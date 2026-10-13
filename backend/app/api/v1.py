@@ -532,6 +532,21 @@ class ProposeClaimRequest(BaseModel):
     session_label: str | None = None  # display-only; never used for authorisation
 
 
+class PreviewRequest(BaseModel):
+    subject: str
+    attribute: str
+    value: str
+    condition: str | None = None
+
+
+@router.post("/proposal_preview")
+def proposal_preview(body: PreviewRequest, p: Principal = Depends(v1_principal)) -> dict:
+    # The exact statement that would be stored/embedded — the sidecar shows this at
+    # propose-time so the human confirms the real text (built by capture_statement).
+    return capture.preview(p, subject=body.subject, attribute=body.attribute,
+                           value=body.value, condition=body.condition)
+
+
 @router.post("/propose_claim")
 def propose_claim(body: ProposeClaimRequest, p: Principal = Depends(v1_principal)) -> dict:
     return capture.propose(

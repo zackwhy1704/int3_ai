@@ -111,6 +111,31 @@ def test_quote_injection_never_reaches_stored_chunk(client, as_user):
     assert chunk_text == f"{tag} badge — renewal: annually"   # built from confirmed fields
 
 
+# --- item 1: one statement builder (preview == stored == embedded) --------------
+
+def test_one_statement_builder_consistency(client, as_user):
+    _set_self_approval("operations", True)
+    cases = [None, "", "  ", "ünïcode", "c" * 80]
+    for cond in cases:
+        tag = _tag()
+        subj = f"{tag} équip—ment"
+        fields = {"subject": subj, "attribute": "review cadence", "condition": cond, "value": "every 90 days — v"}
+        preview = client.post("/v1/proposal_preview", headers=as_user("priya"), json=fields).json()["statement"]
+        pid = client.post("/v1/propose_claim", headers=as_user("priya"),
+                          json={**fields, "scope": "operations", "quote": "ev"}).json()["proposal_id"]
+        client.post("/v1/approve_proposal", headers=as_user("priya"), json={"proposal_id": pid})
+        with _tconn() as c:
+            stored = c.execute(
+                "SELECT ch.text FROM chunks ch JOIN documents d ON d.id=ch.document_id"
+                " WHERE d.authority='workflow' AND ch.text LIKE %s ORDER BY ch.id DESC LIMIT 1",
+                (f"{subj}%",)).fetchone()["text"]
+        # preview (shown + embedded by the backend) == the stored chunk text.
+        assert preview == stored, (repr(cond), repr(preview), repr(stored))
+        # blank conditions collapse to the default rule (no "(...)" suffix).
+        if cond is None or not cond.strip():
+            assert "(" not in stored.split(": ", 1)[0]
+
+
 # --- item 4: supersede paths ----------------------------------------------------
 
 def test_workflow_supersedes_workflow(client, as_user):
