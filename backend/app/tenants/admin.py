@@ -25,7 +25,7 @@ import psycopg
 from psycopg import sql
 from psycopg.rows import dict_row
 
-from .. import config, seed
+from .. import config, migrations, seed
 from ..db import tenant_db_name, tenant_password
 
 ADMIN_USER = os.environ.get("ADMIN_DB_USER", "")
@@ -151,7 +151,82 @@ def init() -> None:
                 GRANT SELECT, INSERT, UPDATE ON tenant_usage TO {g};
             """).format(db=sql.Identifier(config.CONTROL_DB), g=gw)
             )
+    with admin_conn(config.CONTROL_DB) as conn:
+        migrations.ensure_table(conn)
+        migrations.record(conn, migrations.CONTROL_VERSION)
     print("control plane ready")
+
+
+def _grant_tenant_base(tconn, db: str) -> None:
+    """Base runtime grants: read content, write answer_cache + proposals. The
+    runtime role has NO direct write on documents/chunks/claims — those go through
+    the SECURITY DEFINER function (see apply_capture_grants)."""
+    tconn.execute(
+        sql.SQL("""
+        GRANT USAGE ON SCHEMA public TO {r};
+        GRANT SELECT ON users, scopes, memberships, documents, chunks, claims TO {r};
+        GRANT SELECT, INSERT, UPDATE ON answer_cache TO {r};
+        GRANT SELECT, INSERT, UPDATE ON proposals TO {r};
+    """).format(r=sql.Identifier(db))
+    )
+
+
+_FN = "approve_workflow_proposal(uuid, text, boolean, vector)"
+
+
+def apply_capture_grants(tconn, db: str) -> None:
+    """Narrow the capture write path: a dedicated NOLOGIN writer role (<db>_wr)
+    owns the SECURITY DEFINER approve function and holds the content writes; the
+    runtime role only EXECUTEs the function and cannot write documents/chunks/
+    claims directly (REVOKE handles DBs that had the earlier broad grant)."""
+    wr = f"{db}_wr"
+    if not role_exists(tconn, wr):
+        tconn.execute(sql.SQL("CREATE ROLE {} NOLOGIN").format(sql.Identifier(wr)))
+    tconn.execute(
+        sql.SQL("""
+        GRANT USAGE ON SCHEMA public TO {wr};
+        GRANT SELECT ON scopes, users, documents, chunks, claims, proposals TO {wr};
+        GRANT INSERT ON documents TO {wr};
+        GRANT INSERT ON chunks TO {wr};
+        GRANT INSERT, UPDATE ON claims TO {wr};
+        GRANT UPDATE ON proposals TO {wr};
+        GRANT USAGE ON SEQUENCE chunks_id_seq, claims_id_seq TO {wr};
+        ALTER FUNCTION {fn} OWNER TO {wr};
+        GRANT EXECUTE ON FUNCTION {fn} TO {r};
+        REVOKE INSERT ON documents FROM {r};
+        REVOKE INSERT ON chunks FROM {r};
+        REVOKE INSERT, UPDATE ON claims FROM {r};
+        REVOKE USAGE ON SEQUENCE chunks_id_seq, claims_id_seq FROM {r};
+    """).format(wr=sql.Identifier(wr), r=sql.Identifier(db), fn=sql.SQL(_FN))
+    )
+
+
+def _bring_tenant_current(tconn, db: str) -> None:
+    """Apply the current schema + grant posture idempotently and record the tenant
+    migration version. Used by provision (fresh DB) and migrate (existing DB)."""
+    tconn.execute((APP_DIR / "schema.sql").read_text())
+    tconn.execute("REVOKE ALL ON SCHEMA public FROM PUBLIC")
+    _grant_tenant_base(tconn, db)
+    apply_capture_grants(tconn, db)
+    migrations.ensure_table(tconn)
+    migrations.record(tconn, migrations.TENANT_VERSION)
+
+
+def migrate() -> None:
+    """Apply pending migrations to the control DB and every tenant DB. Idempotent."""
+    with admin_conn(config.CONTROL_DB) as conn:
+        if migrations.current(conn) < migrations.CONTROL_VERSION:
+            migrations.record(conn, migrations.CONTROL_VERSION)
+        tenant_ids = [r["id"] for r in conn.execute("SELECT id FROM tenants ORDER BY id")]
+    for tid in tenant_ids:
+        db = tenant_db_name(tid)
+        with admin_tenant_conn(tid, vector=False) as tconn:
+            at = migrations.current(tconn)
+            if at < migrations.TENANT_VERSION:
+                _bring_tenant_current(tconn, db)
+                print(f"migrated {db}: v{at} -> v{migrations.TENANT_VERSION}")
+            else:
+                print(f"{db}: already at v{at}")
 
 
 def provision(
@@ -220,24 +295,7 @@ def _provision_database(
         )
 
     with admin_tenant_conn(tenant_id, vector=False) as tconn:
-        tconn.execute((APP_DIR / "schema.sql").read_text())
-        tconn.execute("REVOKE ALL ON SCHEMA public FROM PUBLIC")
-        tconn.execute(
-            sql.SQL("""
-            GRANT USAGE ON SCHEMA public TO {r};
-            GRANT SELECT ON users, scopes, memberships, documents, chunks, claims TO {r};
-            GRANT SELECT, INSERT, UPDATE ON answer_cache TO {r};
-            -- Phase 2 capture: the runtime role may record proposals and, on the
-            -- owner's approval, write a workflow record (documents + chunk + claim).
-            -- No DELETE anywhere; claims stay append-only (trigger). documents.id
-            -- and proposals.id are text/uuid (no sequence); chunks/claims are serial.
-            GRANT SELECT, INSERT, UPDATE ON proposals TO {r};
-            GRANT INSERT ON documents TO {r};
-            GRANT INSERT ON chunks TO {r};
-            GRANT INSERT, UPDATE ON claims TO {r};
-            GRANT USAGE ON SEQUENCE chunks_id_seq, claims_id_seq TO {r};
-        """).format(r=sql.Identifier(db))
-        )
+        _bring_tenant_current(tconn, db)
 
     with admin_tenant_conn(tenant_id) as tconn:
         if seed_dir:
@@ -303,6 +361,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("init")
+    sub.add_parser("migrate")
     p = sub.add_parser("provision")
     p.add_argument("--id", required=True)
     p.add_argument("--name", required=True)
@@ -320,6 +379,8 @@ def main() -> None:
     a = ap.parse_args()
     if a.cmd == "init":
         init()
+    elif a.cmd == "migrate":
+        migrate()
     elif a.cmd == "provision":
         provision(
             a.id,

@@ -48,35 +48,35 @@ def test_wrong_tenant_password_is_refused(client):
 
 
 def test_tenant_role_capture_boundary(client):
-    """Phase 2 widened the runtime role to APPEND captured knowledge (proposals +
-    workflow records), but the hard limits still hold: claims are append-only
-    (editing a value is blocked by the trigger, not a grant), there is no DELETE
-    on content, and identities/memberships/schema stay untouchable."""
+    """The runtime role may read content and read/write proposals, and approves a
+    proposal ONLY by EXECUTEing the SECURITY DEFINER function — it cannot write
+    documents/chunks/claims directly (Phase 2 audit item 3), nor touch identities,
+    memberships or the schema."""
     with connect(A, A, tenant_password("brindlewood")) as conn:
         assert conn.execute("SELECT count(*) FROM documents").fetchone()[0] > 0
-        # Editing a claim value is blocked by the append-only TRIGGER (the role
-        # now holds UPDATE on claims, for supersede only).
-        with pytest.raises(psycopg.errors.RaiseException):
-            conn.execute("UPDATE claims SET value = 'x'")
-        # Still forbidden by grant: no DELETE on content, no identity/schema writes.
+        # No direct content write and no identity/schema write (grant-blocked).
         for stmt in (
+            "INSERT INTO documents (id,scope_id,title,source,owner,effective_date,body)"
+            " VALUES ('x','company-wide','x','x','x','2026-01-01','x')",
+            "UPDATE claims SET superseded_by = NULL",
             "DELETE FROM claims",
-            "DELETE FROM documents",
             "DELETE FROM proposals",
             "UPDATE memberships SET scope_id = 'finance'",
-            "UPDATE users SET active = true",
             "CREATE TABLE sneaky (id int)",
         ):
             with pytest.raises(psycopg.errors.InsufficientPrivilege):
                 conn.execute(stmt)
-        # Capture IS allowed: the role holds INSERT on the capture tables and no DELETE.
-        for tbl in ("proposals", "documents", "chunks", "claims"):
-            assert conn.execute(
-                "SELECT has_table_privilege(current_user, %s, 'INSERT')", (tbl,)
-            ).fetchone()[0] is True
+        # Exact privilege posture.
+        def priv(tbl, p):
+            return conn.execute("SELECT has_table_privilege(current_user, %s, %s)", (tbl, p)).fetchone()[0]
+        assert priv("proposals", "INSERT") and priv("proposals", "UPDATE")  # runtime manages proposals
+        assert not priv("documents", "INSERT")
+        assert not priv("chunks", "INSERT")
+        assert not priv("claims", "INSERT") and not priv("claims", "UPDATE")
         assert conn.execute(
-            "SELECT has_table_privilege(current_user, 'claims', 'DELETE')"
-        ).fetchone()[0] is False
+            "SELECT has_function_privilege(current_user,"
+            " 'approve_workflow_proposal(uuid,text,boolean,vector)', 'EXECUTE')"
+        ).fetchone()[0] is True
 
 
 def test_control_role_cannot_rewrite_tenancy(client):
