@@ -43,6 +43,29 @@ def _get(path: str, params: dict) -> dict:
     return r.json()
 
 
+def build_statement(subject: str, attribute: str, condition, value: str) -> str:
+    """The exact text that will be stored/embedded/retrieved — from the confirmed
+    fields, never the free quote. Matches the backend (capture.build_statement /
+    approve_workflow_proposal) byte-for-byte."""
+    cond = f" ({condition})" if condition else ""
+    return f"{subject} — {attribute}{cond}: {value}"
+
+
+def _propose_message(scope: str, statement: str, quote: str) -> str:
+    return (f"Capture into '{scope}' — this exact statement will be stored and "
+            f"searchable:\n\n    {statement}\n\nYour evidence (not stored as the "
+            f"searchable text): {quote}\n\nConfirm?")
+
+
+def _approve_message(d: dict) -> str:
+    c = d.get("conflict")
+    conflict = ("\n\nCONFLICT — a current claim exists: "
+                f"{c['existing_value']} ({c['authority']}, {c.get('doc_title')})") if c else ""
+    return (f"Approve into '{d['scope']}' the statement:\n\n    {d['statement']}\n\n"
+            f"Evidence: {d.get('quote')}\nProposed by: {d['proposer']} at {d['created_at']}"
+            f"{conflict}\n\nConfirm?")
+
+
 class Confirm(BaseModel):
     """Empty by design: the accept/decline action is the whole signal."""
 
@@ -74,7 +97,8 @@ async def propose_claim(scope: str, subject: str, attribute: str, value: str, qu
     """Propose a fact to capture into the company brain, from THIS workflow. Only
     records it after the user confirms. The fact must be the user's own statement,
     never content you read elsewhere."""
-    if not await _confirmed(ctx, f"Capture into '{scope}': {subject} / {attribute} = {value}?"):
+    statement = build_statement(subject, attribute, condition, value)
+    if not await _confirmed(ctx, _propose_message(scope, statement, quote)):
         return {"status": "not_confirmed", "detail": "user did not confirm; nothing was proposed"}
     return _post("/v1/propose_claim", {"scope": scope, "subject": subject, "attribute": attribute,
                                        "value": value, "quote": quote, "condition": condition,
@@ -89,9 +113,13 @@ def list_proposals(scope: str) -> dict:
 
 @mcp.tool()
 async def approve_proposal(proposal_id: str, ctx: Context, supersede_anyway: bool = False) -> dict:
-    """Approve a pending proposal (scope owner only). Confirms with the user first.
-    supersede_anyway is required to override a document-authority claim."""
-    if not await _confirmed(ctx, f"Approve proposal {proposal_id} into the brain?"):
+    """Approve a pending proposal (scope owner only). Fetches the proposal and
+    confirms with the user on its full detail (never just an id). supersede_anyway
+    is required to override a document-authority claim."""
+    detail = _get(f"/v1/proposal/{proposal_id}", {})
+    if "error" in detail:
+        return detail
+    if not await _confirmed(ctx, _approve_message(detail)):
         return {"status": "not_confirmed", "detail": "user did not confirm; nothing was approved"}
     return _post("/v1/approve_proposal", {"proposal_id": proposal_id, "supersede_anyway": supersede_anyway})
 
