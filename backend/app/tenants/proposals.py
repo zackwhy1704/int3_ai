@@ -32,8 +32,8 @@ def _approve(a) -> None:
         pr = c.execute("SELECT * FROM proposals WHERE id=%s AND status='pending'", (a.proposal,)).fetchone()
         if not pr:
             sys.exit("no such pending proposal")
-        print(capture._approve_write(c, pr, decided_by=f"operator:{a.operator}",
-                                     supersede_anyway=a.supersede_anyway))
+        print(capture._write_workflow_record(c, pr, decided_by=f"operator:{a.operator}",
+                                             supersede_anyway=a.supersede_anyway))
 
 
 def _reject(a) -> None:

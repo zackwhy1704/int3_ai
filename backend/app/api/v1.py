@@ -546,6 +546,13 @@ def list_proposals(scope: str = Query(...), p: Principal = Depends(v1_principal)
     return {"proposals": capture.list_proposals(p, scope=scope)}
 
 
+@router.get("/proposal/{proposal_id}")
+def get_proposal(proposal_id: str, p: Principal = Depends(v1_principal)) -> dict:
+    # Owner-only full detail (statement, quote, proposer, timestamp, conflict) so
+    # the sidecar's approve elicitation shows what will be stored, not just an id.
+    return capture.get_proposal(p, proposal_id=proposal_id)
+
+
 class ApproveRequest(BaseModel):
     proposal_id: str
     supersede_anyway: bool = False
