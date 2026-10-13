@@ -25,7 +25,11 @@ scopes:
     name: Operations
     kind: department
     description: Runbooks, supplier terms, incident history for the operations team.
-    owner: priya
+    # Proposer != approver by design: priya (Head of Operations, the sole member)
+    # PROPOSES operations facts; ada (CEO) OWNS the scope and APPROVES them. This is
+    # the demo's two-person capture gate, and it comes straight from the seed so a
+    # fresh bring-up has it with no hand edits.
+    owner: ada
   - id: finance
     name: Finance
     kind: department
