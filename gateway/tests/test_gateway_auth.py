@@ -51,9 +51,14 @@ def test_gateway_auth_none_rejected_in_production():
         if gateway_dir not in _sys.path:
             _sys.path.insert(0, gateway_dir)
 
-        # Clear any cached main module.
+        # Clear cached main AND auth: main binds GATEWAY_AUTH via
+        # `from auth import GATEWAY_AUTH`, and auth reads it at its own import time.
+        # If another test imported `auth` at collection (test_key_isolation does),
+        # auth.GATEWAY_AUTH is frozen under the unpatched env, so reloading only
+        # `main` would rebind that stale value and the guard would not fire. Evict
+        # both so both re-read the patched env — makes this guard test order-independent.
         for mod in list(_sys.modules.keys()):
-            if mod == "main":
+            if mod in ("main", "auth"):
                 del _sys.modules[mod]
 
         # Re-import main with patched env so GATEWAY_AUTH and ENV are set at module level.
