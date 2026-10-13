@@ -140,7 +140,6 @@ say "starting gated Hermes backend $hermes_name (u-net only, ingress 127.0.0.1:$
 docker rm -f "$hermes_name" >/dev/null 2>&1 || true
 docker run -d --name "$hermes_name" --init --network "$UNET" \
   --entrypoint /opt/proxy/startup-gate.sh \
-  -p "127.0.0.1:$INGRESS_PORT:9122" \
   -e HERMES_DASHBOARD_SESSION_TOKEN="$INGRESS_TOKEN" \
   -e HERMES_HOME=/opt/data -e HERMES_DASHBOARD_FILES_ROOT=/opt/data -e HERMES_WRITE_SAFE_ROOT=/opt/data \
   -e HTTPS_PROXY=http://edge:3128 -e https_proxy=http://edge:3128 \
@@ -149,6 +148,21 @@ docker run -d --name "$hermes_name" --init --network "$UNET" \
   -e no_proxy="localhost,127.0.0.1,brain-gateway,$mcp_name" \
   -v "$vol:/opt/data" \
   "$GATED_IMAGE" serve --host 127.0.0.1 --port 9119 >/dev/null
+
+# --- 4b. host-ingress forwarder (dual-homed) ----------------------------------
+# The gated backend is on the INTERNAL u-net, so Docker cannot publish its port to
+# the host: a `-p` on an internal-only container is silently dropped (its
+# NetworkSettings.Ports stays empty), so stock Hermes Desktop on the host could not
+# reach 127.0.0.1:$INGRESS_PORT. A tiny socat container bridges ONLY this one
+# ingress port: it is on the default bridge (so `-p` actually publishes) AND on the
+# u-net (so it can reach the backend's route proxy on 9122). The backend itself
+# stays internal and egress-locked; nothing else about its isolation changes.
+fwd_name="fwd-$TENANT-$USER_ID"
+say "starting host-ingress forwarder $fwd_name (127.0.0.1:$INGRESS_PORT -> $hermes_name:9122)"
+docker rm -f "$fwd_name" >/dev/null 2>&1 || true
+docker run -d --name "$fwd_name" -p "127.0.0.1:$INGRESS_PORT:$INGRESS_PORT" \
+  alpine/socat "TCP-LISTEN:$INGRESS_PORT,fork,reuseaddr" "TCP:$hermes_name:9122" >/dev/null
+docker network connect "$UNET" "$fwd_name"
 
 # --- 5. ASSERT the brain token is not reachable from the Hermes container ------
 say "asserting the brain token is absent from $hermes_name"

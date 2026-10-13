@@ -40,6 +40,10 @@ bash deploy/hermes/provision-user.sh brindlewood ada    9133 --key-owner theirs
 
 Each user gets a connect file at `deploy/hermes/connect/brindlewood-<user>.connect.json`
 (`url` = `http://127.0.0.1:<port>`, `session_token` = the backend ingress token).
+Provisioning also starts a small per-user **host-ingress forwarder** (`fwd-<tenant>-<user>`,
+a socat container) so `http://127.0.0.1:<port>` actually reaches the gated backend: the
+backend sits on an internal, egress-locked Docker network that cannot publish a host port
+directly, so the forwarder bridges just that one ingress port (the backend stays isolated).
 
 > Localhost only. These backends are reachable only on this Docker host over plain
 > HTTP until the hosted TLS ingress (Phase 3).
@@ -170,6 +174,17 @@ ago comes back as a cited answer — citing the workflow record, not a guess."
 ada; confirm `docker exec hermes-deploy-db-1 psql -U brain -d t_brindlewood -tAc "select title from documents where authority='workflow'"` shows the record.
 
 ---
+
+## Screenshots (captured from a real run through the GUI)
+
+Driving stock Hermes Desktop (a dev build from the pinned source) against this synthetic
+deploy stack, all five steps as captured in [demo-screenshots/](demo-screenshots/):
+
+1. [`1-finance-cited.png`](demo-screenshots/1-finance-cited.png) — marcus: cited finance answer ("Customer payment terms and credit control").
+2. [`2-operations-refused.png`](demo-screenshots/2-operations-refused.png) — priya: the same question refused, nothing leaked.
+3. [`3-teach-confirm.png`](demo-screenshots/3-teach-confirm.png) — priya: the capture confirmation shows the exact statement before it is stored.
+4. [`4-owner-approve.png`](demo-screenshots/4-owner-approve.png) — ada (the owner): the approval shows the statement **and** the proposer (priya).
+5. [`5-reask-cited.png`](demo-screenshots/5-reask-cited.png) — priya: the re-ask is now answered and cited to "operations workflow — <date> — Priya N.".
 
 ## Reset between runs
 
