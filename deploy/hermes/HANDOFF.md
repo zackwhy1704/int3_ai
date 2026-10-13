@@ -47,6 +47,22 @@ docker build -t hermes-gated --build-arg BASE=hermes-base-pinned -f gated/Docker
 - **BYOK gateway.** Provider key only in the gateway; per-tenant allowlist
   (sonnet only) + daily cap enforced; usage attributed per user.
 
+## Capture (Phase 2)
+
+Knowledge is built from workflows, not uploads. In a Hermes session the agent
+calls `propose_claim` (the user confirms via an MCP elicitation prompt); the
+scope owner later calls `approve_proposal` (own elicitation). On approval the
+backend writes a *workflow record* (a `documents` row with `authority='workflow'`,
+one embedded chunk, and the claim) so `brain_ask` retrieves and cites it like any
+source — captured facts rank below formal documents. An operator CLI
+(`python -m app.tenants.proposals`) is an admin-only fallback.
+
+**Pilot limitation — desktop sessions only.** The confirm step relies on the MCP
+elicitation prompt reaching the signed-in human at the desktop. Do NOT enable
+capture over messaging/bot channels in the pilot: an elicitation there could be
+answered by whoever is in the channel, not the proposing user. Capture tools are
+for per-user desktop backends only until a channel-safe confirm exists.
+
 ## Deferred (scope cuts for the MVP)
 
 - LLM-judge refusal detector (the eval gate is a keyword PROXY — see `eval/README.md`).
