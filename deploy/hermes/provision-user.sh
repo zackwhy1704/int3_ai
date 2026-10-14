@@ -46,6 +46,8 @@ EDGE_CTR=hermes-deploy-edge-1
 GATEWAY_IMAGE="${GATEWAY_IMAGE:-hermes-deploy-gateway}"
 MCP_IMAGE="${MCP_IMAGE:-hermes-deploy-brain-mcp}"
 GATED_IMAGE="${GATED_IMAGE:-hermes-gated}"
+# Pinned by digest: a reproducible, supply-chain-fixed forwarder image (not :latest).
+SOCAT_IMAGE="${SOCAT_IMAGE:-alpine/socat@sha256:fb3862c949af7c79996d0e514ee96128644d840835ed5368eeecb14a869de361}"
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 CONNECT_DIR="${CONNECT_DIR:-$HERE/connect}"; mkdir -p "$CONNECT_DIR"
@@ -161,7 +163,7 @@ fwd_name="fwd-$TENANT-$USER_ID"
 say "starting host-ingress forwarder $fwd_name (127.0.0.1:$INGRESS_PORT -> $hermes_name:9122)"
 docker rm -f "$fwd_name" >/dev/null 2>&1 || true
 docker run -d --name "$fwd_name" -p "127.0.0.1:$INGRESS_PORT:$INGRESS_PORT" \
-  alpine/socat "TCP-LISTEN:$INGRESS_PORT,fork,reuseaddr" "TCP:$hermes_name:9122" >/dev/null
+  "$SOCAT_IMAGE" "TCP-LISTEN:$INGRESS_PORT,fork,reuseaddr" "TCP:$hermes_name:9122" >/dev/null
 docker network connect "$UNET" "$fwd_name"
 
 # --- 5. ASSERT the brain token is not reachable from the Hermes container ------
