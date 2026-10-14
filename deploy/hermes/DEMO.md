@@ -15,7 +15,7 @@ learns a new fact after a human **proposes** it and a **different** human **appr
 |----------|-----------------|---------------------------|--------------------|
 | `marcus` | Finance Director| company-wide, **finance** | finance            |
 | `priya`  | Head of Operations | company-wide, **operations** | — (proposes only) |
-| `ada`    | CEO             | company-wide, leadership  | company-wide, leadership, **operations** |
+| `ada`    | CEO             | company-wide, leadership, **operations** | company-wide, leadership, **operations** |
 
 So in **operations**, **priya proposes** and **ada approves** — a real two-person gate
 (proposer ≠ approver). `marcus` is the finance contrast: he can see finance, priya can't.

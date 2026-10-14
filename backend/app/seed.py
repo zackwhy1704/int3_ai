@@ -26,8 +26,23 @@ def chunk(body: str) -> list[str]:
     return [p.strip() for p in body.split("\n\n") if p.strip()]
 
 
+def assert_owner_is_member(people: dict) -> None:
+    """A scope's owner must also be a member of it. The owner can list proposals and
+    see each one's conflicting active claim (value + document title) — scope content
+    — so an owner who is NOT a member would be shown content for a scope they
+    otherwise cannot read. Raise (fail loudly) so a leaky seed never provisions."""
+    members = people.get("memberships", {})
+    for s in people["scopes"]:
+        if s["id"] not in members.get(s["owner"], []):
+            raise ValueError(
+                f"seed invariant: owner {s['owner']!r} of scope {s['id']!r} is not a "
+                f"member of it — add {s['id']!r} to memberships[{s['owner']!r}]"
+            )
+
+
 def load_documents(conn, seed_dir: Path) -> None:
     people = yaml.safe_load((seed_dir / "users.yaml").read_text())
+    assert_owner_is_member(people)   # fail before any DB write if the seed is leaky
     for u in people["users"]:
         conn.execute(
             "INSERT INTO users (id, name, title, email) VALUES (%s, %s, %s, %s)",

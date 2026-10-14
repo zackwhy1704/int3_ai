@@ -122,6 +122,12 @@ def get_proposal(p, *, proposal_id) -> dict:
 def _require_owner(p, scope):
     if _owner_of(p, scope) != p.user_id:
         raise HTTPException(403, "only the scope owner may review proposals")
+    if scope not in p.scopes:
+        # Defence in depth behind the seed invariant (seed.py): list/get/approve/
+        # reject surface a scope's proposals AND each one's conflicting active claim
+        # (value + document title), which is scope content. Never show it to a
+        # non-member, even if the DB drifted an owner out of the scope's membership.
+        raise HTTPException(403, "reviewing proposals requires membership of the scope")
 
 
 def list_proposals(p, *, scope) -> list[dict]:

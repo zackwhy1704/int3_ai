@@ -1,10 +1,11 @@
 """Phase 2 capture + audit hardening. Integration (needs the stack + fixtures).
-Owners (seed): operations=ada, finance=marcus, leadership=ada. operations' member
-is priya (the proposer) while ada (CEO) owns it — a realistic proposer != approver
-split, so capture-then-approve in operations is the OWNER-APPROVES path (priya
-proposes, ada approves). The self-approval default-deny / opt-in (item 2) is
-therefore tested in finance, where the owner (marcus) is also the sole member and
-can propose then approve his own fact.
+Owners (seed): operations=ada, finance=marcus, leadership=ada. ada owns operations
+AND is a member of it (owner must be a member — the owner sees proposals'
+conflicting claims, which are scope content). priya (the proposer) is the other
+operations member, so capture-then-approve in operations is the OWNER-APPROVES path
+(priya proposes, ada approves). The self-approval default-deny / opt-in is tested in
+finance, where the owner (marcus) is also the sole member and can propose then
+approve his own fact.
 """
 import uuid
 
@@ -85,6 +86,42 @@ def test_proposer_is_not_the_owner_so_cannot_approve_own(client, as_user):
     pid = _propose(client, as_user, "priya", "operations", f"self-{_tag()}").json()["proposal_id"]
     assert _approve(client, as_user, "priya", pid).status_code == 403     # not the owner
     assert _approve(client, as_user, "ada", pid).status_code == 200       # the owner can
+
+
+def test_owner_not_member_cannot_list_or_see_conflict(client, as_user):
+    """Item 1: an owner who is NOT a member of the scope is refused on list_proposals,
+    and the conflicting claim's content (value + doc title) never reaches them. The
+    seed invariant (seed.py) forbids this state, so we induce it directly to prove
+    the capture layer is a second line of defence against DB drift."""
+    tag = _tag()
+    subj, attr = f"{tag} board seat", "term"
+    # A leadership document claim, and a pending proposal that conflicts with it
+    # (ada is a leadership member + owner, so she may propose).
+    _insert_document_claim("leadership", subj, attr, "two years")
+    pid = _propose(client, as_user, "ada", "leadership", subj, attr, "three years",
+                   f"The {tag} board seat term is three years.").json()["proposal_id"]
+    assert pid  # proposal exists; its conflict view would expose "two years" + the doc title
+    # Drift the owner to marcus, who is NOT a leadership member.
+    with _tconn() as c:
+        c.execute("UPDATE scopes SET owner_user_id='marcus' WHERE id='leadership'")
+    try:
+        r = client.get("/v1/proposals", params={"scope": "leadership"}, headers=as_user("marcus"))
+        assert r.status_code == 403, r.text                     # owner, but not a member
+        assert "two years" not in r.text and subj not in r.text  # no scope content leaked
+    finally:
+        with _tconn() as c:
+            c.execute("UPDATE scopes SET owner_user_id='ada' WHERE id='leadership'")
+
+
+def test_seed_invariant_rejects_owner_who_is_not_a_member():
+    """Item 1: the seed loader fails loudly when a scope's owner is not a member, so
+    a leaky seed never provisions (prevention, behind the capture-layer defence)."""
+    from app.seed import assert_owner_is_member
+    with pytest.raises(ValueError, match="not a member"):
+        assert_owner_is_member({"scopes": [{"id": "ops", "owner": "ada"}],
+                                "memberships": {"ada": ["company-wide"]}})
+    assert_owner_is_member({"scopes": [{"id": "ops", "owner": "ada"}],
+                            "memberships": {"ada": ["ops"]}})   # valid shape passes
 
 
 def test_rate_limit_429(client, as_user, monkeypatch):

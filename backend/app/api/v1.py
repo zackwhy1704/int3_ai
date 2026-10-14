@@ -516,9 +516,11 @@ def validate(
 
 # ---------------------------------------------------------------------------
 # Phase 2 capture: propose / list / approve / reject (service-principal auth).
-# Scope membership is required to propose; scope OWNERSHIP to list/approve/reject
-# (enforced in app.capture). Human confirmation is enforced at the MCP sidecar by
-# elicitation before these are ever called.
+# Scope membership is required to propose; scope OWNERSHIP AND membership to
+# list/approve/reject (both enforced in app.capture — the owner sees proposals'
+# conflicting claims, which are scope content, so a non-member owner is refused).
+# Human confirmation is enforced at the MCP sidecar by elicitation before these
+# are ever called.
 # ---------------------------------------------------------------------------
 
 

@@ -44,4 +44,6 @@ scopes:
 memberships:
   priya: [company-wide, operations]
   marcus: [company-wide, finance]
-  ada: [company-wide, leadership]
+  # ada owns operations (approves its captures) so she must also be a member of it
+  # — the owner sees proposals and their conflicting claims, which are scope content.
+  ada: [company-wide, leadership, operations]
