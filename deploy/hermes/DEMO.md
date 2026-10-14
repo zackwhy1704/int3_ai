@@ -75,27 +75,29 @@ dialog (paste the `url` + `session_token` from the connect file).
 
 ## Hermes Desktop version, and "do not update" for the pilot
 
-The pinned backend is commit **`73162b00eefde3794bed0afb53d84a19c0eed230`**
-(`deploy/hermes/build-base.sh:12`). `git describe --tags` on it returns
-**`rc.5-v0.21.7-458-g73162b00`** — i.e. it is an **untagged dev commit**, 458 commits
-after the release tag `rc.5-v0.21.7` (the pinned base image's CLI self-reports
-`Hermes Agent vunknown (2026.9.24)`). **There is no published Desktop release exactly
-at this commit**; the Desktop that matches the pinned backend is one **built from the
-same commit `73162b00`**. The nearest tagged release is `rc.5-v0.21.7`.
+The backend is pinned to a **published release**: **Hermes Agent v0.21.7** (tag
+`v0.21.7` → commit `71d34bad1045610252eda02ee79549436896e784`,
+`deploy/hermes/build-base.sh`). Release page:
+<https://github.com/NousResearch/hermes-agent/releases/tag/v0.21.7>. Per its notes,
+v0.21.7 ships an **official Windows Desktop** (Microsoft Store, MSIX, and the
+installer) — so partners can install the stock app for the matching version without
+building from source. (The GitHub release itself carries **no** binary asset; the
+installers live in the Store / MSIX / the install one-liner.)
 
-Auto-update is **user-initiated only — there is no silent background updater to
-disable**:
+Auto-update at v0.21.7 is **user-initiated — no silent background install**:
 - `electron-updater` is created with `autoDownload = false` and
-  `autoInstallOnAppQuit = false` (`apps/desktop/electron/updater/mac-client.ts:49-50`).
-- The only trigger is the **"Check for Updates…"** menu item, which just opens the
-  updates panel (`sendOpenUpdatesRequested()`, `apps/desktop/electron/main.ts` ~6715).
-- There is no `checkForUpdatesAndNotify`, no update timer/scheduler, and nothing runs
-  `hermes update` on boot.
+  `autoInstallOnAppQuit = false` (`apps/desktop/electron/updater/mac-client.ts:49-50`),
+  and there is no `checkForUpdatesAndNotify` / update timer / scheduler.
+- There is a **passive** version check that can show an update banner
+  (`updates.check`, default on — `hermes_cli/config_defaults.py`); it never installs
+  on its own. "Check for Updates…" opens the panel; `hermes update` is explicit.
 
-**To keep the pilot pinned:** (1) don't click **Check for Updates…**; (2) don't run
-`hermes update`; (3) run exactly the build made from `73162b00`. (A package whose
-install stamp is `updateMechanism: 'external'` — `apps/desktop/electron/install-stamp.ts:85`
-— is marked externally-managed and never self-updates.) **Do not modify Hermes.**
+**To keep the pilot pinned:** (1) don't accept the update banner or click **Check for
+Updates…**; (2) don't run `hermes update`; (3) a Microsoft Store install updates
+through the Store — for a held pilot prefer the standalone installer or the
+`71d34bad` build you control. (A package whose install stamp is
+`updateMechanism: 'external'` — `apps/desktop/electron/install-stamp.ts:85` — is
+externally-managed and never self-updates.) **Do not modify Hermes.**
 
 ---
 

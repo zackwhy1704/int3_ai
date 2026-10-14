@@ -78,10 +78,16 @@ done
 grep -q HERMES_BACKEND_READY /tmp/backend.log 2>/dev/null || fatal "backend not ready within timeout"
 
 code() { curl -s -o /dev/null -w '%{http_code}' --max-time 15 "$@"; }
+# POSITIVE liveness only: retry until 200 or ~30s, since the route proxy and the
+# shared gateway can bind a moment after the backend reports ready (a transient that
+# used to FATAL the first user provisioned). The NEGATIVE security checks below
+# (the 403s, and the unreachable-egress checks) are never retried — they must hold
+# on the first probe.
+wait_200() { for _ in $(seq 1 30); do [ "$(code "$@")" = 200 ] && return 0; sleep 1; done; return 1; }
 AUTH=(-H "Authorization: Bearer $TOKEN")
 
 # --- LIVE 3: route proxy up and enforcing ------------------------------------
-[ "$(code "http://127.0.0.1:$PORT_PROXY/api/status")" = 200 ] || fatal "route proxy not serving /api/status"
+wait_200 "http://127.0.0.1:$PORT_PROXY/api/status" || fatal "route proxy not serving /api/status"
 EXCLUDED=$(code -X POST "${AUTH[@]}" -H 'content-type: application/json' -d '{"path":"'"$HERMES_HOME"'/gate-probe","content":"x"}' "http://127.0.0.1:$PORT_PROXY/api/fs/write-text")
 [ "$EXCLUDED" = 403 ] || fatal "route allowlist not enforcing: POST /api/fs/write-text returned $EXCLUDED, expected 403"
 ok "route proxy enforcing (write-text 403)"
@@ -95,8 +101,7 @@ ok "read boundary live (in=200 /etc=403)"
 
 # --- LIVE 5: egress locked, provider NOT direct, gateway up -------------------
 # positive liveness: our in-network gateway must answer (inference path alive).
-GW=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 --noproxy '*' "$GATE_GATEWAY_HEALTH")
-[ "$GW" = 200 ] || fatal "model gateway $GATE_GATEWAY_HEALTH not reachable ($GW); inference path down"
+wait_200 --noproxy '*' "$GATE_GATEWAY_HEALTH" || fatal "model gateway $GATE_GATEWAY_HEALTH not reachable; inference path down"
 # the provider must NOT be reachable directly — through the proxy OR raw (a hook
 # that strips proxy env must still fail). curl exit 0 means it connected.
 prov_proxy=$(curl -s -o /dev/null --max-time 12 "https://$GATE_PROVIDER_HOST/"; echo $?)

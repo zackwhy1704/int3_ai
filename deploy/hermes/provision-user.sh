@@ -163,6 +163,25 @@ docker run -d --name "$hermes_name" --init --network "$UNET" \
   -v "$vol:/opt/data" \
   "$GATED_IMAGE" serve --host 127.0.0.1 --port 9119 >/dev/null
 
+# --- 4a. wait for the gated backend to pass its gate and serve ----------------
+# Before bridging it to the host (and before this script returns), block until the
+# backend's route proxy answers /api/status inside the container. This removes the
+# race where the forwarder (and the desktop) pointed at a backend still booting, or
+# one whose startup gate failed: if the container exits, we fail LOUDLY here instead
+# of returning a dead backend behind a live host port.
+say "waiting for $hermes_name to pass its startup gate and serve"
+ready=""
+for _ in $(seq 1 90); do
+  if ! docker ps --format '{{.Names}}' | grep -qx "$hermes_name"; then
+    echo "[provision] FATAL: $hermes_name exited during startup — see: docker logs $hermes_name" >&2; exit 1
+  fi
+  if [ "$(docker exec "$hermes_name" curl -s -o /dev/null -w '%{http_code}' --max-time 3 \
+          http://127.0.0.1:9122/api/status 2>/dev/null)" = 200 ]; then ready=1; break; fi
+  sleep 2
+done
+[ -n "$ready" ] || { echo "[provision] FATAL: $hermes_name did not become ready in time" >&2; exit 1; }
+say "ok: $hermes_name is serving on 9122"
+
 # --- 4b. host-ingress forwarder (dual-homed) ----------------------------------
 # The gated backend is on the INTERNAL u-net, so Docker cannot publish its port to
 # the host: a `-p` on an internal-only container is silently dropped (its
