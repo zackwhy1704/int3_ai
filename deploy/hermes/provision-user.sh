@@ -132,6 +132,18 @@ mcp_servers:
     url: "http://$mcp_name:9000/mcp"
     headers:
       X-MCP-Secret: "$MCP_SECRET"
+telemetry:
+  # Pilot default: shared metrics OFF and consent DECIDED, so the desktop never
+  # prompts ("Share usage stats?") and nothing is collected or sent to Nous. This
+  # is the backend consent config (telemetry.shared_metrics) the desktop reads over
+  # the shared_metrics RPC — there is no desktop-side store, so this is set here at
+  # provision, not in connect-desktop.ps1. enabled=false/send=false is the shipped
+  # default (hermes config_defaults.py); offer_version=2 == OFFER_VERSION marks it
+  # decided (hermes_cli/observability/shared_metrics_consent.py:consent_state).
+  shared_metrics:
+    enabled: false
+    send: false
+    offer_version: 2
 YAML
 docker run --rm -i -v "$vol:/opt/data" busybox \
   sh -c 'cat > /opt/data/config.yaml; chown 1000:1000 /opt/data/config.yaml 2>/dev/null || true' < "$cfg"

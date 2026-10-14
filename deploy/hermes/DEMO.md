@@ -99,6 +99,29 @@ install stamp is `updateMechanism: 'external'` — `apps/desktop/electron/instal
 
 ---
 
+## Pilot privacy & approval behaviour
+
+**Usage stats are OFF by default — nothing is sent to Nous.** Stock Hermes shows a
+"Share usage stats? … Share with Nous / Keep on this computer / No thanks" strip until
+the choice is made. That setting is *backend* config (`telemetry.shared_metrics`, which
+the desktop reads over the `shared_metrics` RPC — there is **no** desktop-side store, so
+it can't be set from `connect-desktop.ps1`). `provision-user.sh` writes it **decided and
+off** for every pilot user (`enabled: false`, `send: false`, `offer_version: 2`), so the
+strip never appears and nothing is collected or transmitted. This matches Hermes's own
+shipped default of `enabled=false / send=false` (`hermes_cli/config_defaults.py`);
+`offer_version: 2` marks consent *decided* (`shared_metrics_consent.py`).
+*If a user did opt in* ("Share with Nous"), Hermes sends **privacy-safe aggregate counts
+— no messages, no files** — to `https://telemetry.nousresearch.com/v1/telemetry`. "Keep
+on this computer" aggregates locally only; "No thanks" collects nothing.
+
+**"Always allow" on a brain approval does NOT persist — every capture/approval asks
+again.** The propose/approve confirmations are MCP *elicitations*, which Hermes treats as
+per-call confirmations with "no pattern to remember" (`tools/approval_prompt.py:346`,
+`allow_permanent=False`; the gateway wait does not persist either —
+`tools/approval_gateway_wait.py:138`). So even if you click "Always allow", the next
+proposal or approval prompts the human again — the two-person capture gate can't be
+switched off by habit.
+
 ## The demo (≈5 minutes)
 
 Reset first so step 3 starts from "not known" (see **Reset** below).
