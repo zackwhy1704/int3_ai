@@ -68,8 +68,32 @@ envelopes verbatim). The script prints a warning; it is for this **local, synthe
 demo only. The supported alternative is Hermes Desktop's in-app "Add Connection"
 dialog (paste the `url` + `session_token` from the connect file).
 
+**MSIX AppData virtualization (the official Windows app is MSIX).** The official
+Windows Hermes app ships as an MSIX package (`win.target = ['msix']` in
+`apps/desktop/electron-builder.config.cjs`). Windows redirects a packaged app's
+`%APPDATA%`: *"the OS will open the file from the per-user, per-package location
+first. If that location doesn't exist, then the OS will attempt to open the file
+from the real AppData location."*
+([Microsoft Learn](https://learn.microsoft.com/en-us/windows/msix/desktop/desktop-to-uwp-behind-the-scenes),
+"AppData operations… / Write under AppData"). So writing only the real
+`%APPDATA%\Hermes` works on first launch but is **shadowed** once the app writes its
+own connections file into its private store. `connect-desktop.ps1` handles this: if
+it finds a packaged install (via `Get-AppxPackage`, resolving the package family name
+at runtime — no hard-coded publisher hash), it writes **both** the private
+per-package copy
+(`%LOCALAPPDATA%\Packages\<PackageFamilyName>\LocalCache\Roaming\<app>\connections.json`)
+**and** real `%APPDATA%\<app>`, and prints which paths it used. A plain (non-packaged)
+install just uses `%APPDATA%\Hermes`. If you switch users *after* the app has written
+its own connection file, just re-run the command.
+
+> **If you cannot verify without installing:** the exact private-store `<app>` folder
+> name (Electron userData = productName: `Hermes` vs `Hermes Agent`) and the package
+> family name are resolved at runtime; they are **not verified here** (no MSIX install
+> on the build machine). The script probes the live package and existing folders.
+
 > Using a dev (from-source) Hermes Desktop or a throwaway profile? Pass
-> `-UserDataDir <dir>` and launch Desktop with `HERMES_DESKTOP_USER_DATA_DIR=<dir>`.
+> `-UserDataDir <dir>` and launch Desktop with `HERMES_DESKTOP_USER_DATA_DIR=<dir>`
+> (this skips packaged detection and writes exactly that dir).
 
 ---
 
@@ -98,6 +122,37 @@ through the Store — for a held pilot prefer the standalone installer or the
 `71d34bad` build you control. (A package whose install stamp is
 `updateMechanism: 'external'` — `apps/desktop/electron/install-stamp.ts:85` — is
 externally-managed and never self-updates.) **Do not modify Hermes.**
+
+### How the official Windows app updates, and keeping it on v0.21.7
+
+The Windows app is distributed three ways (v0.21.7 notes:
+<https://github.com/NousResearch/hermes-agent/releases/tag/v0.21.7> — "Microsoft Store
+and MSIX, the installer"), each with a different update path:
+
+- **Microsoft Store install** → updates **automatically through the Store**
+  (release notes: "Microsoft Store installs update through the Store").
+- **Out-of-store MSIX (App Installer)** → the generated `.appinstaller` sets
+  `<UpdateSettings><OnLaunch HoursBetweenUpdateChecks="12"/>`
+  (`scripts/bundles/release_artifacts.py:291-292`), so Windows App Installer
+  **checks the feed on launch, at most every 12 h**, and updates when a newer package
+  is published.
+- **Bundled / standalone build** → the in-app updater, which is **user-initiated**
+  (`autoDownload=false` / `autoInstallOnAppQuit=false`,
+  `apps/desktop/electron/updater/mac-client.ts:49-50`; no scheduler).
+
+**To hold a pilot machine on v0.21.7:** the Store and App-Installer MSIX paths update
+on their own when Nous publishes a newer release, which a pilot cannot pin per-app.
+So for a strictly held pilot, **prefer the bundled/standalone build** (user-initiated
+updates — just don't accept them) or a backend built from the `71d34bad` pin you
+control; if you must use the Store/MSIX, keep the machine off the update feed (e.g.
+pause Microsoft Store app updates, or don't make the `.appinstaller` feed reachable).
+**This is a mitigation, not a hard pin — not verified on a packaged install here.**
+
+`connect-desktop.ps1` helps you *notice* drift: when it finds a packaged install it
+reads the installed version (`Get-AppxPackage … .Version`) and **warns if it is not
+`v0.21.7`** (pass `-ExpectedVersion` to change the bar). Note Microsoft Store builds
+carry a timestamp-based version quad, so a numeric mismatch there may be a Store build
+rather than a wrong version — the warning says so.
 
 ---
 
