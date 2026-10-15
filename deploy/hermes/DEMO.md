@@ -117,11 +117,15 @@ Auto-update at v0.21.7 is **user-initiated — no silent background install**:
   on its own. "Check for Updates…" opens the panel; `hermes update` is explicit.
 
 **To keep the pilot pinned:** (1) don't accept the update banner or click **Check for
-Updates…**; (2) don't run `hermes update`; (3) a Microsoft Store install updates
-through the Store — for a held pilot prefer the standalone installer or the
-`71d34bad` build you control. (A package whose install stamp is
-`updateMechanism: 'external'` — `apps/desktop/electron/install-stamp.ts:85` — is
-externally-managed and never self-updates.) **Do not modify Hermes.**
+Updates…**; (2) don't run `hermes update`; (3) install **Nous's official non-Store
+installer** (the standalone download from the v0.21.7 release page, not the Microsoft
+Store and not an App-Installer/MSIX feed) — its in-app updater is **user-initiated**
+(`autoDownload=false`, `apps/desktop/electron/updater/mac-client.ts:49-50`), so the
+machine stays on v0.21.7 until a human chooses to update. Do **not** ship our own
+desktop build — pilots run Nous's official app; the `71d34bad` pin is for the
+**backend** only, not a desktop we distribute. The Store and App-Installer/MSIX paths
+auto-update and can't be pinned per-app — that drift is the risk (see below). **Do not
+modify Hermes.**
 
 ### How the official Windows app updates, and keeping it on v0.21.7
 
@@ -141,12 +145,14 @@ and MSIX, the installer"), each with a different update path:
   `apps/desktop/electron/updater/mac-client.ts:49-50`; no scheduler).
 
 **To hold a pilot machine on v0.21.7:** the Store and App-Installer MSIX paths update
-on their own when Nous publishes a newer release, which a pilot cannot pin per-app.
-So for a strictly held pilot, **prefer the bundled/standalone build** (user-initiated
-updates — just don't accept them) or a backend built from the `71d34bad` pin you
-control; if you must use the Store/MSIX, keep the machine off the update feed (e.g.
-pause Microsoft Store app updates, or don't make the `.appinstaller` feed reachable).
-**This is a mitigation, not a hard pin — not verified on a packaged install here.**
+on their own when Nous publishes a newer release, which a pilot cannot pin per-app —
+**that auto-update drift is the risk.** So install **Nous's official non-Store
+installer** (the standalone download from the v0.21.7 release page): its in-app updater
+is user-initiated, so the machine stays on v0.21.7 until a human updates it. Do **not**
+build or ship our own desktop to pin it — pilots run Nous's official app. If you must
+use the Store/MSIX, you can only *mitigate* (pause Microsoft Store app updates, or keep
+the `.appinstaller` feed unreachable). **These are mitigations, not a hard pin — not
+verified on a packaged install here.**
 
 `connect-desktop.ps1` helps you *notice* drift: when it finds a packaged install it
 reads the installed version (`Get-AppxPackage … .Version`) and **warns if it is not
