@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# COMPONENT TIER (BYPASSES HERMES) runner. The real demo is `make demo` (deploy/hermes/demo/).
 # `make e2e` body: ONE command, clean machine -> fresh ISOLATED stack -> provision 3
 # users -> run the scenario -> teardown. Isolated by DEPLOY_PROJECT (default hermes-e2e)
 # so it never touches a running hermes-deploy stack. Exits non-zero on any failure.

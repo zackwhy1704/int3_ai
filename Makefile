@@ -62,17 +62,27 @@ eval-openai: _eval_stage
 	  -e MODELS=$$OPENAI_MODELS \
 	  $(GW) python /tmp/gate.py
 
-.PHONY: e2e e2e-down
+.PHONY: demo demo-down e2e e2e-down
 
-# make e2e — headless E2E (DEMO.md steps 1-5 + negative checks) against a FRESH,
-# ISOLATED stack (DEPLOY_PROJECT=hermes-e2e) that never touches a running
-# hermes-deploy stack: build images -> up --build -> provision 3 users -> run the
-# scenario -> teardown. Exits non-zero on any failure and prints a pass/fail table.
-# Needs docker + an Anthropic key in deploy/hermes/.env (or the env). See
-# deploy/hermes/e2e/.
+# make demo — THE demo. Drives the REAL stock Hermes agent through the DEMO.md scenario
+# over /api/ws (the desktop's path), in a FRESH ISOLATED stack (DEPLOY_PROJECT=hermes-demo;
+# never touches hermes-deploy). Checks prerequisites, generates every non-model secret,
+# builds, brings up, provisions marcus/priya/ada, runs the scenario, prints a ✅/❌ table,
+# and LEAVES THE STACK UP so you can open the desktop app. Exits non-zero on any failure.
+demo:
+	bash deploy/hermes/demo/make-demo.sh
+
+# make demo-down — remove the isolated demo stack (refuses the default project).
+demo-down:
+	DEPLOY_PROJECT=hermes-demo bash deploy/hermes/e2e/teardown.sh
+
+# make e2e — COMPONENT TIER (BYPASSES HERMES). Drives the gateway model + the brain over
+# MCP directly (NOT through the Hermes agent / /api/ws) for a fast component check of the
+# same scenario, in a FRESH ISOLATED stack (DEPLOY_PROJECT=hermes-e2e). Use `make demo`
+# for the real thing; this is the quick lower-tier check. See deploy/hermes/e2e/.
 e2e:
 	bash deploy/hermes/e2e/make-e2e.sh
 
-# make e2e-down — force-remove a leftover isolated e2e stack (never the default one).
+# make e2e-down — force-remove a leftover isolated component-tier stack (never the default).
 e2e-down:
 	DEPLOY_PROJECT=hermes-e2e bash deploy/hermes/e2e/teardown.sh

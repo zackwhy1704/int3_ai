@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# COMPONENT TIER (BYPASSES HERMES): drives the gateway model + brain MCP directly, NOT
+# through the Hermes agent /api/ws. For the real demo use `make demo` (deploy/hermes/demo/).
 # E2E scenario = DEMO.md steps 1-5 + negative checks, driven against the provisioned
 # gated Hermes backends (behavioral layer: gateway model + brain MCP; elicitations
 # answered 'accept' == the desktop "Run"/choice 'once', never bypassed). Prints a

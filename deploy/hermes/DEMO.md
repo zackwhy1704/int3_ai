@@ -274,18 +274,19 @@ deploy stack, all five steps as captured in [demo-screenshots/](demo-screenshots
 
 ## Automated tests (so you don't have to run the demo by hand)
 
-**Layer 1 — headless E2E (no desktop GUI), one command:**
-```bash
-make e2e
-```
-Brings up a **fresh, isolated** stack (`DEPLOY_PROJECT=hermes-e2e` — it never touches a
-running `hermes-deploy` stack), provisions the 3 users, runs exactly the scenario above
-(steps 1-5) plus negative checks — priya cannot approve (403); a **declined** capture
-creates **0** proposals; `verify-isolation.sh` passes — then tears the stack down and
-prints a pass/fail table (non-zero exit on any failure). It drives the model via the
-BYOK gateway and the brain over MCP, answering each capture elicitation the way the
-desktop's **"Run"** button does (choice `once`), never bypassing it. Code:
-[`deploy/hermes/e2e/`](e2e/). It runs nightly + on demand in CI
+**`make demo` — THE demo (Hermes tier).** Drives the **real stock Hermes agent** through
+the scenario over `/api/ws` (the desktop's exact path; `deploy/hermes/demo/hermes_chat.py`),
+in a fresh isolated `DEPLOY_PROJECT=hermes-demo` stack that never touches `hermes-deploy`.
+It checks prerequisites, generates every non-model secret, provisions the 3 users, runs
+the scenario, prints a ✅/❌ table, and **leaves the stack up** so you can open the desktop
+app. `make demo-down` removes it. This is "Hermes under the hood" literally. Pass criteria
+use what Hermes **returned** plus DB rows and the backend route log.
+
+**`make e2e` — component tier (bypasses Hermes).** A fast lower-tier check that drives the
+BYOK gateway model + the brain over MCP **directly** (NOT through the Hermes agent /
+`/api/ws`), for the same scenario + negatives, in a fresh isolated `DEPLOY_PROJECT=hermes-e2e`
+stack. Use `make demo` for the real thing; this is the quick component check. Code:
+[`deploy/hermes/e2e/`](e2e/). It runs in CI
 ([`.github/workflows/e2e.yml`](../../.github/workflows/e2e.yml)) with a low gateway
 spend cap; a failed run uses GitHub's default failure notification and uploads the
 transcript.
