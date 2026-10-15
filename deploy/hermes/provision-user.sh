@@ -16,6 +16,9 @@
 # Identity: BRAIN token -> only the sidecar (never the Hermes container, asserted);
 # GATEWAY token (distinct) -> only the Hermes config. All data is synthetic.
 set -euo pipefail
+# Harmless on Linux/CI; on Git Bash it stops MSYS from mangling the container paths
+# in the docker commands below (e.g. --entrypoint /opt/proxy/startup-gate.sh).
+export MSYS_NO_PATHCONV=1
 
 TENANT="${1:?usage: provision-user.sh <tenant> <user> [port] [--key-owner ours|theirs] [--cap-usd N]}"
 USER_ID="${2:?user id required}"
@@ -37,13 +40,18 @@ ID_RE='^[a-z0-9_-]+$'
 case "$KEY_OWNER" in ours|theirs) ;; *) echo "key-owner must be ours|theirs" >&2; exit 2 ;; esac
 [ "$KEY_OWNER" = ours ] && [ -z "$CAP_USD" ] && CAP_USD="5"    # mandatory cap when we pay
 
-EXT_NET=hermes-deploy-ext
-BRAIN_NET=hermes-deploy-brain
-UNET="u-$TENANT-$USER_ID"
-DB=hermes-deploy-db-1
-GATEWAY_CTR=hermes-deploy-gateway-1
-EDGE_CTR=hermes-deploy-edge-1
-GATEWAY_IMAGE="${GATEWAY_IMAGE:-hermes-deploy-gateway}"
+# Project + per-user namespace. DEPLOY_PROJECT isolates an e2e copy (e.g. hermes-e2e)
+# from the normal stack; unset -> hermes-deploy and NS="" so EVERY derived name below
+# is byte-identical to before.
+PROJECT="${DEPLOY_PROJECT:-hermes-deploy}"
+if [ "$PROJECT" = "hermes-deploy" ]; then NS=""; else NS="$PROJECT-"; fi
+EXT_NET="$PROJECT-ext"
+BRAIN_NET="$PROJECT-brain"
+UNET="u-${NS}$TENANT-$USER_ID"
+DB="$PROJECT-db-1"
+GATEWAY_CTR="$PROJECT-gateway-1"
+EDGE_CTR="$PROJECT-edge-1"
+GATEWAY_IMAGE="${GATEWAY_IMAGE:-$PROJECT-gateway}"
 MCP_IMAGE="${MCP_IMAGE:-hermes-deploy-brain-mcp}"
 GATED_IMAGE="${GATED_IMAGE:-hermes-gated}"
 # Pinned by digest: a reproducible, supply-chain-fixed forwarder image (not :latest).
@@ -58,9 +66,9 @@ PROVIDER_KEY="${PROVIDER_KEY:-${ANTHROPIC_API_KEY:?set PROVIDER_KEY or ANTHROPIC
 ADMIN_DB_USER="${ADMIN_DB_USER:-brain}"
 MODEL="${ANTHROPIC_MODEL:-claude-sonnet-5-5}"
 
-mcp_name="mcp-$TENANT-$USER_ID"
-hermes_name="hermes-$TENANT-$USER_ID"
-vol="hermes-home-$TENANT-$USER_ID"
+mcp_name="mcp-${NS}$TENANT-$USER_ID"
+hermes_name="hermes-${NS}$TENANT-$USER_ID"
+vol="hermes-home-${NS}$TENANT-$USER_ID"
 say() { echo "[provision] $*" >&2; }
 
 # --- 0. tenant provider config (idempotent): allowlist = sonnet ONLY ----------
@@ -190,7 +198,7 @@ say "ok: $hermes_name is serving on 9122"
 # ingress port: it is on the default bridge (so `-p` actually publishes) AND on the
 # u-net (so it can reach the backend's route proxy on 9122). The backend itself
 # stays internal and egress-locked; nothing else about its isolation changes.
-fwd_name="fwd-$TENANT-$USER_ID"
+fwd_name="fwd-${NS}$TENANT-$USER_ID"
 say "starting host-ingress forwarder $fwd_name (127.0.0.1:$INGRESS_PORT -> $hermes_name:9122)"
 docker rm -f "$fwd_name" >/dev/null 2>&1 || true
 docker run -d --name "$fwd_name" -p "127.0.0.1:$INGRESS_PORT:$INGRESS_PORT" \

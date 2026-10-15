@@ -1,0 +1,58 @@
+name: e2e
+
+# Headless E2E of the Company Brain demo scenario (DEMO.md steps 1-5 + negatives),
+# against a FRESH isolated stack. Manual + nightly only — NOT on push (it builds a
+# full stack and spends real model money).
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 7 * * *'   # nightly ~07:17 UTC
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      # The DB passwords/KEKs are for an ephemeral test DB, so generate them fresh.
+      # Only the model key is a real secret (set repo secret ANTHROPIC_API_KEY).
+      - name: Write deploy/hermes/.env
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$ANTHROPIC_API_KEY" || { echo "repo secret ANTHROPIC_API_KEY is not set"; exit 1; }
+          umask 077
+          cat > deploy/hermes/.env <<EOF
+          ADMIN_DB_USER=brain
+          ADMIN_DB_PASSWORD=$(openssl rand -hex 32)
+          APP_CONTROL_PASSWORD=$(openssl rand -hex 32)
+          TENANT_DB_KEY=$(openssl rand -hex 32)
+          GATEWAY_DB_PASSWORD=$(openssl rand -hex 32)
+          TENANT_KEY_KEK=$(openssl rand -base64 32)
+          ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY
+          ANTHROPIC_MODEL=claude-sonnet-5-5
+          ENV=development
+          EGRESS_ALLOW=
+          EOF
+
+      # Isolated project (hermes-e2e), low per-run gateway daily spend cap. A non-zero
+      # exit fails the job, which triggers GitHub's default failure notification.
+      - name: make e2e
+        env:
+          E2E_CAP_USD: '1'
+        run: |
+          set -o pipefail
+          make e2e 2>&1 | tee e2e-transcript.txt
+
+      - name: Upload transcript + pass/fail table
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-transcript
+          path: e2e-transcript.txt
+          if-no-files-found: warn

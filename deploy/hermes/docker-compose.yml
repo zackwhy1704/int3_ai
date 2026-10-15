@@ -13,7 +13,11 @@
 #   ./deploy/hermes/provision-user.sh brindlewood marcus 9131
 #
 # Secrets come only from .env (never committed). All data is synthetic.
-name: hermes-deploy
+# Project + network names are parameterized by ${DEPLOY_PROJECT} so an isolated copy
+# (e.g. the `make e2e` stack, DEPLOY_PROJECT=hermes-e2e) can run beside the normal one
+# without clobbering its containers/networks/volumes. Unset -> hermes-deploy, i.e. the
+# names are IDENTICAL to before. provision-user.sh/verify-isolation.sh read the same var.
+name: ${DEPLOY_PROJECT:-hermes-deploy}
 
 x-admin-env: &admin-env
   ADMIN_DB_USER: ${ADMIN_DB_USER:-brain}
@@ -25,14 +29,14 @@ networks:
   # directly or reach another user's sidecar. (The hole we are closing was one
   # shared network for everything.)
   brain-net:
-    name: hermes-deploy-brain
+    name: ${DEPLOY_PROJECT:-hermes-deploy}-brain
     internal: true
   # Containers that must reach the DB or the model provider also join ext.
   # Per-user internal networks (u-<tenant>-<user>) are created by
   # provision-user.sh — each holds exactly one user's Hermes backend + sidecar,
   # with gateway and edge connected in under fixed aliases.
   ext:
-    name: hermes-deploy-ext
+    name: ${DEPLOY_PROJECT:-hermes-deploy}-ext
 
 volumes:
   pgdata:

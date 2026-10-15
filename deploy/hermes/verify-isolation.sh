@@ -11,8 +11,11 @@
 #            secret -> 401 (from the brain network, which can route to it).
 set -euo pipefail
 T="${1:-brindlewood}"; A="${2:-marcus}"; B="${3:-priya}"
-HB="hermes-$T-$B"; HA="hermes-$T-$A"; A_SIDE="mcp-$T-$A"; B_SIDE="mcp-$T-$B"
-BRAIN_NET="${BRAIN_NET:-hermes-deploy-brain}"; MCP_IMAGE="${MCP_IMAGE:-hermes-deploy-brain-mcp}"
+# Same DEPLOY_PROJECT namespace as provision-user.sh (unset -> default, names unchanged).
+PROJECT="${DEPLOY_PROJECT:-hermes-deploy}"
+if [ "$PROJECT" = "hermes-deploy" ]; then NS=""; else NS="$PROJECT-"; fi
+HB="hermes-${NS}$T-$B"; HA="hermes-${NS}$T-$A"; A_SIDE="mcp-${NS}$T-$A"; B_SIDE="mcp-${NS}$T-$B"
+BRAIN_NET="${BRAIN_NET:-$PROJECT-brain}"; MCP_IMAGE="${MCP_IMAGE:-hermes-deploy-brain-mcp}"
 fail() { echo "ISOLATION FAIL: $*" >&2; exit 1; }
 
 B_SECRET=$(docker exec "$HB" sh -c 'grep X-MCP-Secret /opt/data/config.yaml' | sed -E 's/.*"([^"]+)".*/\1/' | tr -d '\r\n')
