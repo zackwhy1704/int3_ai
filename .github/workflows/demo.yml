@@ -1,0 +1,152 @@
+name: demo
+
+# Runs THE demo (make demo — the real stock Hermes agent over /api/ws) in a fresh
+# isolated stack on the CI runner, then proves the owner check is load-bearing
+# (RED->GREEN). This is the validator for the whole Hermes-tier path.
+#
+# Triggers:
+#   * push to spike/remote-thin-client — ONLY when the commit message contains [e2e]
+#     (it builds a full stack + spends real model money, so it is opt-in per commit).
+#   * schedule / manual dispatch — ONLY on main (so the branch's own pushes don't
+#     double-fire and main stays the scheduled home).
+on:
+  push:
+    branches: [spike/remote-thin-client]
+  schedule:
+    - cron: '17 7 * * *'   # nightly ~07:17 UTC (main only, see job `if`)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  demo:
+    # push: gate on [e2e] in the commit message. schedule/dispatch: main only.
+    if: >-
+      (github.event_name == 'push' && contains(github.event.head_commit.message, '[e2e]')) ||
+      ((github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # The model key is the ONLY real secret. If it is missing, say so and stop
+      # (the task's rule: never improvise a key, never prompt for one here).
+      - name: Require ANTHROPIC_API_KEY
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+            echo "::error::repo secret ANTHROPIC_API_KEY is not set — set it in repo Settings > Secrets and re-run. Stopping."
+            exit 1
+          fi
+          echo "ANTHROPIC_API_KEY present."
+
+      # Every other .env secret is for an ephemeral throwaway DB — generate fresh.
+      # (make demo also generates missing secrets; we write the model key + a couple
+      # of settings so the prereq checks pass deterministically.)
+      - name: Write deploy/hermes/.env
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          cat > deploy/hermes/.env <<EOF
+          ADMIN_DB_USER=brain
+          ADMIN_DB_PASSWORD=$(openssl rand -hex 32)
+          APP_CONTROL_PASSWORD=$(openssl rand -hex 32)
+          TENANT_DB_KEY=$(openssl rand -hex 32)
+          GATEWAY_DB_PASSWORD=$(openssl rand -hex 32)
+          TENANT_KEY_KEK=$(openssl rand -base64 32)
+          ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY
+          ANTHROPIC_MODEL=claude-sonnet-5-5
+          ENV=development
+          EGRESS_ALLOW=
+          EOF
+
+      - name: Install demo driver deps (websockets)
+        run: python3 -m pip install --quiet 'websockets>=12,<14'
+
+      # Peak host memory over the whole job: sample free -m every 5s in the background.
+      - name: Start memory sampler
+        run: |
+          ( while true; do free -m | awk '/^Mem:/{print $3}'; sleep 5; done ) > mem.log 2>/dev/null &
+          echo "MEM_SAMPLER_PID=$!" >> "$GITHUB_ENV"
+
+      # First build = the Hermes base image (clones + compiles Hermes v0.21.7). Time it
+      # on its own so the report can state first-build duration distinctly; make demo
+      # then finds the image present and skips rebuilding it.
+      - name: Build Hermes base image (first build, timed)
+        run: |
+          set -euo pipefail
+          t0=$(date +%s)
+          bash deploy/hermes/build-base.sh
+          t1=$(date +%s)
+          echo "FIRST_BUILD_SECONDS=$((t1 - t0))" >> "$GITHUB_ENV"
+          echo "first build (hermes-base-pinned): $((t1 - t0))s"
+
+      - name: make demo (real Hermes agent over /api/ws)
+        env:
+          DEMO_CAP_USD: '1'
+        run: |
+          set -o pipefail
+          t0=$(date +%s)
+          make demo 2>&1 | tee demo-transcript.txt
+          rc=${PIPESTATUS[0]}
+          t1=$(date +%s)
+          echo "DEMO_SECONDS=$((t1 - t0))" >> "$GITHUB_ENV"
+          exit $rc
+
+      # Prove the owner check (both layers) is load-bearing: GREEN -> remove it -> RED
+      # -> restore -> GREEN. Runs in the stack make demo left up. No bypass flag ships.
+      - name: Regression — owner check RED->GREEN
+        if: always()
+        run: |
+          set -o pipefail
+          set -a; . deploy/hermes/.env; set +a
+          DEPLOY_PROJECT=hermes-demo bash deploy/hermes/demo/ci_regression.sh 2>&1 | tee regression.txt
+
+      - name: Stop memory sampler + record peak
+        if: always()
+        run: |
+          kill "${MEM_SAMPLER_PID:-0}" 2>/dev/null || true
+          peak=$(sort -n mem.log 2>/dev/null | tail -1); peak=${peak:-0}
+          echo "PEAK_MEM_MB=$peak" >> "$GITHUB_ENV"
+          {
+            echo "## demo CI metrics"
+            echo ""
+            echo "| metric | value |"
+            echo "|---|---|"
+            echo "| first build (hermes-base-pinned) | ${FIRST_BUILD_SECONDS:-?}s |"
+            echo "| make demo wall time | ${DEMO_SECONDS:-?}s |"
+            echo "| peak host memory | ${peak} MB |"
+            echo ""
+            echo '### demo table'
+            echo '```'
+            sed -n '/DEMO RESULTS/,/DEMO PASSED\|DEMO FAILED/p' demo-transcript.txt 2>/dev/null || true
+            echo '```'
+            echo '### regression'
+            echo '```'
+            grep -E 'RED->GREEN|REGRESSION PROOF|probe:' regression.txt 2>/dev/null || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Tear down the throwaway stack
+        if: always()
+        run: make demo-down || true
+
+      - name: Upload transcript + regression + memory log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: demo-artifacts
+          path: |
+            demo-transcript.txt
+            regression.txt
+            mem.log
+          if-no-files-found: warn
