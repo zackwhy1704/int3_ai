@@ -33,12 +33,14 @@ pending_count() { dbq "SELECT count(*) FROM proposals WHERE subject LIKE '%$1%' 
 # that produces nothing is explainable from regression.txt rather than being a silent black box.
 chat() {
   local u="$1" say="$2" appr="$3"; shift 3
-  local out; out="$("$PY" deploy/hermes/demo/hermes_chat.py --connect "$CONNECT_DIR/brindlewood-$u.connect.json" \
+  local out st to ap
+  out="$("$PY" deploy/hermes/demo/hermes_chat.py --connect "$CONNECT_DIR/brindlewood-$u.connect.json" \
        --say "$say" --approve "$appr" --turn-timeout "$TT" "$@" 2>/dev/null | grep '^__HERMES__ ' | sed 's/^__HERMES__ //' | tail -1)"
-  printf '%s' "$out" | "$PY" -c 'import sys,json
-try: d=json.load(sys.stdin)
-except Exception: print("    [turn] '"$u"'/'"$appr"' -> NO __HERMES__ (transport/exit error)"); sys.exit()
-print(f"    [turn] '"$u"'/'"$appr"' status={d.get(\"status\")} timed_out={d.get(\"timed_out\")} approvals={len(d.get(\"approvals\") or [])} tools={d.get(\"tools\")}")' >&2
+  if [ -z "$out" ]; then echo "    [turn] $u/$appr -> NO __HERMES__ (transport/exit error)" >&2; return; fi
+  st="$(printf '%s' "$out" | "$PY" -c 'import sys,json;print(json.load(sys.stdin).get("status"))' 2>/dev/null)"
+  to="$(printf '%s' "$out" | "$PY" -c 'import sys,json;print(json.load(sys.stdin).get("timed_out"))' 2>/dev/null)"
+  ap="$(printf '%s' "$out" | "$PY" -c 'import sys,json;print(len(json.load(sys.stdin).get("approvals") or []))' 2>/dev/null)"
+  echo "    [turn] $u/$appr status=$st timed_out=$to approvals=$ap" >&2
 }
 
 reapply_schema() {   # rebuild+restart brain (picks up edited capture.py) and re-apply the tenant
