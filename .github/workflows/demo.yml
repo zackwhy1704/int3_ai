@@ -150,3 +150,59 @@ jobs:
             regression.txt
             mem.log
           if-no-files-found: warn
+
+  # Component tier (BYPASSES HERMES): drives the gateway model + brain MCP directly — a faster
+  # lower-tier check of the same scenario. This coverage previously lived in e2e.yml; restored
+  # here as a second job under the SAME [e2e]/main gate (not deleted).
+  component:
+    if: >-
+      (github.event_name == 'push' && contains(github.event.head_commit.message, '[e2e]')) ||
+      ((github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Require ANTHROPIC_API_KEY
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+            echo "::error::repo secret ANTHROPIC_API_KEY is not set — stopping."
+            exit 1
+          fi
+
+      - name: Write deploy/hermes/.env
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          cat > deploy/hermes/.env <<EOF
+          ADMIN_DB_USER=brain
+          ADMIN_DB_PASSWORD=$(openssl rand -hex 32)
+          APP_CONTROL_PASSWORD=$(openssl rand -hex 32)
+          TENANT_DB_KEY=$(openssl rand -hex 32)
+          GATEWAY_DB_PASSWORD=$(openssl rand -hex 32)
+          TENANT_KEY_KEK=$(openssl rand -base64 32)
+          ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY
+          ANTHROPIC_MODEL=claude-sonnet-5-5
+          ENV=development
+          EGRESS_ALLOW=
+          EOF
+
+      - name: make e2e (component tier, bypasses Hermes)
+        env:
+          E2E_CAP_USD: '1'
+        run: |
+          set -o pipefail
+          make e2e 2>&1 | tee e2e-transcript.txt
+
+      - name: Upload e2e transcript
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-transcript
+          path: e2e-transcript.txt
+          if-no-files-found: warn

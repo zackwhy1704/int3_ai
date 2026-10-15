@@ -78,8 +78,23 @@ def ask_brain(question: str) -> dict:
     `refused` is true and `answer` is null — say it is not in the knowledge base
     and do NOT answer from your own knowledge. Preserve citations exactly."""
     data = _post("/v1/brain_ask", {"question": question})
-    return {k: data.get(k) for k in
-            ("refused", "answer", "message", "citations", "answered_from", "retrieval_id")}
+    out = {k: data.get(k) for k in
+           ("refused", "answer", "message", "citations", "answered_from", "retrieval_id")}
+    # Authoritative, per-user server-side signal (this sidecar serves exactly ONE user).
+    # tool.complete only carries a UI preview (tui_gateway/tool_progress.py:257), so the
+    # demo reads refused/answered_from/titles from this line in the sidecar's docker logs.
+    # Titles only (doc_title) — never document text.
+    try:
+        import sys as _sys, json as _json
+        _sys.stderr.write("CB_ASK " + _json.dumps({
+            "refused": out.get("refused"),
+            "answered_from": out.get("answered_from"),
+            "titles": [c.get("doc_title") for c in (out.get("citations") or []) if isinstance(c, dict)],
+        }) + "\n")
+        _sys.stderr.flush()
+    except Exception:
+        pass
+    return out
 
 
 @mcp.tool()
