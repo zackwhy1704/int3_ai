@@ -68,7 +68,13 @@ param(
   [Parameter(Mandatory = $true, Position = 0)] [string] $Tenant,
   [Parameter(Mandatory = $true, Position = 1)] [string] $User,
   [string] $UserDataDir,
-  [string] $ExpectedVersion = '0.21.7'
+  [string] $ExpectedVersion = '0.21.7',
+  # Explicit path to an UNPACKED standalone build's Hermes.exe (release\win-unpacked\Hermes.exe,
+  # produced by scripts\install.ps1 -IncludeDesktop). If omitted, it is auto-detected.
+  [string] $UnpackedExe,
+  # Where to look for that unpacked build (the hermes-agent clone, or its apps\desktop).
+  # Also honours $env:HERMES_DESKTOP_DIR.
+  [string] $DesktopDir
 )
 
 $ErrorActionPreference = 'Stop'
@@ -110,10 +116,39 @@ function Find-HermesPackage {
   } catch { return $null }   # Appx module unavailable (e.g. non-Windows PS) -> treat as plain
 }
 
+# --- find an UNPACKED standalone build (release\win-unpacked\Hermes.exe) --------
+# This is what `scripts\install.ps1 -IncludeDesktop -Commit <sha>` produces: a plain
+# (non-MSIX) Electron app, so its userData is the real %APPDATA%\<productName> (no MSIX
+# virtualization). We detect it to report it, version-check it, and guide the launch.
+function Find-HermesUnpacked {
+  if ($UnpackedExe) { return (Get-Item -LiteralPath $UnpackedExe -ErrorAction SilentlyContinue) }
+  $roots = @()
+  if ($DesktopDir) { $roots += $DesktopDir }
+  if ($env:HERMES_DESKTOP_DIR) { $roots += $env:HERMES_DESKTOP_DIR }
+  # common clone locations relative to this repo and the demo machine
+  $roots += (Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) '..\hermes-agent')
+  $roots += 'C:\tmp\hermes-agent'
+  foreach ($root in $roots) {
+    if (-not $root -or -not (Test-Path $root)) { continue }
+    foreach ($rel in @(
+        'release\win-unpacked\Hermes.exe','release\win-ia32-unpacked\Hermes.exe','release\win-arm64-unpacked\Hermes.exe',
+        'apps\desktop\release\win-unpacked\Hermes.exe','apps\desktop\release\win-ia32-unpacked\Hermes.exe','apps\desktop\release\win-arm64-unpacked\Hermes.exe')) {
+      $p = Join-Path $root $rel
+      if (Test-Path $p) { return (Get-Item -LiteralPath $p) }
+    }
+    # last resort: a bounded search under the root
+    $hit = Get-ChildItem -Path $root -Recurse -Filter 'Hermes.exe' -ErrorAction SilentlyContinue |
+           Where-Object { $_.FullName -match '\\release\\win(-ia32|-arm64)?-unpacked\\Hermes\.exe$' } | Select-Object -First 1
+    if ($hit) { return $hit }
+  }
+  return $null
+}
+
 # --- resolve the userData directory(ies) to write ------------------------------
 # $targets is ORDERED; $targets[0] is the primary (what the running app reads).
 $targets = @()
 $pkg = $null
+$unpacked = $null
 $usingExplicit = $PSBoundParameters.ContainsKey('UserDataDir') -and $UserDataDir
 if ($usingExplicit) {
   $targets = @($UserDataDir)
@@ -146,7 +181,15 @@ if ($usingExplicit) {
       $targets = @($realTarget, $privTarget)
     }
   } else {
-    $targets = @(Join-Path $env:APPDATA 'Hermes')   # plain (non-packaged) install
+    # No MSIX. Either a plain %APPDATA% install, or an UNPACKED standalone build.
+    $unpacked = Find-HermesUnpacked
+    # Electron userData = productName (Hermes / Hermes Agent / Hermes Light). Pick the
+    # %APPDATA% folder that already exists; default 'Hermes'. (No MSIX virtualization.)
+    $udir = 'Hermes'
+    foreach ($c in @('Hermes', 'Hermes Agent', 'Hermes Light')) {
+      if (Test-Path (Join-Path $env:APPDATA $c)) { $udir = $c; break }
+    }
+    $targets = @(Join-Path $env:APPDATA $udir)
   }
 }
 
@@ -211,8 +254,11 @@ if ($pkg) {
   Write-Host  "  files : wrote the private per-package copy AND real %APPDATA% (the app reads the private copy first, real as fallback)."
 } elseif ($usingExplicit) {
   Write-Host ("  files : explicit userData dir {0}" -f $UserDataDir)
+} elseif ($unpacked) {
+  Write-Host ("  app   : unpacked standalone build {0}" -f $unpacked.FullName)
+  Write-Host ("  files : {0} (real %APPDATA%; unpacked builds have no MSIX virtualization)." -f $targets[0])
 } else {
-  Write-Host  "  files : plain install (%APPDATA%\Hermes); no packaged MSIX install detected."
+  Write-Host ("  files : plain install ({0}); no packaged MSIX and no unpacked build detected." -f $targets[0])
 }
 Write-Host ""
 
@@ -225,6 +271,16 @@ if ($pkg) {
                    "Note: Microsoft Store builds use a timestamp-based version quad, so a numeric mismatch may be a Store build rather than a wrong version. " +
                    "See DEMO.md 'Keeping the desktop on v0.21.7'.")
   }
+} elseif ($unpacked) {
+  $uv = try { [string]$unpacked.VersionInfo.ProductVersion } catch { '' }
+  if (-not $uv) { $uv = try { [string]$unpacked.VersionInfo.FileVersion } catch { '' } }
+  if ($uv -and ($uv -like ("{0}*" -f $ExpectedVersion))) {
+    Write-Host ("Desktop version check: unpacked build {0} matches pinned v{1}. OK." -f $uv, $ExpectedVersion) -ForegroundColor Green
+  } elseif ($uv) {
+    Write-Warning ("Desktop version DRIFT: unpacked build {0} is not the pinned v{1} this demo was validated on (see DEMO.md)." -f $uv, $ExpectedVersion)
+  } else {
+    Write-Host ("Desktop version check: unpacked build found at {0}; version not readable from the exe. This demo is validated on v{1}." -f $unpacked.FullName, $ExpectedVersion) -ForegroundColor DarkYellow
+  }
 } else {
   Write-Host ("Desktop version check: no packaged install found, so the version is not determinable here. This demo is validated on v{0}." -f $ExpectedVersion) -ForegroundColor DarkYellow
 }
@@ -235,6 +291,12 @@ if ($usingExplicit) {
   Write-Host "This is a NON-DEFAULT userData dir. Launch Hermes Desktop with:"
   Write-Host ("  `$env:HERMES_DESKTOP_USER_DATA_DIR = '{0}'" -f $UserDataDir) -ForegroundColor Cyan
   Write-Host '  # then start Hermes Desktop (packaged exe, or "npm start" in apps/desktop for a dev run)'
+} elseif ($unpacked) {
+  Write-Host "Launch the unpacked standalone build:"
+  Write-Host ("  & '{0}'" -f $unpacked.FullName) -ForegroundColor Cyan
+  Write-Host "It opens this connection. If it is already open, use its in-app connection"
+  Write-Host "switcher or restart it; if you switched users after it wrote its own"
+  Write-Host "connection file, just re-run this command."
 } else {
   Write-Host "Launch Hermes Desktop normally; it opens this connection. If it is already"
   Write-Host "open, use its in-app connection switcher or restart it. If you switched users"

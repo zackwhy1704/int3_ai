@@ -38,7 +38,11 @@ param(
   [string] $Tenant = 'brindlewood',
   [string] $ExpectedVersion = '0.21.7',
   [int]    $WaitSeconds = 45,
-  [string] $OutDir
+  [string] $OutDir,
+  # Explicit path to an UNPACKED standalone build's Hermes.exe (release\win-unpacked\Hermes.exe,
+  # from scripts\install.ps1 -IncludeDesktop), and/or where to look for it ($env:HERMES_DESKTOP_DIR too).
+  [string] $UnpackedExe,
+  [string] $DesktopDir
 )
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
@@ -75,6 +79,29 @@ function Find-HermesPackage {
     } | Select-Object -First 1
   } catch { return $null }
 }
+# An UNPACKED standalone build (release\win-unpacked\Hermes.exe) from
+# scripts\install.ps1 -IncludeDesktop. Not an MSIX: real %APPDATA%, launched directly.
+function Find-HermesUnpacked {
+  if ($UnpackedExe) { return (Get-Item -LiteralPath $UnpackedExe -ErrorAction SilentlyContinue) }
+  $roots = @()
+  if ($DesktopDir) { $roots += $DesktopDir }
+  if ($env:HERMES_DESKTOP_DIR) { $roots += $env:HERMES_DESKTOP_DIR }
+  $roots += (Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) '..\hermes-agent')
+  $roots += 'C:\tmp\hermes-agent'
+  foreach ($root in $roots) {
+    if (-not $root -or -not (Test-Path $root)) { continue }
+    foreach ($rel in @(
+        'release\win-unpacked\Hermes.exe','release\win-ia32-unpacked\Hermes.exe','release\win-arm64-unpacked\Hermes.exe',
+        'apps\desktop\release\win-unpacked\Hermes.exe','apps\desktop\release\win-ia32-unpacked\Hermes.exe','apps\desktop\release\win-arm64-unpacked\Hermes.exe')) {
+      $p = Join-Path $root $rel
+      if (Test-Path $p) { return (Get-Item -LiteralPath $p) }
+    }
+    $hit = Get-ChildItem -Path $root -Recurse -Filter 'Hermes.exe' -ErrorAction SilentlyContinue |
+           Where-Object { $_.FullName -match '\\release\\win(-ia32|-arm64)?-unpacked\\Hermes\.exe$' } | Select-Object -First 1
+    if ($hit) { return $hit }
+  }
+  return $null
+}
 function Launch-Hermes($pkg) {
   if ($pkg) {
     # MSIX: launch via the AppsFolder alias (applicationId = appNamePascal 'Hermes',
@@ -82,8 +109,10 @@ function Launch-Hermes($pkg) {
     $appId = 'Hermes'
     Start-Process ("shell:AppsFolder\{0}!{1}" -f $pkg.PackageFamilyName, $appId) | Out-Null
   } else {
-    $exe = Get-ChildItem "$env:LOCALAPPDATA\Programs","$env:ProgramFiles" -Recurse -Filter 'Hermes.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
-    if (-not $exe) { throw "No installed Hermes found (no Appx package and no Hermes.exe)." }
+    # Prefer an unpacked standalone build; fall back to an installed Hermes.exe.
+    $exe = Find-HermesUnpacked
+    if (-not $exe) { $exe = Get-ChildItem "$env:LOCALAPPDATA\Programs","$env:ProgramFiles" -Recurse -Filter 'Hermes.exe' -ErrorAction SilentlyContinue | Select-Object -First 1 }
+    if (-not $exe) { throw "No installed Hermes found (no Appx package, no unpacked build, no Hermes.exe)." }
     Start-Process $exe.FullName | Out-Null
   }
 }
@@ -115,9 +144,19 @@ if ($pkg) {
   if (-not $okv) { Write-Warning "Installed version $($pkg.Version) is not pinned v$ExpectedVersion (Store builds use a timestamp quad)." }
   Row "version == v$ExpectedVersion" $okv "installed $($pkg.Version)"
 } else {
-  $exe = Get-ChildItem "$env:LOCALAPPDATA\Programs","$env:ProgramFiles" -Recurse -Filter 'Hermes.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
-  if ($exe) { Row "install detected: standalone $($exe.FullName)" $true 'standalone'; Row "version == v$ExpectedVersion" $false 'NOT VERIFIED (standalone version not read)' }
-  else { Row 'install detected' $false 'no Appx package and no Hermes.exe — install the official app first'; }
+  # No MSIX: prefer an UNPACKED standalone build (release\win-unpacked\Hermes.exe) and
+  # version-check it from the exe; fall back to any installed Hermes.exe.
+  $exe = Find-HermesUnpacked
+  $kind = 'unpacked standalone'
+  if (-not $exe) { $exe = Get-ChildItem "$env:LOCALAPPDATA\Programs","$env:ProgramFiles" -Recurse -Filter 'Hermes.exe' -ErrorAction SilentlyContinue | Select-Object -First 1; $kind = 'installed standalone' }
+  if ($exe) {
+    Row "install detected: $kind $($exe.FullName)" $true $kind
+    $uv = try { [string]$exe.VersionInfo.ProductVersion } catch { '' }
+    if (-not $uv) { $uv = try { [string]$exe.VersionInfo.FileVersion } catch { '' } }
+    if ($uv) { Row "version == v$ExpectedVersion" ($uv -like "$ExpectedVersion*") "installed $uv" }
+    else     { Row "version == v$ExpectedVersion" $false 'NOT VERIFIED (version not readable from the exe)' }
+  }
+  else { Row 'install detected' $false 'no Appx package, no unpacked build, no Hermes.exe — install the official app first'; }
 }
 
 function Test-User($user, $otherBackendWsBefore) {
