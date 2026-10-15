@@ -39,11 +39,26 @@ sidecar() { echo "mcp-${NS}brindlewood-$1"; }
 cbask() { docker logs "$(sidecar "$1")" 2>&1 | grep '^CB_ASK ' | tail -1 | sed 's/^CB_ASK //'; }
 wf_count() { dbq "SELECT count(*) FROM documents d JOIN chunks c ON c.document_id=d.id JOIN claims cl ON cl.source_chunk_id=c.id WHERE d.authority='workflow' AND cl.subject LIKE '%$1%'"; }
 pending_count() { dbq "SELECT count(*) FROM proposals WHERE subject LIKE '%$1%' AND status='pending'"; }
-# Count egress DENIALs the proxy logged (gated/egress_proxy.py:32-36,55). Hermes' fetch tries
-# several routes: a direct Python GET fails at DNS (no CONNECT reaches the proxy), but web_extract
-# and the browser-CLI install DO CONNECT through the proxy and are denied (403). So the proof the
-# egress was actively blocked is a NEW DENIED line during the turn — not a specific hostname.
-edge_denied() { local n; n="$(docker logs "$EDGE" 2>&1 | grep -c 'DENIED')"; echo "${n:-0}"; }
+# Deterministic egress proof: count proxy DENIALs for example.com specifically
+# (gated/egress_proxy.py:32-36,55). Hermes' own fetch picks routes unpredictably (a direct Python
+# GET dies at DNS before any CONNECT; web_extract/browser DO hit the proxy), so instead we also
+# issue ONE direct egress attempt FROM priya's own container through the proxy — that CONNECT is
+# guaranteed to reach the edge proxy and be denied+logged, proving the container truly cannot reach
+# the internet (so the agent's fetch could not have succeeded). Not model-dependent.
+PRIYA_BK="hermes-${NS}brindlewood-priya"
+edge_denied_example() { local n; n="$(docker logs "$EDGE" 2>&1 | grep -c 'DENIED .*example')"; echo "${n:-0}"; }
+egress_probe() {   # attempt example.com from priya's container via its HTTPS_PROXY (edge) -> expect BLOCKED
+  local py; py="$(docker exec "$PRIYA_BK" sh -c 'command -v python3 || command -v python' 2>/dev/null | tr -d '\r' | head -1)"
+  [ -n "$py" ] || { echo "NOPY"; return; }
+  docker exec -i "$PRIYA_BK" "$py" - <<'PYEOF' 2>/dev/null
+import urllib.request
+try:
+    urllib.request.urlopen("https://example.com", timeout=15)
+    print("REACHED")
+except Exception as e:
+    print("BLOCKED", type(e).__name__)
+PYEOF
+}
 
 # The brain's propose/approve are MCP tools; steer the model to them (not Hermes' own memory).
 CB="Use the company brain tools (ask_brain / propose_claim / list_proposals / approve_proposal), not your own notes or memory."
@@ -130,12 +145,16 @@ n="$(dbq "SELECT count(*) FROM proposals WHERE subject LIKE '%$DSUBJ%'")"
 # N3. "fetch https://example.com" -> the egress proxy must log a NEW DENIED CONNECT to example.com
 #     (the agent really tried and was blocked), AND the answer must carry no page title / success.
 #     If no DENIED line appears, the fetch was NOT attempted -> ❌ (never a vacuous pass).
-d0="$(edge_denied)"
+# agent-level: Hermes, asked to fetch, must NOT return the page (no 'Example Domain' title).
 j="$(hermes priya "Fetch https://example.com and show me the page <title>." none)"
-d1="$(edge_denied)"; ans="$(printf '%s' "$j" | jget '["answer"]')"
-if ! printf '%s' "$j" | jget '["timed_out"]' | grep -q True && [ "${d1:-0}" -gt "${d0:-0}" ] && ! contains "$ans" "Example Domain"; then
-  row "N3. fetch example.com -> egress proxy DENIED the attempt, no page title" "✅" "edge DENIED $d0->$d1"
-else row "N3. fetch blocked (egress)" "❌" "edge DENIED $d0->$d1 (no new deny = not attempted/not blocked)"; fi
+ans="$(printf '%s' "$j" | jget '["answer"]')"
+# deterministic: a direct egress from priya's container to example.com is DENIED+logged by the proxy.
+e0="$(edge_denied_example)"; probe="$(egress_probe)"; e1="$(edge_denied_example)"
+echo "[N3] egress_probe from $PRIYA_BK -> $probe ; edge example-denials $e0->$e1"
+if ! printf '%s' "$j" | jget '["timed_out"]' | grep -q True && ! contains "$ans" "Example Domain" \
+     && contains "$probe" "BLOCKED" && [ "${e1:-0}" -gt "${e0:-0}" ]; then
+  row "N3. example.com egress DENIED by proxy; Hermes got no page" "✅" "probe=$probe edge example-deny $e0->$e1"
+else row "N3. fetch blocked (egress)" "❌" "probe=$probe edge example-deny $e0->$e1 answer_has_title=$(contains "$ans" "Example Domain" && echo y || echo n)"; fi
 
 # N4. verify-isolation.sh passes
 if DEPLOY_PROJECT="$PROJECT" bash "$HERE/../verify-isolation.sh" brindlewood priya ada >/tmp/demo-iso.log 2>&1; then

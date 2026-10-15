@@ -23,13 +23,23 @@ PROJECT="${DEPLOY_PROJECT:-hermes-demo}"
 if [ "$PROJECT" = "hermes-deploy" ]; then NS=""; else NS="$PROJECT-"; fi
 CONNECT_DIR="${CONNECT_DIR:-$ROOT/deploy/hermes/connect/$PROJECT}"
 DB="$PROJECT-db-1"; PY="$(command -v python3 || command -v python)"
-TT="${DEMO_TURN_TIMEOUT:-120}"
+TT="${DEMO_TURN_TIMEOUT:-180}"
 : "${ADMIN_DB_PASSWORD:?}"
 
 dbq() { docker exec -e PGPASSWORD="$ADMIN_DB_PASSWORD" "$DB" psql -U "${ADMIN_DB_USER:-brain}" -d t_brindlewood -tAc "$1" 2>/dev/null | tr -d '\r'; }
 wf_count() { dbq "SELECT count(*) FROM documents d JOIN chunks c ON c.document_id=d.id JOIN claims cl ON cl.source_chunk_id=c.id WHERE d.authority='workflow' AND cl.subject LIKE '%$1%'"; }
 pending_count() { dbq "SELECT count(*) FROM proposals WHERE subject LIKE '%$1%' AND status='pending'"; }
-chat() { "$PY" deploy/hermes/demo/hermes_chat.py --connect "$CONNECT_DIR/brindlewood-$1.connect.json" --say "$2" --approve "$3" --turn-timeout "$TT" "${@:4}" >/dev/null 2>&1; }
+# Observable: print a one-line diagnostic per turn (status / timed_out / #approvals) so a probe
+# that produces nothing is explainable from regression.txt rather than being a silent black box.
+chat() {
+  local u="$1" say="$2" appr="$3"; shift 3
+  local out; out="$("$PY" deploy/hermes/demo/hermes_chat.py --connect "$CONNECT_DIR/brindlewood-$u.connect.json" \
+       --say "$say" --approve "$appr" --turn-timeout "$TT" "$@" 2>/dev/null | grep '^__HERMES__ ' | sed 's/^__HERMES__ //' | tail -1)"
+  printf '%s' "$out" | "$PY" -c 'import sys,json
+try: d=json.load(sys.stdin)
+except Exception: print("    [turn] '"$u"'/'"$appr"' -> NO __HERMES__ (transport/exit error)"); sys.exit()
+print(f"    [turn] '"$u"'/'"$appr"' status={d.get(\"status\")} timed_out={d.get(\"timed_out\")} approvals={len(d.get(\"approvals\") or [])} tools={d.get(\"tools\")}")' >&2
+}
 
 reapply_schema() {   # rebuild+restart brain (picks up edited capture.py) and re-apply the tenant
   # schema so the edited approve_workflow_proposal is CREATE OR REPLACE'd in the live DB.
