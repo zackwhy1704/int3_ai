@@ -272,6 +272,39 @@ deploy stack, all five steps as captured in [demo-screenshots/](demo-screenshots
 4. [`4-owner-approve.png`](demo-screenshots/4-owner-approve.png) — ada (the owner): the approval shows the statement **and** the proposer (priya).
 5. [`5-reask-cited.png`](demo-screenshots/5-reask-cited.png) — priya: the re-ask is now answered and cited to "operations workflow — <date> — Priya N.".
 
+## Automated tests (so you don't have to run the demo by hand)
+
+**Layer 1 — headless E2E (no desktop GUI), one command:**
+```bash
+make e2e
+```
+Brings up a **fresh, isolated** stack (`DEPLOY_PROJECT=hermes-e2e` — it never touches a
+running `hermes-deploy` stack), provisions the 3 users, runs exactly the scenario above
+(steps 1-5) plus negative checks — priya cannot approve (403); a **declined** capture
+creates **0** proposals; `verify-isolation.sh` passes — then tears the stack down and
+prints a pass/fail table (non-zero exit on any failure). It drives the model via the
+BYOK gateway and the brain over MCP, answering each capture elicitation the way the
+desktop's **"Run"** button does (choice `once`), never bypassing it. Code:
+[`deploy/hermes/e2e/`](e2e/). It runs nightly + on demand in CI
+([`.github/workflows/e2e.yml`](../../.github/workflows/e2e.yml)) with a low gateway
+spend cap; a failed run uses GitHub's default failure notification and uploads the
+transcript.
+
+**Layer 2 — packaged-app smoke test (Windows, unattended, no clicks):**
+One-time, by hand: install Nous's **official** Hermes Desktop (the non-Store installer,
+see "keeping the desktop on v0.21.7" above), and make sure the demo stack + 3 users are
+provisioned. Then just run:
+```powershell
+deploy\hermes\smoke-packaged.ps1
+```
+and **read the pass/fail table**. Without ever typing into or clicking the app, it:
+detects the installed app and warns if it is not v0.21.7; for marcus then priya runs
+`connect-desktop.ps1`, launches the app, and confirms **server-side** that the session
+landed on that user's backend and **not** the other's (the signal is `GET /api/ws` in
+the backend's route-proxy log — `deploy/hermes/gated/route_proxy.py`); screenshots the
+screen; quits cleanly; and checks the telemetry setting is off. Screenshots + a
+`results.csv` are saved to a dated folder it prints.
+
 ## Reset between runs
 
 Step 3 only lands if the loading-bay fact is *not* already known. To start clean,
