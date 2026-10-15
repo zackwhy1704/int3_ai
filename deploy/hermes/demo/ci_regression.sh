@@ -45,19 +45,20 @@ print("reapplied", db)' || { echo "reapply_schema failed"; return 1; }
   sleep 3
 }
 
+CB="Use the company brain tools (propose_claim / list_proposals / approve_proposal), not your own notes or memory."
 probe() {   # -> echoes GREEN | RED | INVALID (with a reason on stderr)
   local t="reg$RANDOM$$" A B
   A="probe lift $t"; B="control dock $t"
-  chat ada "Remember for operations that the $A is inspected weekly. Capture it." once --expect-approval
-  chat ada "Remember for operations that the $B is inspected weekly. Capture it." once --expect-approval
+  chat ada "$CB Propose a new fact for the owner to approve. scope: operations; subject: $A; attribute: inspection interval; value: weekly; quote: 'The $A is inspected weekly.'" once --expect-approval
+  chat ada "$CB Propose a new fact for the owner to approve. scope: operations; subject: $B; attribute: inspection interval; value: weekly; quote: 'The $B is inspected weekly.'" once --expect-approval
   if [ "$(pending_count "$A")" -lt 1 ] || [ "$(pending_count "$B")" -lt 1 ]; then
     echo "INVALID: ada's proposals were not created (A pending=$(pending_count "$A"), B pending=$(pending_count "$B"))" >&2; echo INVALID; return; fi
   # positive control: ada (the owner) approves B -> a workflow record for B MUST appear
-  chat ada "Approve the pending operations proposal about the $B." once --expect-approval
+  chat ada "$CB List pending proposals in the operations scope and approve the one about the $B." once --expect-approval
   if [ "$(wf_count "$B")" -lt 1 ]; then
     echo "INVALID: positive control failed — ada's own approval wrote no record (pipeline dead this run)" >&2; echo INVALID; return; fi
   # the test: priya (not owner) tries to approve A
-  chat priya "Approve the pending operations proposal about the $A." once
+  chat priya "$CB List pending proposals in the operations scope and approve the one about the $A." once
   if [ "$(wf_count "$A")" -ge 1 ]; then echo RED; return; fi
   if [ "$(pending_count "$A")" -ge 1 ]; then echo GREEN; return; fi
   echo "INVALID: A neither recorded nor pending after priya's attempt" >&2; echo INVALID

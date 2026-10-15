@@ -25,7 +25,8 @@ DB="$PROJECT-db-1"
 EDGE="$PROJECT-edge-1"
 PY="$(command -v python3 || command -v python)"
 TAG="${DEMO_TAG:-demo$RANDOM}"
-TURN_TIMEOUT="${DEMO_TURN_TIMEOUT:-120}"
+TURN_TIMEOUT="${DEMO_TURN_TIMEOUT:-180}"
+VERBOSE="${DEMO_VERBOSE:---verbose}"   # dump every /api/ws frame into the transcript (auditable)
 : "${ADMIN_DB_PASSWORD:?set ADMIN_DB_PASSWORD}"
 "$PY" -c 'import websockets' 2>/dev/null || "$PY" -m pip install --quiet websockets >/dev/null 2>&1 || true
 
@@ -38,13 +39,16 @@ sidecar() { echo "mcp-${NS}brindlewood-$1"; }
 cbask() { docker logs "$(sidecar "$1")" 2>&1 | grep '^CB_ASK ' | tail -1 | sed 's/^CB_ASK //'; }
 wf_count() { dbq "SELECT count(*) FROM documents d JOIN chunks c ON c.document_id=d.id JOIN claims cl ON cl.source_chunk_id=c.id WHERE d.authority='workflow' AND cl.subject LIKE '%$1%'"; }
 pending_count() { dbq "SELECT count(*) FROM proposals WHERE subject LIKE '%$1%' AND status='pending'"; }
-edge_denied_example() { docker logs "$EDGE" 2>&1 | grep -c "DENIED .*example\.com" 2>/dev/null || echo 0; }
+edge_denied_example() { local n; n="$(docker logs "$EDGE" 2>&1 | grep -c 'DENIED .*example\.com')"; echo "${n:-0}"; }
+
+# The brain's propose/approve are MCP tools; steer the model to them (not Hermes' own memory).
+CB="Use the company brain tools (ask_brain / propose_claim / list_proposals / approve_proposal), not your own notes or memory."
 
 # hermes <user> <say> <approve> [extra flags] -> prints transcript to stderr, echoes __HERMES__ json
 hermes() {
   local u="$1" say="$2" appr="$3"; shift 3
   "$PY" "$HERE/hermes_chat.py" --connect "$CONNECT_DIR/brindlewood-$u.connect.json" \
-     --say "$say" --approve "$appr" --turn-timeout "$TURN_TIMEOUT" "$@" 2>&1 \
+     --say "$say" --approve "$appr" --turn-timeout "$TURN_TIMEOUT" $VERBOSE "$@" 2>&1 \
      | tee /dev/stderr | grep '^__HERMES__ ' | sed 's/^__HERMES__ //' | tail -1
 }
 # turn_ok <json> -> 0 if the turn did not time out and produced a non-empty answer
@@ -72,16 +76,16 @@ else row "2. priya refused, no leak" "❌" "refused=$ref leak=$leak timed_out=$(
 # 3. priya teaches -> approval prompt shows the EXACT statement; priya approves (choice once).
 #    Assert: approval text carries the subject + the value, AND a pending proposal now exists.
 SUBJ="loading bay $TAG"
-j="$(hermes priya "Remember for operations that the $SUBJ opens at 6am on weekdays. Capture it." once --expect-approval)"
+j="$(hermes priya "$CB Propose a new fact into the company brain for the owner to approve. scope: operations; subject: $SUBJ; attribute: opening time; value: 6am on weekdays; quote: 'The $SUBJ opens at 6am on weekdays.'" once --expect-approval)"
 apr="$(printf '%s' "$j" | jget '["approvals"][0]["text"]')"
-if ! printf '%s' "$j" | jget '["timed_out"]' | grep -q True && contains "$apr" "$SUBJ" && contains "$apr" "6am" && [ "$(pending_count "$SUBJ")" -ge 1 ]; then
+if ! printf '%s' "$j" | jget '["timed_out"]' | grep -q True && contains "$apr" "$SUBJ" && contains "$apr" "opening time" && contains "$apr" "6am on weekdays" && [ "$(pending_count "$SUBJ")" -ge 1 ]; then
   row "3. priya teach -> approval shows exact statement; proposal pending" "✅" "approved once, pending=$(pending_count "$SUBJ")"
 else row "3. priya teach -> exact statement" "❌" "approval=$(printf '%s' "$apr"|head -c 80) pending=$(pending_count "$SUBJ")"; fi
 
 # N1a. priya approves her OWN proposal (choice once). Owner+self check must stop her:
 #      pass = NO workflow record for SUBJ and the proposal is STILL pending. No word matching.
 wf0="$(wf_count "$SUBJ")"
-j="$(hermes priya "Approve the pending operations proposal about the $SUBJ." once)"
+j="$(hermes priya "$CB List pending proposals in the operations scope and approve the one about the $SUBJ." once)"
 if ! printf '%s' "$j" | jget '["timed_out"]' | grep -q True && [ "$(wf_count "$SUBJ")" = "$wf0" ] && [ "$(pending_count "$SUBJ")" -ge 1 ]; then
   row "N1a. priya self-approve -> blocked (no record, still pending)" "✅" "wf=$wf0 pending=$(pending_count "$SUBJ")"
 else row "N1a. priya self-approve -> blocked" "❌" "wf:$wf0->$(wf_count "$SUBJ") pending=$(pending_count "$SUBJ")"; fi
@@ -89,10 +93,10 @@ else row "N1a. priya self-approve -> blocked" "❌" "wf:$wf0->$(wf_count "$SUBJ"
 # N1b. ada proposes a 2nd fact; priya (not owner) approves it (choice once) -> blocked:
 #      pass = NO workflow record for SUBJ2 and SUBJ2 still pending.
 SUBJ2="service lift $TAG"
-hermes ada "Remember for operations that the $SUBJ2 is inspected monthly. Capture it." once --expect-approval >/dev/null 2>&1
+hermes ada "$CB Propose a new fact into the company brain for the owner to approve. scope: operations; subject: $SUBJ2; attribute: inspection interval; value: monthly; quote: 'The $SUBJ2 is inspected monthly.'" once --expect-approval >/dev/null 2>&1
 [ "$(pending_count "$SUBJ2")" -ge 1 ] || row "N1b.pre ada proposal exists" "❌" "ada's $SUBJ2 proposal was not created (pending=0)"
 wf2="$(wf_count "$SUBJ2")"
-j="$(hermes priya "Approve the pending operations proposal about the $SUBJ2." once)"
+j="$(hermes priya "$CB List pending proposals in the operations scope and approve the one about the $SUBJ2." once)"
 if ! printf '%s' "$j" | jget '["timed_out"]' | grep -q True && [ "$(wf_count "$SUBJ2")" = "$wf2" ] && [ "$(pending_count "$SUBJ2")" -ge 1 ]; then
   row "N1b. priya approves ada's proposal -> blocked (owner check)" "✅" "wf=$wf2 pending=$(pending_count "$SUBJ2")"
 else row "N1b. priya approves ada's -> blocked" "❌" "wf:$wf2->$(wf_count "$SUBJ2") pending=$(pending_count "$SUBJ2")"; fi
@@ -100,14 +104,14 @@ else row "N1b. priya approves ada's -> blocked" "❌" "wf:$wf2->$(wf_count "$SUB
 # 4. ada (owner) approves priya's SUBJ (choice once) -> approval shows statement + proposer,
 #    AND a workflow record for SUBJ now EXISTS (positive proof the approval went through).
 wfb="$(wf_count "$SUBJ")"
-j="$(hermes ada "Approve the pending operations proposal about the $SUBJ." once --expect-approval)"
+j="$(hermes ada "$CB List pending proposals in the operations scope and approve the one about the $SUBJ." once --expect-approval)"
 apr="$(printf '%s' "$j" | jget '["approvals"][0]["text"]')"
 if ! printf '%s' "$j" | jget '["timed_out"]' | grep -q True && contains "$apr" "$SUBJ" && contains "$apr" "priya" && [ "$(wf_count "$SUBJ")" -gt "$wfb" ]; then
   row "4. ada approves priya's -> statement+proposer shown; record written" "✅" "wf:$wfb->$(wf_count "$SUBJ")"
 else row "4. ada approve -> statement+proposer; record" "❌" "approval=$(printf '%s' "$apr"|head -c 80) wf:$wfb->$(wf_count "$SUBJ")"; fi
 
 # 5. priya re-asks -> Hermes answers, cited to the workflow record (CB_ASK titles ~ 'operations workflow')
-j="$(hermes priya "What time does the $SUBJ open?" none)"; cb="$(cbask priya)"
+j="$(hermes priya "$CB What time does the $SUBJ open?" none)"; cb="$(cbask priya)"
 ref="$(printf '%s' "$cb" | jget '["refused"]')"; titles="$(printf '%s' "$cb" | jget '["titles"]')"
 if turn_ok "$j" && [ "$ref" = "False" ] && printf '%s' "$titles" | grep -qi "operations workflow"; then
   row "5. priya re-asks -> cited to the workflow record" "✅" "titles=$titles"
@@ -115,7 +119,7 @@ else row "5. priya re-asks -> cited workflow record" "❌" "refused=$ref titles=
 
 # N2. priya declines a teach (choice deny) -> 0 proposal rows for that subject
 DSUBJ="declined $TAG"
-hermes priya "Remember for operations that the $DSUBJ is real. Capture it." deny --expect-approval >/dev/null 2>&1
+hermes priya "$CB Propose a new fact into the company brain for the owner to approve. scope: operations; subject: $DSUBJ; attribute: status; value: real; quote: '$DSUBJ is real.'" deny --expect-approval >/dev/null 2>&1
 n="$(dbq "SELECT count(*) FROM proposals WHERE subject LIKE '%$DSUBJ%'")"
 [ "${n:-x}" = 0 ] && row "N2. priya declines teach -> 0 proposal rows" "✅" "rows=0" || row "N2. declined -> 0 rows" "❌" "rows=$n"
 
