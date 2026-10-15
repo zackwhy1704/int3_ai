@@ -10,7 +10,12 @@ export DEPLOY_PROJECT="${DEPLOY_PROJECT:-hermes-demo}"
 [ "$DEPLOY_PROJECT" != "hermes-deploy" ] || { echo "refusing to run demo as the default project"; exit 2; }
 ENVF="deploy/hermes/.env"
 CONNECT_DIR="$ROOT/deploy/hermes/connect/$DEPLOY_PROJECT"; export CONNECT_DIR
-CAP="${DEMO_CAP_USD:-1}"
+# The gateway daily cap is PER-TENANT (gateway/admin_keys.py: daily_cap_usd keyed on tenant),
+# so all three users SHARE it. $1 is exhausted partway through the real-agent scenario (thinking
+# + title generation), which 429s the gateway and stalls later turns on a 600s retry. The cap
+# must exceed the whole run's spend (demo + the regression that reuses this tenant). The gateway
+# DB is fresh per CI run, so this resets each run. Still a hard ceiling — just not a throttle.
+CAP="${DEMO_CAP_USD:-20}"
 PORTS=("marcus:9331" "priya:9332" "ada:9333")   # off deploy(9131)/e2e(9231)
 COMPOSE=(docker compose -f deploy/hermes/docker-compose.yml)
 

@@ -92,7 +92,9 @@ jobs:
 
       - name: make demo (real Hermes agent over /api/ws)
         env:
-          DEMO_CAP_USD: '1'
+          # PER-TENANT daily cap, shared by all 3 users and reused by the regression; $1 throttled
+          # the real-agent run (429 -> 600s retry stall). Fresh gateway DB each run, so this resets.
+          DEMO_CAP_USD: '20'
         run: |
           set -o pipefail
           t0=$(date +%s)
