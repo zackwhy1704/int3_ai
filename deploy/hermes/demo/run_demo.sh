@@ -39,7 +39,11 @@ sidecar() { echo "mcp-${NS}brindlewood-$1"; }
 cbask() { docker logs "$(sidecar "$1")" 2>&1 | grep '^CB_ASK ' | tail -1 | sed 's/^CB_ASK //'; }
 wf_count() { dbq "SELECT count(*) FROM documents d JOIN chunks c ON c.document_id=d.id JOIN claims cl ON cl.source_chunk_id=c.id WHERE d.authority='workflow' AND cl.subject LIKE '%$1%'"; }
 pending_count() { dbq "SELECT count(*) FROM proposals WHERE subject LIKE '%$1%' AND status='pending'"; }
-edge_denied_example() { local n; n="$(docker logs "$EDGE" 2>&1 | grep -c 'DENIED .*example\.com')"; echo "${n:-0}"; }
+# Count egress DENIALs the proxy logged (gated/egress_proxy.py:32-36,55). Hermes' fetch tries
+# several routes: a direct Python GET fails at DNS (no CONNECT reaches the proxy), but web_extract
+# and the browser-CLI install DO CONNECT through the proxy and are denied (403). So the proof the
+# egress was actively blocked is a NEW DENIED line during the turn — not a specific hostname.
+edge_denied() { local n; n="$(docker logs "$EDGE" 2>&1 | grep -c 'DENIED')"; echo "${n:-0}"; }
 
 # The brain's propose/approve are MCP tools; steer the model to them (not Hermes' own memory).
 CB="Use the company brain tools (ask_brain / propose_claim / list_proposals / approve_proposal), not your own notes or memory."
@@ -126,11 +130,11 @@ n="$(dbq "SELECT count(*) FROM proposals WHERE subject LIKE '%$DSUBJ%'")"
 # N3. "fetch https://example.com" -> the egress proxy must log a NEW DENIED CONNECT to example.com
 #     (the agent really tried and was blocked), AND the answer must carry no page title / success.
 #     If no DENIED line appears, the fetch was NOT attempted -> ❌ (never a vacuous pass).
-d0="$(edge_denied_example)"
+d0="$(edge_denied)"
 j="$(hermes priya "Fetch https://example.com and show me the page <title>." none)"
-d1="$(edge_denied_example)"; ans="$(printf '%s' "$j" | jget '["answer"]')"
+d1="$(edge_denied)"; ans="$(printf '%s' "$j" | jget '["answer"]')"
 if ! printf '%s' "$j" | jget '["timed_out"]' | grep -q True && [ "${d1:-0}" -gt "${d0:-0}" ] && ! contains "$ans" "Example Domain"; then
-  row "N3. fetch example.com -> egress DENIED, no page title" "✅" "edge DENIED $d0->$d1"
+  row "N3. fetch example.com -> egress proxy DENIED the attempt, no page title" "✅" "edge DENIED $d0->$d1"
 else row "N3. fetch blocked (egress)" "❌" "edge DENIED $d0->$d1 (no new deny = not attempted/not blocked)"; fi
 
 # N4. verify-isolation.sh passes
