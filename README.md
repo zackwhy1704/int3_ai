@@ -1,48 +1,52 @@
-# Company Brain — hosted pilot (in progress)
+# Company Brain
 
-Scoped, cited question answering over a company's own documents, with a truth layer
-that tracks which claim is still current. This branch line builds the hosted pilot
-(gates 5–9, see CLAUDE.md).
+A multi-tenant **Company Brain**: scoped, cited question answering over a company's own
+documents and workflow history, with a truth layer that tracks which claim is still
+current — and that can **learn from real work**, capturing a fact only after a human with
+authority approves it.
 
-The local partner demo is frozen at git tag **`demo-v1`**
-(`git checkout demo-v1 && docker compose up -d`, then follow that README).
+On this branch (`spike/remote-thin-client`) it reaches the user as a **thin client**:
 
-## Run locally
-
-```sh
-cp .env.example .env            # fill in the secrets (openssl rand -hex 32)
-docker compose --profile dev up -d --build
-docker compose run --rm tools python -m app.tenants.admin provision \
-  --id brindlewood --name "Brindlewood Supply Co." --seed /seed/brindlewood \
-  --google-domain brindlewood.example
+```
+stock Hermes Desktop  ──▶  per-user gated Hermes backend  ──▶  brain (MCP)  ──▶  BYOK LLM gateway
+   (the official app)        (our hardened fork, one               (truth layer)      (customer's own
+                              isolated container per user)                             model key, capped)
 ```
 
-Open http://localhost:5173 and sign in.
+The user runs the **real, stock Hermes agent** (we ship no custom desktop). What is ours is
+the per-user **gated backend**, the **brain**, and the **BYOK gateway**. Nothing is
+fine-tuned; permissions are enforced server-side; the brain token lives only in each user's
+MCP sidecar.
 
-- **Test sign-in (dev only):** click "Continue with Test Google". On the test provider's
-  form, enter any username (it becomes the account's stable id, e.g. `google-priya`) and
-  these claims:
-  `{"email": "priya@brindlewood.example", "email_verified": true, "hd": "brindlewood.example"}`.
-  Seeded users are `priya`, `marcus` and `ada` `@brindlewood.example`.
-- **Real Google / Microsoft:** set `GOOGLE_CLIENT_ID/SECRET` and `MS_CLIENT_ID/SECRET`
-  in `.env`. Redirect URIs are `http://localhost:5173/api/auth/callback/google` and
-  `.../callback/microsoft`. Then set the tenant's policy:
-  `docker compose run --rm tools python -m app.tenants.admin configure --id <tenant> --google-domain <domain> --ms-tenant-id <entra tenant id>`.
+## Start here
 
-## Operator commands (tools container: the only one with superuser credentials)
+- **[QUICKSTART.md](QUICKSTART.md)** — one command (`make demo`) brings up an isolated
+  stack and drives the real Hermes agent through the demo, then prints a ✅/❌ table.
+- **[CLAUDE.md](CLAUDE.md)** — the architecture, the invariants, and how we work.
+- **[deploy/hermes/README.md](deploy/hermes/README.md)** and
+  **[deploy/hermes/DEMO.md](deploy/hermes/DEMO.md)** — the live system on this branch: the
+  gated backend, the proxies and startup gate, provisioning, and the desktop connect flow.
 
-```sh
-docker compose run --rm tools python -m app.tenants.admin provision --id acme \
-  --name "Acme Pte Ltd" --admin-email ops@acme.example [--google-domain acme.example] \
-  [--ms-tenant-id <guid>]
-docker compose run --rm tools python -m app.tenants.admin configure --id acme --google-domain acme.example
-docker compose run --rm tools pytest -v                  # full suite (provisions test tenants)
-docker compose run --rm tools pytest -v -m "not llm"     # without model calls
-./preflight.sh                                           # local stack health, PASS/FAIL per check
-```
+## The two test tiers
 
-A tenant is one Postgres database (`t_<id>`) reachable only by its own role. Provisioning
-creates the role and database, applies the schema and grants, and registers the tenant
-and its users in the control database. If any step fails, it removes what it created.
+| command | tier | what it drives |
+|---|---|---|
+| `make demo` | **Hermes tier** (the real thing) | the stock Hermes agent over `/api/ws`, the desktop's own path |
+| `make e2e` | **component tier (bypasses Hermes)** | the gateway model + brain MCP directly — a faster lower-tier check |
 
-**Reset everything:** `docker compose down -v`.
+Both run in **isolated** compose projects (`hermes-demo` / `hermes-e2e`) and never touch a
+running `hermes-deploy`. `make demo-down` / `make e2e-down` remove them.
+
+## The one secret you provide
+
+The LLM key, in `deploy/hermes/.env` (`ANTHROPIC_API_KEY=…`), which **you edit yourself** —
+never paste a key into chat. Every other secret for the throwaway stack is generated for
+you. All seed and demo data is **synthetic**.
+
+## Repo layout
+
+- `backend/app/` — the FastAPI brain (truth layer, capture-with-approval, retrieval, auth).
+- `deploy/hermes/` — the per-user gated backend, proxies, startup gate, provisioning, the
+  `demo/` (Hermes tier) and `e2e/` (component tier).
+- `gateway/` — the BYOK custodian gateway (OpenAI-compatible `/v1/chat/completions`).
+- `seed/` — synthetic tenants (`brindlewood`: marcus/priya/ada) and test fixtures.

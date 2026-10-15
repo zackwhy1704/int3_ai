@@ -108,24 +108,36 @@ installer) — so partners can install the stock app for the matching version wi
 building from source. (The GitHub release itself carries **no** binary asset; the
 installers live in the Store / MSIX / the install one-liner.)
 
-Auto-update at v0.21.7 is **user-initiated — no silent background install**:
-- `electron-updater` is created with `autoDownload = false` and
-  `autoInstallOnAppQuit = false` (`apps/desktop/electron/updater/mac-client.ts:49-50`),
-  and there is no `checkForUpdatesAndNotify` / update timer / scheduler.
-- There is a **passive** version check that can show an update banner
-  (`updates.check`, default on — `hermes_cli/config_defaults.py`); it never installs
-  on its own. "Check for Updates…" opens the panel; `hermes update` is explicit.
+Update behaviour on **Windows depends on the install shape**, not on a single
+updater setting. The desktop dispatches one of several update owners by build
+stamp (`apps/desktop/electron/updater/index.ts:1-13,36-46`):
+- **Microsoft Store** → `microsoft-store`: "StoreContext checks and requests the
+  package update" (`updater/index.ts:6`) — **auto, through the Store**.
+- **Out-of-store MSIX (App Installer)** → `app-installer`: "the OS App Installer
+  owns the apply" (`updater/index.ts:4-5`, `updater/app-installer.ts:1-9`); the
+  `.appinstaller` feed sets `OnLaunch HoursBetweenUpdateChecks=12` when the policy is
+  `automatic` (`scripts/bundles/release_artifacts.py:291-292`; re-read on launch,
+  `apps/desktop/electron/app-updater.ts:27`) — **auto on launch, at most every 12 h**.
+- **Standalone / bundled (git checkout)** → `windows-handoff`: "detached updater
+  binary or the repo hand-off script owns the swap" (`updater/index.ts:8-9`); the
+  swap is driven by an update action, not a background timer.
+- **A commit-build** (what *we* pin for the backend) → `external`: **"no in-app
+  updater"** (`updater/index.ts:7`, `resolveUpdaterMechanism` at `:37-39`).
 
-**To keep the pilot pinned:** (1) don't accept the update banner or click **Check for
-Updates…**; (2) don't run `hermes update`; (3) install **Nous's official non-Store
-installer** (the standalone download from the v0.21.7 release page, not the Microsoft
-Store and not an App-Installer/MSIX feed) — its in-app updater is **user-initiated**
-(`autoDownload=false`, `apps/desktop/electron/updater/mac-client.ts:49-50`), so the
-machine stays on v0.21.7 until a human chooses to update. Do **not** ship our own
-desktop build — pilots run Nous's official app; the `71d34bad` pin is for the
-**backend** only, not a desktop we distribute. The Store and App-Installer/MSIX paths
-auto-update and can't be pinned per-app — that drift is the risk (see below). **Do not
-modify Hermes.**
+> **Correction (was wrong here):** earlier revisions cited
+> `apps/desktop/electron/updater/mac-client.ts:49-50` (`autoDownload=false`) as the
+> Windows proof. That file is **macOS-only** — it gates on `platform !== 'darwin'`
+> (`updater/mac-client.ts:21`) and drives `electronUpdater.MacUpdater()` (`:38`), so its
+> `autoDownload`/`autoInstallOnAppQuit` flags govern the **Mac** updater and prove
+> nothing about Windows. Use the Windows owners above.
+
+**To keep a pilot pinned on Windows:** the Store and App-Installer/MSIX paths
+**auto-update** and cannot be pinned per app — that drift is the real risk. The only
+hard pin is an install shape with no auto-updater: a `windows-handoff`/standalone
+install that no one runs an update against, or a commit-build (`external`, no in-app
+updater). Pilots run **Nous's official app**; the `71d34bad` pin is for the **backend
+only**, not a desktop we distribute. Do **not** ship our own desktop build and **do
+not modify Hermes**.
 
 ### How the official Windows app updates, and keeping it on v0.21.7
 
@@ -140,9 +152,11 @@ and MSIX, the installer"), each with a different update path:
   (`scripts/bundles/release_artifacts.py:291-292`), so Windows App Installer
   **checks the feed on launch, at most every 12 h**, and updates when a newer package
   is published.
-- **Bundled / standalone build** → the in-app updater, which is **user-initiated**
-  (`autoDownload=false` / `autoInstallOnAppQuit=false`,
-  `apps/desktop/electron/updater/mac-client.ts:49-50`; no scheduler).
+- **Bundled / standalone build** → `windows-handoff`: a git-checkout swap owned by a
+  detached updater binary or the repo hand-off script (`updater/index.ts:8-9`), driven
+  by an update action rather than a background timer. (The macOS `autoDownload=false`
+  in `updater/mac-client.ts:49-50` is **not** the Windows proof — that file is Mac-only,
+  `updater/mac-client.ts:21,38`.)
 
 **To hold a pilot machine on v0.21.7:** the Store and App-Installer MSIX paths update
 on their own when Nous publishes a newer release, which a pilot cannot pin per-app —
