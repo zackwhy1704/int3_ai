@@ -77,6 +77,8 @@ services:
       APP_CONTROL_PASSWORD: ${APP_CONTROL_PASSWORD:?set APP_CONTROL_PASSWORD in .env}
       TENANT_DB_KEY: ${TENANT_DB_KEY:?set TENANT_DB_KEY in .env}
       GATEWAY_DB_PASSWORD: ${GATEWAY_DB_PASSWORD:?set GATEWAY_DB_PASSWORD in .env}
+      # Optional (Phase 2b): set to provision the encrypt-only key-intake DB role at init.
+      KEY_INTAKE_DB_PASSWORD: ${KEY_INTAKE_DB_PASSWORD:-}
     volumes:
       - ../../seed:/seed:ro
     networks: [ext]
@@ -117,10 +119,38 @@ services:
       # … in= out= cache_write= cache_read=` line per upstream call, so the demo can report
       # per-user token usage. Off by default (unset); the demo/CI opt in here.
       GATEWAY_USAGE_LOG: /tmp/usage.log
+      # Phase 2b: the PRIVATE half of the keyvault v2 keypair — the gateway decrypts BYOK keys the
+      # intake sealed to the public half. Optional (v1/KEK keys don't need it); never on intake.
+      KEYVAULT_PRIVATE_KEY: ${KEYVAULT_PRIVATE_KEY:-}
     networks:
       ext: {}                   # DB + model-provider egress. provision-user.sh
                                 # connects it to each u-<tenant>-<user> net with
                                 # alias brain-gateway so that user's Hermes reaches it.
+    depends_on:
+      init: {condition: service_completed_successfully}
+
+  # Phase 2b: encrypt-only BYOK key-entry intake. Behind the `key-intake` compose profile so a
+  # plain `up` (and `make demo`) does NOT start it. Bound to LOOPBACK ONLY on the host — the key
+  # crosses the wire on POST, so it MUST sit behind a TLS ingress before any non-loopback exposure
+  # (see deploy/hermes/KEY_INTAKE.md). Holds ONLY the keyvault PUBLIC key + the least-privilege
+  # key_intake DB role: it cannot decrypt any tenant key.
+  key-intake:
+    profiles: ["key-intake"]
+    build: {context: ../.., dockerfile: gateway/Dockerfile}
+    command: ["uvicorn", "key_intake:app", "--host", "0.0.0.0", "--port", "8099"]
+    environment:
+      CONTROL_DB: control
+      DB_HOST: db
+      KEY_INTAKE_DB_ROLE: key_intake
+      # Optional at parse time (so a profile-off `up`/`make demo` never fails to interpolate); the
+      # service needs BOTH set to run — start it with: docker compose --profile key-intake up -d.
+      KEY_INTAKE_DB_PASSWORD: ${KEY_INTAKE_DB_PASSWORD:-}
+      KEYVAULT_PUBLIC_KEY: ${KEYVAULT_PUBLIC_KEY:-}
+      KEY_INTAKE_BASE_URL: ${KEY_INTAKE_BASE_URL:-http://127.0.0.1:8099}
+    ports:
+      - "127.0.0.1:8099:8099"   # LOOPBACK ONLY — never 0.0.0.0 without TLS in front
+    networks:
+      ext: {}                   # reach the control DB + the provider endpoint for validation
     depends_on:
       init: {condition: service_completed_successfully}
 

@@ -17,8 +17,9 @@ demo. "Hermes under the hood" is literally true: every step in the demo goes ove
   it; on Linux: `sudo apt-get install docker-compose-plugin`.
 - **≥ 8 GB free memory** for the stack (local embedding model + Postgres + per-user
   containers). `make demo` checks this and tells you if you're short.
-- **`make` and `bash`.** On Windows use **Git Bash** (or WSL); see Troubleshooting for the
-  one Git Bash gotcha (it's already handled in-repo).
+- **`bash`.** On Windows use **Git Bash** (or WSL). `make` is macOS/Linux only — on Windows run
+  the scripts directly (shown below). See Troubleshooting for the one Git Bash gotcha (handled
+  in-repo).
 - **`deploy/hermes/.env` with your model key.** If the file is missing:
   `cp deploy/hermes/.env.example deploy/hermes/.env`, then edit it and set
   `ANTHROPIC_API_KEY=sk-ant-…` yourself.
@@ -27,19 +28,27 @@ demo. "Hermes under the hood" is literally true: every step in the demo goes ove
 
 ## 2. Run it
 
+**macOS / Linux:**
 ```sh
 make demo
+```
+
+**Windows (Git Bash has no `make`)** — run the script directly:
+```sh
+bash deploy/hermes/demo/make-demo.sh
 ```
 
 This (in an **isolated** project `DEPLOY_PROJECT=hermes-demo` — it never touches a running
 `hermes-deploy`): checks prerequisites → generates any missing non-model secrets → builds
 images → brings the stack up → provisions three synthetic users (marcus=finance,
-priya=operations, ada=operations **owner**), each with your key under a **$1/day cap** →
-runs the scenario **through the real Hermes agent over `/api/ws`** → prints a ✅/❌ table.
-It **leaves the stack up** so you can open the desktop app (next section). Remove it with:
+priya=operations, ada=operations **owner**), each with your key under a **$3/day cap** (the
+`DEMO_CAP_USD` default in `make-demo.sh`) → runs the scenario **through the real Hermes agent over
+`/api/ws`** → prints a ✅/❌ table. It **leaves the stack up** so you can open the desktop app
+(next section). Remove it with:
 
 ```sh
-make demo-down
+make demo-down                                                   # macOS / Linux
+DEPLOY_PROJECT=hermes-demo bash deploy/hermes/e2e/teardown.sh    # Windows (Git Bash)
 ```
 
 ### What it costs
@@ -80,26 +89,30 @@ directly. In order:
 
 A non-zero exit means at least one row failed; the table shows which.
 
-> **Component-tier check (bypasses Hermes):** `make e2e` runs the same scenario by driving
-> the gateway model + brain MCP **directly**, without the Hermes agent. It's the faster
-> lower-tier check; `make demo` is the real thing. (`make e2e-down` to remove it.)
+> **Component-tier check (bypasses Hermes):** `make e2e` (macOS/Linux) — or on Windows
+> `bash deploy/hermes/e2e/make-e2e.sh` — runs the same scenario by driving the gateway model +
+> brain MCP **directly**, without the Hermes agent. It's the faster lower-tier check; `make demo`
+> is the real thing. Remove it with `make e2e-down`, or on Windows
+> `DEPLOY_PROJECT=hermes-e2e bash deploy/hermes/e2e/teardown.sh`.
 
 ## 4. (Optional) See it in the desktop app
 
 The demo already proves the agent path; this step just lets you watch it in the GUI.
 
-**Install the official, stock Hermes Desktop, pinned to the demo's version.** On Windows,
-Nous's installer builds the official app from a pinned commit:
+**Install the official, stock Hermes Desktop, pinned to the demo's version.** The installer is
+Nous's, in the `NousResearch/hermes-agent` repo (not this repo). On Windows, download it from the
+v0.21.7 tag to `%TEMP%` and run it with the desktop stage, pinned to the commit:
 
 ```powershell
-# pins commit 71d34bad… (= tag v0.21.7) and adds the desktop build stage
-scripts\install.ps1 -IncludeDesktop -Commit 71d34bad1045610252eda02ee79549436896e784
+$u = 'https://raw.githubusercontent.com/NousResearch/hermes-agent/v0.21.7/scripts/install.ps1'
+Invoke-WebRequest -Uri $u -OutFile "$env:TEMP\hermes-install.ps1"
+& "$env:TEMP\hermes-install.ps1" -IncludeDesktop -Commit 71d34bad1045610252eda02ee79549436896e784
 ```
 
-`-IncludeDesktop` (`scripts/install.ps1:33`) adds the desktop stage; `-Commit` pins it
-(`:962`); the build produces **`release\win-unpacked\Hermes.exe`** (`:1232`). That unpacked
-build is a standalone app (not the Store package), which is what you want for a pinned
-demo. Then point it at a user's connect file:
+`-IncludeDesktop` (`scripts/install.ps1:33` in hermes-agent) adds the desktop stage; `-Commit`
+pins it to tag v0.21.7 (`:962`); the build produces **`release\win-unpacked\Hermes.exe`** (`:1232`).
+That unpacked build is a standalone app (not the Store package), which is what you want for a
+pinned demo. Then point it at a user's connect file:
 
 ```powershell
 # writes the connection into the app's data dir and (re)starts it at the demo backend
@@ -145,9 +158,10 @@ agent, running in our sandbox, is doing the work.
 ## Troubleshooting
 
 - **Out of memory / builds killed / `cannot allocate memory`.** The stack wants ≥ 8 GB
-  free. Close other apps, or run on a machine/runner with more memory. Do **not** run the
-  demo stack beside a separately running `hermes-deploy` stack — two full stacks will
-  exhaust host memory. `make demo` is isolated (`hermes-demo`) but still needs the RAM.
+  free. **First, stop any running `hermes-deploy` containers** (Docker Desktop → Containers →
+  Stop the `hermes-deploy` stack) — running it beside the demo stack exhausts host memory. The
+  demo is isolated (`hermes-demo`) and won't touch `hermes-deploy`, but both running at once is
+  two full stacks. Then close other apps, or use a machine with more RAM.
 - **Port already in use.** The demo binds host ports **9331/9332/9333** (off the deploy
   stack's 9131–9133 and the e2e stack's 9231–9233). If something else holds them, stop it
   or change the ports in `deploy/hermes/demo/make-demo.sh`. `make demo-down` frees the
