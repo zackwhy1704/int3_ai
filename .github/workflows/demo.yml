@@ -15,9 +15,20 @@ on:
   schedule:
     - cron: '17 7 * * *'   # nightly ~07:17 UTC (main only, see job `if`)
   workflow_dispatch:
+    inputs:
+      run_regression:
+        description: 'Also run the owner-check RED->GREEN regression (extra model spend)'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
+
+# Run budget: never let stacked pushes run full real-model stacks in parallel — cancel the
+# older in-progress run of this workflow for the same ref.
+concurrency:
+  group: demo-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   demo:
@@ -92,9 +103,12 @@ jobs:
 
       - name: make demo (real Hermes agent over /api/ws)
         env:
-          # PER-TENANT daily cap, shared by all 3 users and reused by the regression; $1 throttled
-          # the real-agent run (429 -> 600s retry stall). Fresh gateway DB each run, so this resets.
-          DEMO_CAP_USD: '20'
+          # TIGHT per-tenant daily cap (shared by all 3 users; fresh gateway DB each run).
+          DEMO_CAP_USD: '3'
+          # CI cost control: lowest reasoning effort the main agent supports (extended thinking is
+          # the dominant per-turn cost). A tester's local `make demo` leaves this unset -> full
+          # thinking. 'none' is lower still but may hurt tool-calling; 'minimal' is the safe floor.
+          HERMES_REASONING_EFFORT: 'minimal'
         run: |
           set -o pipefail
           t0=$(date +%s)
@@ -106,8 +120,10 @@ jobs:
 
       # Prove the owner check (both layers) is load-bearing: GREEN -> remove it -> RED
       # -> restore -> GREEN. Runs in the stack make demo left up. No bypass flag ships.
+      # MANUAL-ONLY: off the default [e2e] path (it rebuilds the brain twice + runs ~12 extra
+      # model turns). Enable via `workflow_dispatch` with run_regression=true.
       - name: Regression — owner check RED->GREEN
-        if: always()
+        if: ${{ inputs.run_regression == true }}
         run: |
           set -o pipefail
           set -a; . deploy/hermes/.env; set +a

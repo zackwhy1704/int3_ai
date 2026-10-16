@@ -42,6 +42,18 @@ It **leaves the stack up** so you can open the desktop app (next section). Remov
 make demo-down
 ```
 
+### What it costs
+
+`make demo` runs the **real** Claude Sonnet agent through ~10+ turns with extended thinking, so it
+spends real money on **your** Anthropic key. The exact per-run cost is **unmeasured**: the gateway
+records a dollar figure only when the daily cap is *hit*, and a healthy run stays under it. What's
+known: a run is bounded by the gateway's **per-tenant daily cap, default `$3`** (`DEMO_CAP_USD` in
+`make-demo.sh`), and extended thinking is the dominant cost. CI lowers it further by provisioning the
+agent at the lowest reasoning effort (`HERMES_REASONING_EFFORT=minimal`); your local `make demo`
+leaves that unset, so you get the full-thinking experience (and the higher cost). Set a hard spend
+limit on your Anthropic account as the real backstop — the gateway cap is a per-run ceiling, not an
+account budget. Raise `DEMO_CAP_USD` deliberately if a legitimate run needs more.
+
 ## 3. Read the table
 
 Each row is a claim about what Hermes *returned* (its final text / the approval prompts it

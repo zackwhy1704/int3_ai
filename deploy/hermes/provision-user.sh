@@ -153,6 +153,14 @@ telemetry:
     send: false
     offer_version: 2
 YAML
+# Optional CI cost control: lower the MAIN agent's reasoning effort (agent.reasoning_effort —
+# hermes_cli/cli_model_switch_mixin.py:244; values ultra|max|xhigh|high|medium|low|minimal|none,
+# empty=model default). Extended thinking is the dominant per-turn cost; set this ONLY in CI via
+# HERMES_REASONING_EFFORT. A tester's `make demo` leaves it unset -> Hermes' default (full thinking).
+if [ -n "${HERMES_REASONING_EFFORT:-}" ]; then
+  printf 'agent:\n  reasoning_effort: "%s"\n' "$HERMES_REASONING_EFFORT" >> "$cfg"
+  say "reasoning_effort=$HERMES_REASONING_EFFORT (cost control; unset for the default full-thinking experience)"
+fi
 docker run --rm -i -v "$vol:/opt/data" busybox \
   sh -c 'cat > /opt/data/config.yaml; chown 1000:1000 /opt/data/config.yaml 2>/dev/null || true' < "$cfg"
 rm -f "$cfg"
