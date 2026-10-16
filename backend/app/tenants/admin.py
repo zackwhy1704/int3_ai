@@ -151,6 +151,28 @@ def init() -> None:
                 GRANT SELECT, INSERT, UPDATE ON tenant_usage TO {g};
             """).format(db=sql.Identifier(config.CONTROL_DB), g=gw)
             )
+        # Encrypt-only key-intake role (Phase 2b): the internet-facing intake connects as this.
+        # It may ONLY SELECT non-secret link/provider columns (never key_ciphertext) and EXECUTE
+        # the two SECURITY DEFINER functions — it cannot write tenant_providers/key_entry_links
+        # directly, cannot read any key, and holds no KEK/private key (keyvault v2). Password from
+        # KEY_INTAKE_DB_PASSWORD; absent -> role not provisioned (intake disabled).
+        if getattr(config, "KEY_INTAKE_DB_PASSWORD", None):
+            ki = sql.Identifier(getattr(config, "KEY_INTAKE_DB_ROLE", "key_intake"))
+            if not role_exists(conn, getattr(config, "KEY_INTAKE_DB_ROLE", "key_intake")):
+                conn.execute(sql.SQL("CREATE ROLE {} LOGIN PASSWORD {}").format(ki, sql.Literal(config.KEY_INTAKE_DB_PASSWORD)))
+            else:
+                conn.execute(sql.SQL("ALTER ROLE {} PASSWORD {}").format(ki, sql.Literal(config.KEY_INTAKE_DB_PASSWORD)))
+            conn.execute(
+                sql.SQL("""
+                GRANT CONNECT ON DATABASE {db} TO {k};
+                GRANT USAGE ON SCHEMA public TO {k};
+                REVOKE ALL ON ALL TABLES IN SCHEMA public FROM {k};
+                GRANT SELECT (token_hash, tenant_id, provider, expires_at, used_at, fail_count) ON key_entry_links TO {k};
+                GRANT SELECT (tenant_id, provider, base_url, key_owner) ON tenant_providers TO {k};
+                GRANT EXECUTE ON FUNCTION consume_key_link(text, text, text) TO {k};
+                GRANT EXECUTE ON FUNCTION record_key_link_failure(text) TO {k};
+            """).format(db=sql.Identifier(config.CONTROL_DB), k=ki)
+            )
     with admin_conn(config.CONTROL_DB) as conn:
         migrations.ensure_table(conn)
         migrations.record(conn, migrations.CONTROL_VERSION)

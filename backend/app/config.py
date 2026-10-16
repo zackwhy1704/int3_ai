@@ -28,6 +28,11 @@ TENANT_DB_KEY = os.environ.get("TENANT_DB_KEY", "")
 GATEWAY_DB_ROLE = "gateway_auth"
 GATEWAY_DB_PASSWORD = os.environ.get("GATEWAY_DB_PASSWORD", "")
 
+# Encrypt-only key-intake role (Phase 2b). Provisioned by admin.init() only when the password is
+# set; absent -> the role is not created and the intake service cannot run (feature disabled).
+KEY_INTAKE_DB_ROLE = "key_intake"
+KEY_INTAKE_DB_PASSWORD = os.environ.get("KEY_INTAKE_DB_PASSWORD", "")
+
 SESSION_IDLE_MINUTES = 30
 SESSION_ABSOLUTE_HOURS = 8
 SESSION_COOKIE = "__Host-session"

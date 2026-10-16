@@ -50,6 +50,63 @@ def test_tamper_detected():
 
 
 # ---------------------------------------------------------------------------
+# v2 asymmetric (encrypt-only intake): intake seals to a PUBLIC key and cannot decrypt.
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def _v2_keypair(monkeypatch):
+    pub, priv = keyvault.generate_keypair()
+    monkeypatch.setenv("KEYVAULT_PUBLIC_KEY", pub)
+    monkeypatch.setenv("KEYVAULT_PRIVATE_KEY", priv)
+    return pub, priv
+
+
+def test_v2_roundtrip(_v2_keypair):
+    blob = keyvault.encrypt_v2(_SENTINEL, tenant_id="brindlewood", provider="anthropic")
+    assert base64.b64decode(blob)[:1] == b"\x02"
+    assert _SENTINEL not in blob
+    assert keyvault.decrypt(blob, tenant_id="brindlewood", provider="anthropic") == _SENTINEL
+
+
+def test_v2_aad_binding(_v2_keypair):
+    blob = keyvault.encrypt_v2(_SENTINEL, tenant_id="brindlewood", provider="anthropic")
+    with pytest.raises(Exception):
+        keyvault.decrypt(blob, tenant_id="hollowmere", provider="anthropic")
+
+
+def test_decrypt_handles_both_v1_and_v2(_v2_keypair):
+    v1 = keyvault.encrypt(_SENTINEL, tenant_id="t", provider="anthropic")
+    v2 = keyvault.encrypt_v2(_SENTINEL, tenant_id="t", provider="anthropic")
+    assert base64.b64decode(v1)[:1] == b"\x01" and base64.b64decode(v2)[:1] == b"\x02"
+    assert keyvault.decrypt(v1, tenant_id="t", provider="anthropic") == _SENTINEL
+    assert keyvault.decrypt(v2, tenant_id="t", provider="anthropic") == _SENTINEL
+
+
+def test_intake_holding_only_public_key_cannot_decrypt(monkeypatch):
+    """The encrypt-only intake has the PUBLIC key but NO private key and NO KEK: it can SEAL a key
+    (v2) but decrypt of ANY version MUST raise — it cannot read tenant keys."""
+    pub, _priv = keyvault.generate_keypair()
+    # build a v1 blob first (needs the KEK the autouse fixture set), then strip all decrypt secrets
+    v1 = keyvault.encrypt(_SENTINEL, tenant_id="t", provider="anthropic")
+    monkeypatch.setenv("KEYVAULT_PUBLIC_KEY", pub)
+    monkeypatch.delenv("KEYVAULT_PRIVATE_KEY", raising=False)
+    monkeypatch.delenv("TENANT_KEY_KEK", raising=False)
+    v2 = keyvault.encrypt_v2(_SENTINEL, tenant_id="t", provider="anthropic")  # sealing still works
+    assert _SENTINEL not in v2
+    with pytest.raises(Exception):   # no private key -> cannot unseal v2
+        keyvault.decrypt(v2, tenant_id="t", provider="anthropic")
+    with pytest.raises(Exception):   # no KEK -> cannot unwrap v1
+        keyvault.decrypt(v1, tenant_id="t", provider="anthropic")
+
+
+def test_rewrap_v1_to_v2(_v2_keypair):
+    v1 = keyvault.encrypt(_SENTINEL, tenant_id="t", provider="anthropic")
+    v2 = keyvault.rewrap_v1_to_v2(v1, tenant_id="t", provider="anthropic")
+    assert base64.b64decode(v2)[:1] == b"\x02"
+    assert keyvault.decrypt(v2, tenant_id="t", provider="anthropic") == _SENTINEL
+
+
+# ---------------------------------------------------------------------------
 # DB-gated: store via admin creds, read via the gateway role, prove no leak.
 # ---------------------------------------------------------------------------
 

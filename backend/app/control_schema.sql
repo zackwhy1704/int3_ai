@@ -125,3 +125,67 @@ CREATE TABLE IF NOT EXISTS tenant_usage (
     updated_at      timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (tenant_id, day)
 );
+
+-- Single-use BYOK key-entry links (Phase 2b). A one-time token (sha256 at rest, like
+-- service_tokens) lets a tenant admin POST their provider key to the ENCRYPT-ONLY intake
+-- service over TLS. No token and no key are stored here — only the hash + non-secret metadata.
+-- The intake never writes this table or tenant_providers directly: it calls the SECURITY DEFINER
+-- functions below (owned by the NOLOGIN key_writer role), so a compromised intake can neither
+-- read a key (it holds only the keyvault PUBLIC key) nor bypass the owner/single-use checks.
+CREATE TABLE IF NOT EXISTS key_entry_links (
+    token_hash  text PRIMARY KEY,
+    tenant_id   text NOT NULL REFERENCES tenants(id),
+    provider    text NOT NULL,
+    expires_at  timestamptz NOT NULL,
+    used_at     timestamptz,
+    fail_count  integer NOT NULL DEFAULT 0,
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    created_by  text NOT NULL
+);
+CREATE INDEX IF NOT EXISTS key_entry_links_expires ON key_entry_links(expires_at);
+
+-- NOLOGIN role that OWNS (and thus whose privileges back) the SECURITY DEFINER functions.
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'key_writer') THEN CREATE ROLE key_writer NOLOGIN; END IF;
+END $$;
+GRANT SELECT, UPDATE ON key_entry_links TO key_writer;
+GRANT SELECT, UPDATE (key_ciphertext, updated_at) ON tenant_providers TO key_writer;
+
+-- validate-then-consume: the intake validates the key FIRST, then calls this to store it
+-- atomically. Locks the link row; requires it unused + unexpired; requires the provider row with
+-- key_owner='theirs' (rejects 'ours'); sets used_at; writes the v2 ciphertext. Returns the
+-- outcome so the caller can log the event — never the key. SET search_path pins resolution.
+CREATE OR REPLACE FUNCTION consume_key_link(p_token_hash text, p_ciphertext text, p_fingerprint text)
+RETURNS text LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE v_tenant text; v_provider text; v_had boolean;
+BEGIN
+  SELECT tenant_id, provider INTO v_tenant, v_provider FROM key_entry_links
+    WHERE token_hash = p_token_hash AND used_at IS NULL AND expires_at > now() FOR UPDATE;
+  IF NOT FOUND THEN RETURN 'gone'; END IF;                 -- used, expired, or no such link
+  SELECT (key_ciphertext IS NOT NULL) INTO v_had FROM tenant_providers
+    WHERE tenant_id = v_tenant AND provider = v_provider AND key_owner = 'theirs' FOR UPDATE;
+  IF NOT FOUND THEN RETURN 'rejected_owner'; END IF;       -- no provider row, or key_owner='ours'
+  UPDATE key_entry_links SET used_at = now() WHERE token_hash = p_token_hash;
+  UPDATE tenant_providers SET key_ciphertext = p_ciphertext, updated_at = now()
+    WHERE tenant_id = v_tenant AND provider = v_provider;
+  RETURN CASE WHEN v_had THEN 'replaced' ELSE 'stored' END;
+END $$;
+
+-- Count a failed validation; burn (mark used) the link after 3. Returns the new count, or -1
+-- if the link is already gone.
+CREATE OR REPLACE FUNCTION record_key_link_failure(p_token_hash text)
+RETURNS integer LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE v_n integer;
+BEGIN
+  UPDATE key_entry_links SET fail_count = fail_count + 1
+    WHERE token_hash = p_token_hash AND used_at IS NULL AND expires_at > now()
+    RETURNING fail_count INTO v_n;
+  IF NOT FOUND THEN RETURN -1; END IF;
+  IF v_n >= 3 THEN UPDATE key_entry_links SET used_at = now() WHERE token_hash = p_token_hash; END IF;
+  RETURN v_n;
+END $$;
+
+ALTER FUNCTION consume_key_link(text, text, text) OWNER TO key_writer;
+ALTER FUNCTION record_key_link_failure(text) OWNER TO key_writer;
+REVOKE EXECUTE ON FUNCTION consume_key_link(text, text, text) FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION record_key_link_failure(text) FROM PUBLIC;
