@@ -113,6 +113,10 @@ services:
       CONTROL_DB: control
       DB_HOST: db
       TENANT_KEY_KEK: ${TENANT_KEY_KEK:?set TENANT_KEY_KEK in .env}
+      # Per-request usage log (gateway/upstream.py:32 _log_usage): one `USAGE caller=<tenant>/<user>
+      # … in= out= cache_write= cache_read=` line per upstream call, so the demo can report
+      # per-user token usage. Off by default (unset); the demo/CI opt in here.
+      GATEWAY_USAGE_LOG: /tmp/usage.log
     networks:
       ext: {}                   # DB + model-provider egress. provision-user.sh
                                 # connects it to each u-<tenant>-<user> net with

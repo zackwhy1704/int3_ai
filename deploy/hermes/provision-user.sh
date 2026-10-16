@@ -152,18 +152,55 @@ telemetry:
     enabled: false
     send: false
     offer_version: 2
+agent:
+  # Toolset trim (cost + attack surface). Keep only what the pilot needs: the brain MCP tools
+  # (via mcp_servers, NOT a toolset) and the desktop's normal chat. Disabled sets
+  # (hermes-agent toolsets.py): "web"/"search"/"browser" are DEAD in this sandbox — egress is
+  # default-deny (gated/egress_proxy.py), so they cannot work and only add dead tool schemas to
+  # every prompt (this is the N3 "fetch" path we saw fail); "vision"/"image_gen" are not used by
+  # any of the five DEMO.md steps or basic chat; "memory" is disabled here AND below. None of these
+  # is needed for the 5 steps (which use only ask_brain/propose_claim/list_proposals/
+  # approve_proposal) or for the desktop UI to chat. Read as agent.disabled_toolsets
+  # (hermes_cli/cli_init_mixin.py:217).
+  disabled_toolsets: ["memory", "web", "search", "browser", "vision", "image_gen"]
+memory:
+  # Turn OFF Hermes' native per-user memory entirely: no `memory` tool and no MEMORY.md/USER.md
+  # injected into the system prompt (hermes_cli/config_defaults.py:1311-1317). This is the
+  # CAPTURE_PILOT fix — with no memory tool, "remember for <scope> …" can only go to the brain's
+  # propose_claim — AND it enforces the posture "Hermes per-user memory must not be read/synced".
+  # The startup gate (gated/startup-gate.sh) REFUSES to boot if this is not false.
+  memory_enabled: false
+  user_profile_enabled: false
 YAML
-# Optional CI cost control: lower the MAIN agent's reasoning effort (agent.reasoning_effort —
-# hermes_cli/cli_model_switch_mixin.py:244; values ultra|max|xhigh|high|medium|low|minimal|none,
-# empty=model default). Extended thinking is the dominant per-turn cost; set this ONLY in CI via
-# HERMES_REASONING_EFFORT. A tester's `make demo` leaves it unset -> Hermes' default (full thinking).
-if [ -n "${HERMES_REASONING_EFFORT:-}" ]; then
-  printf 'agent:\n  reasoning_effort: "%s"\n' "$HERMES_REASONING_EFFORT" >> "$cfg"
-  say "reasoning_effort=$HERMES_REASONING_EFFORT (cost control; unset for the default full-thinking experience)"
-fi
 docker run --rm -i -v "$vol:/opt/data" busybox \
   sh -c 'cat > /opt/data/config.yaml; chown 1000:1000 /opt/data/config.yaml 2>/dev/null || true' < "$cfg"
 rm -f "$cfg"
+
+# Standing operator instruction = SOUL.md in HERMES_HOME (/opt/data). SOUL.md is the agent's
+# PRIMARY IDENTITY, loaded into the system prompt of every turn from the agent's home
+# (agent/system_prompt.py:544-549 load_soul_md(home_override=HERMES_HOME); gated by the default
+# agent.skip_context_files=false). It routes capture/approval/questions to the brain tools so a
+# NATURAL sentence (no steering prefix) reaches propose_claim / approve_proposal / ask_brain.
+soul="$(mktemp)"
+cat > "$soul" <<'SOUL'
+# Company Brain operator
+
+You are the Company Brain assistant for this user. The company's shared knowledge lives in the
+**company brain**, reached through your brain tools. You have NO personal memory of your own.
+
+Routing rules (always):
+- When the user says to **remember / note / capture / save a fact for a scope** (operations,
+  finance, …), call **propose_claim** so the scope owner can approve it. Never claim you saved it
+  to your own memory — you have none.
+- When the user asks to **review or approve pending facts**, call **list_proposals** and
+  **approve_proposal**. Only a scope's owner may approve; if the brain returns 403, tell the user
+  they are not the owner — do not try to work around it.
+- When the user asks a **question about the company**, call **ask_brain** and answer only from its
+  result, preserving citations. If it refuses, say it is not in the knowledge base; do not guess.
+SOUL
+docker run --rm -i -v "$vol:/opt/data" busybox \
+  sh -c 'cat > /opt/data/SOUL.md; chown 1000:1000 /opt/data/SOUL.md 2>/dev/null || true' < "$soul"
+rm -f "$soul"
 
 INGRESS_TOKEN="$(openssl rand -hex 24)"
 say "starting gated Hermes backend $hermes_name (u-net only, ingress 127.0.0.1:$INGRESS_PORT)"

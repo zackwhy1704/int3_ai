@@ -44,13 +44,14 @@ make demo-down
 
 ### What it costs
 
-`make demo` runs the **real** Claude Sonnet agent through ~10+ turns with extended thinking, so it
-spends real money on **your** Anthropic key. The exact per-run cost is **unmeasured**: the gateway
-records a dollar figure only when the daily cap is *hit*, and a healthy run stays under it. What's
-known: a run is bounded by the gateway's **per-tenant daily cap, default `$3`** (`DEMO_CAP_USD` in
-`make-demo.sh`), and extended thinking is the dominant cost. CI lowers it further by provisioning the
-agent at the lowest reasoning effort (`HERMES_REASONING_EFFORT=minimal`); your local `make demo`
-leaves that unset, so you get the full-thinking experience (and the higher cost). Set a hard spend
+`make demo` runs the **real** Claude Sonnet agent, so it spends real money on **your** Anthropic key.
+The cost **is measured**: the gateway records every call's `spend_usd` and `request_count` per
+tenant (`tenant_usage`, `gateway/limits.py`), and each call's token counts to a usage log
+(`gateway/upstream.py`). `make demo` prints a **USAGE** block at the end — per-user tokens
+(input/output/cache) and per-tenant `spend_usd` + `request_count` — so you see exactly what a run
+cost. A run is also bounded by the gateway's **per-tenant daily cap, default `$3`** (`DEMO_CAP_USD`
+in `make-demo.sh`). The gateway also enables **prompt caching** (the system prompt + tool schemas are
+cached across a session), which cuts input-token cost on every turn after the first. Set a hard spend
 limit on your Anthropic account as the real backstop — the gateway cap is a per-run ceiling, not an
 account budget. Raise `DEMO_CAP_USD` deliberately if a legitimate run needs more.
 

@@ -115,7 +115,7 @@ class TestSystemMessages:
             ]
         }
         result = openai_request_to_anthropic(body)
-        assert result["system"] == "Be concise."
+        assert _system_text(result) == "Be concise."
         assert all(m["role"] != "system" for m in result["messages"])
 
     def test_multiple_system_messages_first_one_wins(self):
@@ -128,12 +128,61 @@ class TestSystemMessages:
             ]
         }
         result = openai_request_to_anthropic(body)
-        assert result["system"] == "First."
+        assert _system_text(result) == "First."
 
     def test_no_system_message_means_no_system_field(self):
         body = {"messages": [{"role": "user", "content": "Hi"}]}
         result = openai_request_to_anthropic(body)
         assert "system" not in result
+
+
+def _system_text(result: dict) -> str:
+    """The system prompt text, whether plain (cache off) or a cached block list (cache on)."""
+    sys = result.get("system")
+    if isinstance(sys, list):
+        return "".join(b.get("text", "") for b in sys if isinstance(b, dict))
+    return sys
+
+
+class TestPromptCaching:
+    """gateway/translate.py marks the stable prefix (system + tool defs) with Anthropic
+    ephemeral cache_control so multi-turn sessions reuse it. ON by default."""
+
+    def _body(self):
+        return {
+            "messages": [
+                {"role": "system", "content": "You are helpful."},
+                {"role": "user", "content": "Hi"},
+            ],
+            "tools": [
+                {"function": {"name": "a", "description": "", "parameters": {"type": "object", "properties": {}}}},
+                {"function": {"name": "b", "description": "", "parameters": {"type": "object", "properties": {}}}},
+            ],
+        }
+
+    def test_system_is_a_cached_block_by_default(self):
+        result = openai_request_to_anthropic(self._body())
+        assert isinstance(result["system"], list)
+        assert result["system"][-1]["cache_control"] == {"type": "ephemeral"}
+        assert _system_text(result) == "You are helpful."
+
+    def test_last_tool_is_cache_marked_by_default(self):
+        result = openai_request_to_anthropic(self._body())
+        assert result["tools"][-1]["cache_control"] == {"type": "ephemeral"}
+        # earlier tools are NOT individually marked (one breakpoint caches all preceding defs)
+        assert "cache_control" not in result["tools"][0]
+
+    def test_caching_off_keeps_plain_string_system_and_unmarked_tools(self, monkeypatch):
+        monkeypatch.setenv("GATEWAY_PROMPT_CACHE", "0")
+        result = openai_request_to_anthropic(self._body())
+        assert result["system"] == "You are helpful."
+        assert all("cache_control" not in t for t in result["tools"])
+
+    def test_no_tools_still_caches_system(self):
+        body = {"messages": [{"role": "system", "content": "S"}, {"role": "user", "content": "Hi"}]}
+        result = openai_request_to_anthropic(body)
+        assert isinstance(result["system"], list)
+        assert result["system"][-1]["cache_control"] == {"type": "ephemeral"}
 
 
 # ---------------------------------------------------------------------------

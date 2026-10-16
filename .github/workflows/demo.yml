@@ -105,10 +105,6 @@ jobs:
         env:
           # TIGHT per-tenant daily cap (shared by all 3 users; fresh gateway DB each run).
           DEMO_CAP_USD: '3'
-          # CI cost control: lowest reasoning effort the main agent supports (extended thinking is
-          # the dominant per-turn cost). A tester's local `make demo` leaves this unset -> full
-          # thinking. 'none' is lower still but may hurt tool-calling; 'minimal' is the safe floor.
-          HERMES_REASONING_EFFORT: 'minimal'
         run: |
           set -o pipefail
           t0=$(date +%s)

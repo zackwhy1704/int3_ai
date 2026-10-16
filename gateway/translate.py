@@ -196,6 +196,45 @@ def openai_request_to_anthropic(openai_body: dict) -> dict:
         if tc:
             body["tool_choice"] = tc
 
+    return _with_prompt_cache(body)
+
+
+def _prompt_cache_enabled() -> bool:
+    """ON by default; GATEWAY_PROMPT_CACHE=0 disables it. Read per-call so it is configurable
+    at runtime and monkeypatch-able in tests."""
+    return os.getenv("GATEWAY_PROMPT_CACHE", "1").lower() not in ("0", "false", "no", "")
+
+
+def _with_prompt_cache(body: dict) -> dict:
+    """Mark the STABLE PREFIX — the tool definitions and the system prompt — with Anthropic
+    ``cache_control: {type: ephemeral}`` so every later turn in a session reuses it instead of
+    re-billing it. The agent's system prompt + tool schemas are the same on every turn of a
+    conversation and are the bulk of the input tokens; a cache read is ~10% of the input price
+    (one cold write is +25%), so a multi-turn session is much cheaper.
+
+    Breakpoints (Anthropic caches everything up to and including a marked block, in order
+    tools -> system -> messages): one on the LAST tool (caches all tool defs) and one on the
+    system block (caches tools + system). Messages are left uncached (they change each turn).
+
+    KEY-OWNER IMPLICATION: the cache lives on the upstream provider side, keyed to the API key's
+    org. For ``key_owner='theirs'`` (BYOK) the customer's own key caches the customer's own
+    prefix — no cross-tenant sharing, since each tenant uses its own key. For ``key_owner='ours'``
+    our key caches; still per our org, and the prefix carries no tenant secrets (system prompt +
+    tool schemas only). Translation is pure, so this is covered by test_translate.py.
+    """
+    if not _prompt_cache_enabled():
+        return body
+    sys = body.get("system")
+    if isinstance(sys, str) and sys:
+        body["system"] = [{"type": "text", "text": sys, "cache_control": {"type": "ephemeral"}}]
+    elif isinstance(sys, list):
+        for blk in reversed(sys):
+            if isinstance(blk, dict):
+                blk["cache_control"] = {"type": "ephemeral"}
+                break
+    tools = body.get("tools")
+    if isinstance(tools, list) and tools and isinstance(tools[-1], dict):
+        tools[-1] = {**tools[-1], "cache_control": {"type": "ephemeral"}}
     return body
 
 

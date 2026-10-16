@@ -39,20 +39,21 @@ running `hermes-deploy`. `make demo-down` / `make e2e-down` remove them.
 
 ### Test status (honest)
 
-- **`make demo` (Hermes tier): PASSED 10/10** on a funded CI run (GitHub run 38838056914), including
-  the full owner-gated capture workflow and the default-deny egress check. **`make e2e` (component
-  tier): green.**
+- **`make demo` with the STEERED prompts (`DEMO_SCAFFOLD=1`): PASSED 10/10** on a funded CI run
+  (GitHub run 38838056914) — the full owner-gated capture workflow + default-deny egress, on the real
+  agent over `/api/ws`. **`make e2e` (component tier): green.**
+- **`make demo` DEFAULT is now the NATURAL sentences (no steering) — the pilot-capture bar — and is
+  UNVALIDATED.** The capture fix is implemented (native Hermes memory disabled for gated users, a
+  `SOUL.md` routing instruction, trimmed toolsets, gateway prompt caching — see
+  **[deploy/hermes/CAPTURE_PILOT.md](deploy/hermes/CAPTURE_PILOT.md)**), but whether a plain sentence
+  reliably reaches `propose_claim`/`approve_proposal`/`ask_brain` has **not** been run yet (held on
+  cost grounds). `DEMO_SCAFFOLD=1` reverts to the proven steered path.
 - **Open — owner-check RED→GREEN regression: UNVALIDATED.** `deploy/hermes/demo/ci_regression.sh`
-  removes the owner check in both layers and asserts the capture regresses, then restores it. Its
-  baseline probe passes (GREEN) and the fix for the brain re-apply is committed, but a full
-  GREEN→RED→GREEN has **not** been observed end-to-end (runs were stopped on cost grounds). It is
-  **manual-only** in CI (`workflow_dispatch` with `run_regression=true`) and is a belt-and-suspenders
-  proof — the demo's N1a/N1b already show the owner check blocking a non-owner on the real agent.
-- **Pilot-capture bar is NOT yet met.** The demo steers the agent with structured prompts naming the
-  brain tool and its args; a real user types natural sentences. See
-  **[deploy/hermes/CAPTURE_PILOT.md](deploy/hermes/CAPTURE_PILOT.md)** for the gap, the recommended
-  fix (disable Hermes' native memory for gated users + a standing instruction), and the unexecuted
-  natural-language test plan.
+  removes the owner check in both layers, asserts the capture regresses, then restores it. The
+  baseline probe passes (GREEN) and the re-apply fix is committed, but a full GREEN→RED→GREEN has
+  **not** been observed end-to-end. It is **manual-only** in CI (`workflow_dispatch` with
+  `run_regression=true`) and is belt-and-suspenders — the demo's N1a/N1b already show the owner check
+  blocking a non-owner on the real agent.
 
 ## The one secret you provide
 

@@ -58,6 +58,15 @@ if [ -f "$CFG" ]; then
 fi
 ok "terminal.backend is not ssh"
 
+# --- STATIC 3: native per-user memory must be OFF ----------------------------
+# Posture: "Hermes per-user memory must not be read or synced." Hermes' default is
+# memory_enabled=true (config_defaults.py:1311), so ABSENCE of the key = enabled = refuse.
+# Provisioning (provision-user.sh) writes memory.memory_enabled: false; require it here so a
+# gated backend cannot boot with native memory live.
+grep -Eq '^[[:space:]]*memory_enabled:[[:space:]]*false\b' "$CFG" 2>/dev/null \
+  || fatal "config.yaml does not set memory.memory_enabled: false — native per-user memory would be live"
+ok "native memory is disabled (memory_enabled: false)"
+
 [ -f "$ALLOWLIST" ] || fatal "route allowlist $ALLOWLIST missing"
 
 # --- start route proxy (enforcing) and backend -------------------------------

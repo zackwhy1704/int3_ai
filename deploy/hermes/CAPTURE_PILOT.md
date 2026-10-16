@@ -72,6 +72,13 @@ Why this one:
 C is both the most reliable capture fix and the one that matches the security posture. It is a
 **provisioning/config** change only (no Hermes edit, no new tool).
 
+**STATUS: IMPLEMENTED (config/provisioning only, unvalidated pending one approved run).**
+`deploy/hermes/provision-user.sh` now writes `memory.memory_enabled: false` +
+`user_profile_enabled: false`, `agent.disabled_toolsets: [memory, web, search, browser, vision,
+image_gen]`, and a `/opt/data/SOUL.md` carrying the routing instruction above. The startup gate
+(`gated/startup-gate.sh`) refuses to boot unless `memory_enabled: false` is set. The demo now sends
+the **natural** sentences by default (below); `DEMO_SCAFFOLD=1` restores the old steered prompts.
+
 ## Test plan — the bar for "pilot-ready capture" (UNEXECUTED; run only on explicit approval)
 
 Re-run the Hermes-tier scenario with the **natural DEMO.md sentences and NO steering prefix / no
@@ -87,6 +94,9 @@ tool names / no structured args**, against backends provisioned per Option C:
 4. priya: **"What time does the loading bay open?"** → answered, cited to the operations workflow record.
 
 Pass bar = the same server-side assertions the current demo uses (DB rows + the sidecar `CB_ASK`
-signal + owner gate), achieved **without** any steering. Until this passes, capture is demo-ready but
-not pilot-ready. This plan is intentionally not wired into `make demo` yet; wiring + running it needs
-explicit approval (it spends real model budget).
+signal + owner gate), achieved **without** any steering. Until this passes on a real run, capture is
+implemented but not yet *proven* pilot-ready.
+
+**This is now the default `make demo` path** (`run_demo.sh`: natural sentences via `cap <natural>
+<scaffold>`; `DEMO_SCAFFOLD=1` reverts to steered). It is **not yet executed** — running it spends
+real model budget and needs explicit approval of one run.
