@@ -104,9 +104,7 @@ jobs:
       - name: make demo (real Hermes agent over /api/ws)
         env:
           # TIGHT per-tenant daily cap (shared by all 3 users; fresh gateway DB each run).
-          # Raised to $5 for THIS validation run (natural-sentence capture, cold cache) per owner
-          # approval; make-demo.sh's default stays $3 and this override is reverted after the run.
-          DEMO_CAP_USD: '5'
+          DEMO_CAP_USD: '3'
         run: |
           set -o pipefail
           t0=$(date +%s)
