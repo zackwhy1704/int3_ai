@@ -115,11 +115,15 @@ def normalise_usage(provider: str, usage: dict) -> dict:
             "cache_write": usage.get("cache_creation_input_tokens") or 0,
             "cache_read": usage.get("cache_read_input_tokens") or 0,
         }
-    # openai-compatible
+    # openai-compatible: cached_tokens are a SUBSET of prompt_tokens, so subtract them from
+    # `input` to keep the four counts DISJOINT (else estimate_cost_usd bills the cached part twice —
+    # once at the input rate, once at the cache-read rate). Anthropic reports them disjoint already.
     details = usage.get("prompt_tokens_details") or {}
+    cached = details.get("cached_tokens") or 0
+    prompt = usage.get("prompt_tokens") or 0
     return {
-        "input": usage.get("prompt_tokens") or 0,
+        "input": max(0, prompt - cached),
         "output": usage.get("completion_tokens") or 0,
         "cache_write": 0,
-        "cache_read": details.get("cached_tokens") or 0,
+        "cache_read": cached,
     }

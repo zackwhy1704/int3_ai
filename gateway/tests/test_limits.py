@@ -46,21 +46,48 @@ def test_rate_limit_zero_disables(monkeypatch):
 
 # --- cost estimate ----------------------------------------------------------
 
-def test_estimate_cost_uses_price_table_and_folds_cache():
+def test_estimate_cost_prices_input_output_and_cache_at_distinct_rates():
     one_m = 1_000_000
     assert abs(limits.estimate_cost_usd("claude-sonnet-5-5",
               {"input": one_m, "output": 0, "cache_read": 0, "cache_write": 0}) - 3.0) < 1e-9
     assert abs(limits.estimate_cost_usd("claude-sonnet-5-5",
               {"input": 0, "output": one_m, "cache_read": 0, "cache_write": 0}) - 15.0) < 1e-9
-    # cache_read + cache_write fold into the input rate
+    # cache read = 0.1x input (0.3), cache write = 1.25x input (3.75) — NOT the full input rate.
     assert abs(limits.estimate_cost_usd("claude-sonnet-5-5",
-              {"input": 0, "output": 0, "cache_read": one_m, "cache_write": one_m}) - 6.0) < 1e-9
+              {"input": 0, "output": 0, "cache_read": one_m, "cache_write": 0}) - 0.3) < 1e-9
+    assert abs(limits.estimate_cost_usd("claude-sonnet-5-5",
+              {"input": 0, "output": 0, "cache_read": 0, "cache_write": one_m}) - 3.75) < 1e-9
+    assert abs(limits.estimate_cost_usd("claude-sonnet-5-5",
+              {"input": 0, "output": 0, "cache_read": one_m, "cache_write": one_m}) - 4.05) < 1e-9
 
 
-def test_prices_overridable_via_env(monkeypatch):
+def test_prices_overridable_via_env_2tuple_derives_cache(monkeypatch):
     monkeypatch.setenv("GATEWAY_PRICES", '{"gpt-mid":[1,2]}')
+    # input+output at 1,2; cache derived from input: read 0.1, write 1.25
     assert abs(limits.estimate_cost_usd("gpt-mid",
               {"input": 1_000_000, "output": 1_000_000}) - 3.0) < 1e-9
+    assert abs(limits.estimate_cost_usd("gpt-mid",
+              {"input": 0, "output": 0, "cache_read": 1_000_000, "cache_write": 1_000_000}) - 1.35) < 1e-9
+
+
+def test_prices_overridable_via_env_4tuple_pins_cache(monkeypatch):
+    monkeypatch.setenv("GATEWAY_PRICES", '{"m4":[3,15,0.3,3.75]}')
+    assert abs(limits.estimate_cost_usd("m4",
+              {"input": 0, "output": 0, "cache_read": 1_000_000, "cache_write": 1_000_000}) - 4.05) < 1e-9
+
+
+def test_validation_run_totals_recompute_to_about_46_cents():
+    """The 2026-10-16 validation run (GitHub 38846845310) summed across the 3 users. At the full
+    input rate this read $2.459 (the bug); priced with cache read 0.1x / write 1.25x it is ~$0.46."""
+    usage = {"input": 2934 + 6704 + 18952,          # 28,590
+             "output": 368 + 925 + 3102,            # 4,395
+             "cache_write": 21364,                   # cold write (marcus); ada/priya reused it
+             "cache_read": 42728 + 149548 + 555464}  # 747,740
+    cost = limits.estimate_cost_usd("claude-sonnet-5-5", usage)
+    assert abs(cost - 0.456) < 0.01, cost
+    # and the old full-input-rate miscount reproduces the recorded $2.459, proving the fix's scope
+    buggy = sum(usage[k] for k in ("input", "cache_read", "cache_write")) / 1e6 * 3.0 + usage["output"] / 1e6 * 15.0
+    assert abs(buggy - 2.459) < 0.01, buggy
 
 
 # --- per-tenant daily cap ---------------------------------------------------

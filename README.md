@@ -39,15 +39,17 @@ running `hermes-deploy`. `make demo-down` / `make e2e-down` remove them.
 
 ### Test status (honest)
 
-- **`make demo` with the STEERED prompts (`DEMO_SCAFFOLD=1`): PASSED 10/10** on a funded CI run
-  (GitHub run 38838056914) — the full owner-gated capture workflow + default-deny egress, on the real
-  agent over `/api/ws`. **`make e2e` (component tier): green.**
-- **`make demo` DEFAULT is now the NATURAL sentences (no steering) — the pilot-capture bar — and is
-  UNVALIDATED.** The capture fix is implemented (native Hermes memory disabled for gated users, a
-  `SOUL.md` routing instruction, trimmed toolsets, gateway prompt caching — see
-  **[deploy/hermes/CAPTURE_PILOT.md](deploy/hermes/CAPTURE_PILOT.md)**), but whether a plain sentence
-  reliably reaches `propose_claim`/`approve_proposal`/`ask_brain` has **not** been run yet (held on
-  cost grounds). `DEMO_SCAFFOLD=1` reverts to the proven steered path.
+- **`make demo` with the NATURAL sentences (the default, no steering): PASSED 10/10** on a funded CI
+  run (GitHub run 38846845310) — plain user sentences reached `propose_claim` / `approve_proposal` /
+  `ask_brain` (native Hermes memory is disabled for gated users; a `SOUL.md` preserving Hermes' own
+  identity adds the routing; toolsets trimmed; gateway prompt caching on — see
+  **[deploy/hermes/CAPTURE_PILOT.md](deploy/hermes/CAPTURE_PILOT.md)**). The full owner-gated capture
+  workflow + default-deny egress held. **`make e2e` (component tier): green.** `DEMO_SCAFFOLD=1`
+  reverts to the steered prompts (also previously 10/10, run 38838056914).
+- **Cost of that run: metered ≈ `$0.46`** at the UNVERIFIED placeholder price table
+  (`gateway/limits.py`: in/out `$3`/`$15`/Mtok, cache read `0.1×`, cache write `1.25×`; override via
+  `GATEWAY_PRICES`). Prompt caching reused the system+tools prefix across sessions (most input was
+  cache reads at `0.1×`). Per-tenant daily cap default `$3`.
 - **Open — owner-check RED→GREEN regression: UNVALIDATED.** `deploy/hermes/demo/ci_regression.sh`
   removes the owner check in both layers, asserts the capture regresses, then restores it. The
   baseline probe passes (GREEN) and the re-apply fix is committed, but a full GREEN→RED→GREEN has

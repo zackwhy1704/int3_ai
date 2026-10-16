@@ -107,12 +107,27 @@ def test_openai_route_is_passthrough_with_bearer_tenant_key():
 # --- usage normalisation ----------------------------------------------------
 
 def test_usage_normalisation_per_provider():
+    # Anthropic reports the four counts DISJOINT already (input_tokens excludes cache).
     a = routing.normalise_usage("anthropic", {"input_tokens": 5, "output_tokens": 7,
                                               "cache_creation_input_tokens": 9, "cache_read_input_tokens": 2})
     assert a == {"input": 5, "output": 7, "cache_write": 9, "cache_read": 2}
+    # OpenAI: cached_tokens are a SUBSET of prompt_tokens, so `input` must exclude them
+    # (prompt 10, cached 4 -> input 6) or the cached part is billed twice.
     o = routing.normalise_usage("openai", {"prompt_tokens": 10, "completion_tokens": 3,
                                            "prompt_tokens_details": {"cached_tokens": 4}})
-    assert o == {"input": 10, "output": 3, "cache_write": 0, "cache_read": 4}
+    assert o == {"input": 6, "output": 3, "cache_write": 0, "cache_read": 4}
+
+
+def test_openai_cached_subset_not_double_counted_in_cost():
+    """End-to-end: an OpenAI usage with all tokens cached must not bill the cached part at both the
+    input and the cache-read rate. prompt=1M, cached=1M -> input 0, cache_read 1M -> 1M*0.1*price."""
+    import limits
+    norm = routing.normalise_usage("openai", {"prompt_tokens": 1_000_000, "completion_tokens": 0,
+                                              "prompt_tokens_details": {"cached_tokens": 1_000_000}})
+    assert norm["input"] == 0 and norm["cache_read"] == 1_000_000
+    # at the default sonnet input rate 3.0, cache_read is 0.3; a double-count would be 3.0 or 3.3.
+    cost = limits.estimate_cost_usd("claude-sonnet-5-5", norm)
+    assert abs(cost - 0.3) < 1e-9, cost
 
 
 # --- routing resolution (dev mode, no DB) -----------------------------------

@@ -48,12 +48,16 @@ make demo-down
 The cost **is measured**: the gateway records every call's `spend_usd` and `request_count` per
 tenant (`tenant_usage`, `gateway/limits.py`), and each call's token counts to a usage log
 (`gateway/upstream.py`). `make demo` prints a **USAGE** block at the end — per-user tokens
-(input/output/cache) and per-tenant `spend_usd` + `request_count` — so you see exactly what a run
-cost. A run is also bounded by the gateway's **per-tenant daily cap, default `$3`** (`DEMO_CAP_USD`
-in `make-demo.sh`). The gateway also enables **prompt caching** (the system prompt + tool schemas are
-cached across a session), which cuts input-token cost on every turn after the first. Set a hard spend
-limit on your Anthropic account as the real backstop — the gateway cap is a per-run ceiling, not an
-account budget. Raise `DEMO_CAP_USD` deliberately if a legitimate run needs more.
+(input/output/cache-read/cache-write) and per-tenant `spend_usd` + `request_count`.
+
+The last validation run (GitHub 38846845310) metered **≈ $0.46** at the placeholder price table
+(input/output `$3`/`$15` per Mtok, cache read `0.1×`, cache write `1.25×` — all marked **UNVERIFIED**
+in `gateway/limits.py`; set real prices via `GATEWAY_PRICES`). Prompt caching is doing the heavy
+lifting: most input tokens are cache *reads* billed at `0.1×`, reused across the demo's sessions.
+(An earlier figure of `$2.46` was a metering bug that billed cache tokens at the full input rate;
+fixed.) A run is bounded by the gateway's **per-tenant daily cap, default `$3`** (`DEMO_CAP_USD` in
+`make-demo.sh`). Set a hard spend limit on your Anthropic account as the real backstop — the gateway
+cap is a per-run ceiling, not an account budget. Raise `DEMO_CAP_USD` deliberately if needed.
 
 ## 3. Read the table
 

@@ -35,20 +35,26 @@ _WINDOW_S = 60.0
 _hits: dict[str, deque] = defaultdict(deque)
 _lock = threading.Lock()
 
-# USD per 1M tokens: (input, output). GUARDRAIL estimates for the daily cap, not
-# billing. Every allowlisted model MUST have an entry with a price source — a URL
-# or "UNVERIFIED" when no confirmed public price is on hand. Override per
-# deployment with GATEWAY_PRICES, e.g. GATEWAY_PRICES='{"claude-sonnet-5-5":[3,15]}'.
+# USD per 1M tokens: (input, output) — or (input, output, cache_read, cache_write) to pin cache
+# rates. GUARDRAIL estimates for the daily cap, not billing. Every allowlisted model MUST have an
+# entry with a price source — a URL or "UNVERIFIED" when no confirmed public price is on hand.
+# Override per deployment with GATEWAY_PRICES, e.g.
+#   GATEWAY_PRICES='{"claude-sonnet-5-5":[3,15]}'  or  '{"m":[3,15,0.3,3.75]}'.
+# When cache rates are omitted they are DERIVED from the input rate with the Anthropic prompt-cache
+# multipliers: cache_read = 0.1x input, cache_write = 1.25x input. These multipliers are the
+# published Anthropic ratios; the absolute input/output numbers remain UNVERIFIED placeholders.
 _PRICE_SOURCES: dict[str, str] = {
     # MVP allowlist is claude-sonnet-5-5 only. UNVERIFIED: no confirmed public
     # price URL on hand; (3,15)/Mtok is a conservative placeholder. Set a real
     # source before anything an invoice depends on reads this.
     "claude-sonnet-5-5": "UNVERIFIED",
 }
-_DEFAULT_PRICES: dict[str, tuple[float, float]] = {
-    "claude-sonnet-5-5": (3.0, 15.0),  # UNVERIFIED — see _PRICE_SOURCES
+_DEFAULT_PRICES: dict[str, tuple[float, ...]] = {
+    "claude-sonnet-5-5": (3.0, 15.0),  # UNVERIFIED — cache rates derived (0.1x / 1.25x)
 }
 _FALLBACK_PRICE = (3.0, 15.0)  # UNVERIFIED — used for any model absent above
+_CACHE_READ_MULT = 0.1    # Anthropic prompt-cache read  = 0.1x input
+_CACHE_WRITE_MULT = 1.25  # Anthropic prompt-cache write = 1.25x input
 
 # Health: set when a key_owner='ours' spend write fails. A tenant WE pay for then
 # runs with an under-counted cap, so GET /health reports it (degraded) rather
@@ -94,15 +100,30 @@ def check_rate_limit(caller: str, *, now: float | None = None) -> None:
         dq.append(t)
 
 
+def _rates(model: str) -> tuple[float, float, float, float]:
+    """(input, output, cache_read, cache_write) USD/Mtok for a model. A 2-tuple price derives the
+    cache rates from the input rate (0.1x read, 1.25x write); a 4-tuple is used verbatim."""
+    p = _prices().get(model, _FALLBACK_PRICE)
+    pin, pout = p[0], p[1]
+    pcr = p[2] if len(p) > 2 else pin * _CACHE_READ_MULT
+    pcw = p[3] if len(p) > 3 else pin * _CACHE_WRITE_MULT
+    return pin, pout, pcr, pcw
+
+
 def estimate_cost_usd(model: str, usage: dict) -> float:
-    """Rough USD for one call from normalised usage
-    ({input,output,cache_read,cache_write}). Cache tokens fold into input at the
-    input rate — a proxy, not an invoice."""
-    pin, pout = _prices().get(model, _FALLBACK_PRICE)
-    usage = usage or {}
-    inp = (usage.get("input") or 0) + (usage.get("cache_read") or 0) + (usage.get("cache_write") or 0)
-    out = usage.get("output") or 0
-    return inp / 1_000_000 * pin + out / 1_000_000 * pout
+    """Rough USD for one call from normalised, DISJOINT usage
+    ({input,output,cache_read,cache_write}). Cache reads bill at ~0.1x and writes at ~1.25x the
+    input rate (Anthropic prompt caching) — NOT the full input rate (that over-billed cache-heavy
+    runs ~5x). `normalise_usage` keeps `input` disjoint from the cache counts for both providers
+    (routing.py), so nothing is double counted. A guardrail proxy, not an invoice."""
+    pin, pout, pcr, pcw = _rates(model)
+    u = usage or {}
+    return (
+        (u.get("input") or 0) / 1_000_000 * pin
+        + (u.get("output") or 0) / 1_000_000 * pout
+        + (u.get("cache_read") or 0) / 1_000_000 * pcr
+        + (u.get("cache_write") or 0) / 1_000_000 * pcw
+    )
 
 
 def _today() -> datetime.date:
