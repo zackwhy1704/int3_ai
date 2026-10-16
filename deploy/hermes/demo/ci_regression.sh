@@ -46,15 +46,24 @@ chat() {
 reapply_schema() {   # rebuild+restart brain (picks up edited capture.py) and re-apply the tenant
   # schema so the edited approve_workflow_proposal is CREATE OR REPLACE'd in the live DB.
   # `admin migrate` is version-gated (a no-op post-provision), so force _bring_tenant_current.
-  DEPLOY_PROJECT="$PROJECT" docker compose -f deploy/hermes/docker-compose.yml up -d --build brain >/dev/null 2>&1
+  # Errors are SURFACED (not suppressed) and the exec is retried while the brain finishes booting.
+  echo "  [reapply] rebuild brain" >&2
+  if ! DEPLOY_PROJECT="$PROJECT" docker compose -f deploy/hermes/docker-compose.yml up -d --build brain >/tmp/reapply-build.log 2>&1; then
+    echo "  [reapply] brain build/up FAILED:" >&2; tail -25 /tmp/reapply-build.log >&2; return 1; fi
+  for _ in $(seq 1 60); do [ "$(docker inspect -f '{{.State.Running}}' "${PROJECT}-brain-1" 2>/dev/null)" = "true" ] && break; sleep 2; done
   for _ in $(seq 1 30); do docker exec "$DB" pg_isready -U "${ADMIN_DB_USER:-brain}" >/dev/null 2>&1 && break; sleep 2; done
-  docker exec "${PROJECT}-brain-1" python -c '
+  local ok=""
+  for _ in $(seq 1 12); do
+    if docker exec "${PROJECT}-brain-1" python -c '
 from app.tenants.admin import tenant_db_name, _bring_tenant_current, admin_tenant_conn
 tid="brindlewood"; db=tenant_db_name(tid)
 with admin_tenant_conn(tid, vector=False) as tconn:
     _bring_tenant_current(tconn, db)
-print("reapplied", db)' || { echo "reapply_schema failed"; return 1; }
-  sleep 3
+print("reapplied", db)' >/tmp/reapply-exec.log 2>&1; then ok=1; break; fi
+    sleep 3
+  done
+  if [ -z "$ok" ]; then echo "  [reapply] re-apply FAILED:" >&2; tail -25 /tmp/reapply-exec.log >&2; return 1; fi
+  echo "  [reapply] ok ($(cat /tmp/reapply-exec.log 2>/dev/null | tail -1))" >&2; sleep 2
 }
 
 CB="Use the company brain tools (propose_claim / list_proposals / approve_proposal), not your own notes or memory."
@@ -88,12 +97,12 @@ perl -0pi -e 's/if _owner_of\(p, scope\) != p\.user_id:\n\s*raise HTTPException\
 perl -0pi -e "s/RAISE EXCEPTION 'not scope owner' USING ERRCODE = 'CB403';/RAISE NOTICE 'owner check removed for regression';/g" backend/app/schema.sql
 grep -q "False and _owner_of" backend/app/capture.py || { echo "neutralise(capture.py) did not apply — pattern drift"; exit 1; }
 grep -q "owner check removed for regression" backend/app/schema.sql || { echo "neutralise(schema.sql) did not apply — pattern drift"; exit 1; }
-reapply_schema
+reapply_schema || { echo "REGRESSION ABORT: rebuild/re-apply after neutralise failed (a GREEN here would be false)"; git checkout -- backend/app/capture.py backend/app/schema.sql; exit 1; }
 r="$(probe)"; echo "  neutralised probe: $r"
 
 echo "== regression: RESTORE =="
 git checkout -- backend/app/capture.py backend/app/schema.sql
-reapply_schema
+reapply_schema || { echo "REGRESSION ABORT: rebuild/re-apply after restore failed"; exit 1; }
 g="$(probe)"; echo "  restored probe: $g"
 
 echo ""
