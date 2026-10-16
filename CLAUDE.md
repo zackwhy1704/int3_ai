@@ -15,7 +15,7 @@ The way it reaches a user's machine is the thing that is new on this branch
 stock Hermes Desktop (thin client)          the user installs Nous's official Hermes app
    │  one connection (url + session_token)   and points it at a connect file — no custom
    ▼                                          desktop build, "Hermes under the hood"
-per-user gated Hermes backend (container)    our hardened fork of the Hermes backend,
+per-user gated Hermes backend (container)    STOCK Hermes v0.21.7 in our gated container
    │  MCP (per-user brain token)              one isolated container per user; default-deny
    ▼                                          route + egress proxies; startup gate
 Company Brain (brain + per-user MCP sidecar) the truth layer; the ONLY thing that holds
@@ -25,8 +25,9 @@ BYOK LLM gateway (custodian)                 the customer's own model key, meter
                                              provider keys never reach a client machine
 ```
 
-Everything the user sees is the **real, stock Hermes agent** — we do not ship a modified
-desktop. What is ours is the per-user **gated backend**, the **brain**, and the **BYOK
+Everything the user sees is the **real, stock Hermes agent** — we neither fork nor modify Hermes
+(desktop or backend). What is ours is the **gating around stock Hermes** (the per-user container,
+the default-deny route + egress proxies, the startup gate), the **brain**, and the **BYOK
 gateway** behind it.
 
 ## What is genuinely ours (the intellectual property)
@@ -105,24 +106,24 @@ gateway** behind it.
   (`ANTHROPIC_API_KEY=…`). You edit that file yourself — never paste a key into chat.
 - **Component-tier check:** `make e2e` (bypasses Hermes; `DEPLOY_PROJECT=hermes-e2e`).
 
-## Desktop: stock app now; a hardened fork later
-- **Now:** pilots run **Nous's official, stock Hermes Desktop** pointed at a per-user
-  connect file. We do not build or ship a desktop. The desktop launches its own local
-  `hermes serve` backend for *local* profiles (`apps/desktop/electron/backend-command.ts`),
-  but when the active connection is our **remote** gated backend it routes to that backend
-  and does not spawn a local child for it (`connection-config.ts:886-892`,
-  `backend-start-failure.ts:28`) — the remote connection is the agent in the path.
-- **Later (decided direction):** a hardened fork of Hermes Desktop with our UI compiled in
-  as a bundled plugin. Tauri is dropped. This does not change the backend/brain/gateway
-  architecture above.
-- **Windows is top priority; the hosted (TLS) pilot is paused.** The connect flow is
-  host-only (127.0.0.1 forwarder) until a hosted TLS ingress exists.
+## Desktop: the stock app
+- **Pilots run Nous's official, stock Hermes Desktop** pointed at a per-user connect file. We do
+  not build, fork, or ship a desktop. The desktop launches its own local `hermes serve` backend
+  for *local* profiles (`apps/desktop/electron/backend-command.ts`), but when the active
+  connection is our **remote** gated backend it routes to that backend and does not spawn a local
+  child for it (`connection-config.ts:886-892`, `backend-start-failure.ts:28`) — the remote
+  connection is the agent in the path. **No desktop fork is decided.**
+- **Windows is the current target.** The connect flow is host-only (127.0.0.1 forwarder); a
+  **hosted TLS pilot is the next step once the cloud account exists** (not paused by decision —
+  just not built yet).
 
 ## How we work
 - **Plan before large changes.** Anything touching token issuance, scope filtering, the
   owner gate, or key handling: the owner reviews the plan, not the diff.
 - **Evals/tests gate merges.** Cross-user/cross-tenant permission tests pass 100%; refusal
-  tests pass; the capture owner gate is proven load-bearing (CI RED→GREEN).
+  tests pass. The capture owner gate is enforced in two layers (by design) and the demo shows it
+  blocking a non-owner on the real agent (N1a/N1b); the CI RED→GREEN regression that would *prove*
+  it load-bearing is **UNVALIDATED** (manual-only; never run to a full GREEN→RED→GREEN).
 - **Reports** state which of "compiles / unit tests pass / ran locally / ran in CI"
   applies to each claim, with real command output and `file:line`. A measured failure is a
   result; a tuned pass is not. If something doesn't work, say so, and say what you did not

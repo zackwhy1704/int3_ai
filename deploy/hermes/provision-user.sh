@@ -178,17 +178,24 @@ rm -f "$cfg"
 
 # Standing operator instruction = SOUL.md in HERMES_HOME (/opt/data). SOUL.md is the agent's
 # PRIMARY IDENTITY, loaded into the system prompt of every turn from the agent's home
-# (agent/system_prompt.py:544-549 load_soul_md(home_override=HERMES_HOME); gated by the default
-# agent.skip_context_files=false). It routes capture/approval/questions to the brain tools so a
-# NATURAL sentence (no steering prefix) reaches propose_claim / approve_proposal / ask_brain.
+# (agent/system_prompt.py:544-550 load_soul_md(home_override=HERMES_HOME); gated by the default
+# agent.skip_context_files=false). But SOUL.md REPLACES Hermes' built-in DEFAULT_AGENT_IDENTITY
+# (system_prompt.py:550 drops it when SOUL.md exists). To stay "Hermes through and through" we
+# PREFIX our routing rules with Hermes' OWN default identity, read from the SAME pinned image the
+# backend runs (agent/prompt_builder.py:159 DEFAULT_AGENT_IDENTITY) — never hand-copied.
+say "reading Hermes' DEFAULT_AGENT_IDENTITY from $GATED_IMAGE"
+default_identity="$(docker run --rm --entrypoint "" "$GATED_IMAGE" \
+  sh -c 'py=$(command -v python3 || command -v python); exec "$py" -c "import sys; from agent.prompt_builder import DEFAULT_AGENT_IDENTITY; sys.stdout.write(DEFAULT_AGENT_IDENTITY)"')"
+[ -n "$default_identity" ] || { echo "[provision] FATAL: could not read DEFAULT_AGENT_IDENTITY from $GATED_IMAGE" >&2; exit 1; }
 soul="$(mktemp)"
-cat > "$soul" <<'SOUL'
-# Company Brain operator
+{
+  printf '%s\n\n' "$default_identity"
+  cat <<'SOUL'
+## Company Brain — operator rules (this deployment)
 
-You are the Company Brain assistant for this user. The company's shared knowledge lives in the
-**company brain**, reached through your brain tools. You have NO personal memory of your own.
+The company's shared knowledge lives in the **company brain**, reached through your brain tools.
+You have NO personal memory of your own in this deployment.
 
-Routing rules (always):
 - When the user says to **remember / note / capture / save a fact for a scope** (operations,
   finance, …), call **propose_claim** so the scope owner can approve it. Never claim you saved it
   to your own memory — you have none.
@@ -198,6 +205,12 @@ Routing rules (always):
 - When the user asks a **question about the company**, call **ask_brain** and answer only from its
   result, preserving citations. If it refuses, say it is not in the knowledge base; do not guess.
 SOUL
+} > "$soul"
+# ASSERT SOUL.md starts with Hermes' own default identity (so we did not replace it).
+case "$(cat "$soul")" in
+  "$default_identity"*) say "SOUL.md = Hermes default identity + our routing rules (identity preserved)" ;;
+  *) echo "[provision] FATAL: SOUL.md does not start with Hermes' DEFAULT_AGENT_IDENTITY" >&2; exit 1 ;;
+esac
 docker run --rm -i -v "$vol:/opt/data" busybox \
   sh -c 'cat > /opt/data/SOUL.md; chown 1000:1000 /opt/data/SOUL.md 2>/dev/null || true' < "$soul"
 rm -f "$soul"

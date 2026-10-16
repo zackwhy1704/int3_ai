@@ -9,14 +9,14 @@ On this branch (`spike/remote-thin-client`) it reaches the user as a **thin clie
 
 ```
 stock Hermes Desktop  ──▶  per-user gated Hermes backend  ──▶  brain (MCP)  ──▶  BYOK LLM gateway
-   (the official app)        (our hardened fork, one               (truth layer)      (customer's own
-                              isolated container per user)                             model key, capped)
+   (the official app)        (STOCK Hermes v0.21.7 in our         (truth layer)      (customer's own
+                              gated container, one per user)                         model key, capped)
 ```
 
-The user runs the **real, stock Hermes agent** (we ship no custom desktop). What is ours is
-the per-user **gated backend**, the **brain**, and the **BYOK gateway**. Nothing is
-fine-tuned; permissions are enforced server-side; the brain token lives only in each user's
-MCP sidecar.
+The user runs the **real, stock Hermes agent** — we neither fork nor modify Hermes. What is ours
+is the **gating around stock Hermes** (the per-user container, default-deny proxies, startup gate),
+the **brain**, and the **BYOK gateway**. Nothing is fine-tuned; permissions are enforced
+server-side; the brain token lives only in each user's MCP sidecar.
 
 ## Start here
 
