@@ -52,9 +52,12 @@ reapply_schema() {   # rebuild+restart brain (picks up edited capture.py) and re
     echo "  [reapply] brain build/up FAILED:" >&2; tail -25 /tmp/reapply-build.log >&2; return 1; fi
   for _ in $(seq 1 60); do [ "$(docker inspect -f '{{.State.Running}}' "${PROJECT}-brain-1" 2>/dev/null)" = "true" ] && break; sleep 2; done
   for _ in $(seq 1 30); do docker exec "$DB" pg_isready -U "${ADMIN_DB_USER:-brain}" >/dev/null 2>&1 && break; sleep 2; done
+  # The brain runs as the tenant role; _bring_tenant_current needs the ADMIN creds (the brain
+  # can reach the DB on brain-net, it just lacks the admin env), so inject them into the exec.
   local ok=""
   for _ in $(seq 1 12); do
-    if docker exec "${PROJECT}-brain-1" python -c '
+    if docker exec -e ADMIN_DB_USER="${ADMIN_DB_USER:-brain}" -e ADMIN_DB_PASSWORD="$ADMIN_DB_PASSWORD" \
+         "${PROJECT}-brain-1" python -c '
 from app.tenants.admin import tenant_db_name, _bring_tenant_current, admin_tenant_conn
 tid="brindlewood"; db=tenant_db_name(tid)
 with admin_tenant_conn(tid, vector=False) as tconn:
