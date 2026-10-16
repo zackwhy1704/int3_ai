@@ -67,6 +67,9 @@
 param(
   [Parameter(Mandatory = $true, Position = 0)] [string] $Tenant,
   [Parameter(Mandatory = $true, Position = 1)] [string] $User,
+  # Which deploy project's connect file to use (make-demo.sh writes connect/<project>/...).
+  # Omitted: auto-detect; a per-project file wins over the flat one, hermes-demo wins a tie.
+  [string] $Project,
   [string] $UserDataDir,
   [string] $ExpectedVersion = '0.21.7',
   # Explicit path to an UNPACKED standalone build's Hermes.exe (release\win-unpacked\Hermes.exe,
@@ -80,11 +83,44 @@ param(
 $ErrorActionPreference = 'Stop'
 
 # --- locate the connect file this user was provisioned with --------------------
-$connectFile = Join-Path $PSScriptRoot ("connect/{0}-{1}.connect.json" -f $Tenant, $User)
-if (-not (Test-Path $connectFile)) {
-  Write-Error ("No connect file at {0}. Provision the user first: ./provision-user.sh {1} {2} <port>" -f $connectFile, $Tenant, $User)
-  exit 1
+# make-demo.sh writes PER-PROJECT: connect/<project>/<tenant>-<user>.connect.json (make-demo.sh:12);
+# a legacy/plain run may write the flat connect/<tenant>-<user>.connect.json. Resolution: -Project
+# pins the dir; otherwise a per-project file WINS over the flat one (hermes-demo wins a tie), and we
+# never silently use the flat file when a per-project file for this user exists.
+$rel  = "{0}-{1}.connect.json" -f $Tenant, $User
+$flat = Join-Path $PSScriptRoot ("connect/{0}" -f $rel)
+$connectRoot = Join-Path $PSScriptRoot 'connect'
+if ($Project) {
+  $connectFile = Join-Path $connectRoot (Join-Path $Project $rel)
+  if (-not (Test-Path $connectFile)) {
+    Write-Error ("No connect file at {0}. Provision {1}/{2} in project '{3}' first." -f $connectFile, $Tenant, $User, $Project); exit 1
+  }
+} else {
+  $projMatches = @()
+  if (Test-Path $connectRoot) {
+    $projMatches = @(Get-ChildItem -Path $connectRoot -Directory -ErrorAction SilentlyContinue |
+      ForEach-Object { Join-Path $_.FullName $rel } | Where-Object { Test-Path $_ })
+  }
+  $projNames = { ($projMatches | ForEach-Object { Split-Path (Split-Path $_ -Parent) -Leaf }) -join ', ' }
+  if ($projMatches.Count -eq 1) {
+    $connectFile = $projMatches[0]
+  } elseif ($projMatches.Count -gt 1) {
+    $demo = $projMatches | Where-Object { (Split-Path (Split-Path $_ -Parent) -Leaf) -eq 'hermes-demo' } | Select-Object -First 1
+    if ($demo) {
+      $connectFile = $demo
+      Write-Warning ("{0}/{1} exists in several projects ({2}); using hermes-demo. Pass -Project to pick another." -f $Tenant, $User, (& $projNames))
+    } else {
+      Write-Error ("{0}/{1} exists in several projects ({2}) and none is hermes-demo. Pass -Project <name>." -f $Tenant, $User, (& $projNames)); exit 1
+    }
+  } elseif (Test-Path $flat) {
+    # No per-project file for this user; use the flat file, but ANNOUNCE it (never silent).
+    $connectFile = $flat
+    Write-Warning "Using the legacy FLAT connect file (no connect/<project>/ file found for this user)."
+  } else {
+    Write-Error ("No connect file for {0}/{1} under connect/<project>/ or connect/. Provision first (make-demo.sh, or provision-user.sh)." -f $Tenant, $User); exit 1
+  }
 }
+Write-Host ("connect file: {0}" -f $connectFile) -ForegroundColor Cyan
 $connect = Get-Content -Raw -Path $connectFile | ConvertFrom-Json
 if (-not $connect.url -or -not $connect.session_token) {
   Write-Error "Connect file is missing url or session_token."

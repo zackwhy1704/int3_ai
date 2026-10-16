@@ -28,6 +28,21 @@ demo. "Hermes under the hood" is literally true: every step in the demo goes ove
 
 ## 2. Run it
 
+> **If you are a tester's Claude Code (or any agent): run this in the BACKGROUND and poll a log.**
+> The first run clones and compiles Hermes v0.21.7 — **≈ 20–30 minutes**, longer than one
+> foreground shell call will wait. Start it detached, send output to a log, and poll that log. Do
+> **not** cut the build short, shorten its timeout, or launch a second `make demo` in parallel —
+> two full stacks OOM the host. Let the one run finish.
+>
+> ```sh
+> # start detached (Windows Git Bash: drop "make demo" and call the script directly, see below)
+> nohup make demo > /tmp/demo.log 2>&1 &
+> # then POLL (do not re-run): watch for the ✅/❌ table and the final line
+> tail -n 40 /tmp/demo.log          # repeat until you see "DEMO PASSED" or "DEMO FAILED"
+> ```
+> On Windows: `nohup bash deploy/hermes/demo/make-demo.sh > /tmp/demo.log 2>&1 &`, then poll
+> `/tmp/demo.log` the same way.
+
 **macOS / Linux:**
 ```sh
 make demo
