@@ -24,6 +24,9 @@ CONNECT_DIR="${CONNECT_DIR:-$HERE/../connect/$PROJECT}"
 DB="$PROJECT-db-1"
 EDGE="$PROJECT-edge-1"
 PY="$(command -v python3 || command -v python)"
+# Native Windows Python cannot open MSYS paths (/c/tmp/...) under MSYS_NO_PATHCONV=1, so any
+# repo path handed to "$PY" goes through nativepath: cygpath -w on Git Bash, a no-op elsewhere.
+nativepath() { if command -v cygpath >/dev/null 2>&1; then cygpath -w "$1"; else printf '%s' "$1"; fi; }
 TAG="${DEMO_TAG:-demo$RANDOM}"
 TURN_TIMEOUT="${DEMO_TURN_TIMEOUT:-180}"
 VERBOSE="${DEMO_VERBOSE:---verbose}"   # dump every /api/ws frame into the transcript (auditable)
@@ -93,9 +96,12 @@ with psycopg.connect(**_gateway_dsn(), autocommit=True) as c:
 # hermes <user> <say> <approve> [extra flags] -> prints transcript to stderr, echoes __HERMES__ json
 hermes() {
   local u="$1" say="$2" appr="$3"; shift 3
-  "$PY" "$HERE/hermes_chat.py" --connect "$CONNECT_DIR/brindlewood-$u.connect.json" \
+  # tee >(cat >&2), not tee /dev/stderr: reopening /dev/stderr truncates a log that stderr is
+  # redirected to (nohup ... > log 2>&1), wiping earlier turns. The process substitution writes
+  # through the inherited fd and never reopens it.
+  "$PY" "$(nativepath "$HERE/hermes_chat.py")" --connect "$(nativepath "$CONNECT_DIR/brindlewood-$u.connect.json")" \
      --say "$say" --approve "$appr" --turn-timeout "$TURN_TIMEOUT" $VERBOSE "$@" 2>&1 \
-     | tee /dev/stderr | grep '^__HERMES__ ' | sed 's/^__HERMES__ //' | tail -1
+     | tee >(cat >&2) | grep '^__HERMES__ ' | sed 's/^__HERMES__ //' | tail -1
 }
 # turn_ok <json> -> 0 if the turn did not time out and produced a non-empty answer
 turn_ok() { [ -n "$1" ] || return 1; [ "$(printf '%s' "$1" | jget '["timed_out"]')" != "True" ] || return 1

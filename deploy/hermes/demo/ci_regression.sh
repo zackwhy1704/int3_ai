@@ -23,6 +23,9 @@ PROJECT="${DEPLOY_PROJECT:-hermes-demo}"
 if [ "$PROJECT" = "hermes-deploy" ]; then NS=""; else NS="$PROJECT-"; fi
 CONNECT_DIR="${CONNECT_DIR:-$ROOT/deploy/hermes/connect/$PROJECT}"
 DB="$PROJECT-db-1"; PY="$(command -v python3 || command -v python)"
+# Native Windows Python cannot open MSYS paths (/c/tmp/...) under MSYS_NO_PATHCONV=1, so any
+# repo path handed to "$PY" goes through nativepath: cygpath -w on Git Bash, a no-op elsewhere.
+nativepath() { if command -v cygpath >/dev/null 2>&1; then cygpath -w "$1"; else printf '%s' "$1"; fi; }
 TT="${DEMO_TURN_TIMEOUT:-180}"
 : "${ADMIN_DB_PASSWORD:?}"
 
@@ -34,7 +37,7 @@ pending_count() { dbq "SELECT count(*) FROM proposals WHERE subject LIKE '%$1%' 
 chat() {
   local u="$1" say="$2" appr="$3"; shift 3
   local out st to ap
-  out="$("$PY" deploy/hermes/demo/hermes_chat.py --connect "$CONNECT_DIR/brindlewood-$u.connect.json" \
+  out="$("$PY" deploy/hermes/demo/hermes_chat.py --connect "$(nativepath "$CONNECT_DIR/brindlewood-$u.connect.json")" \
        --say "$say" --approve "$appr" --turn-timeout "$TT" "$@" 2>/dev/null | grep '^__HERMES__ ' | sed 's/^__HERMES__ //' | tail -1)"
   if [ -z "$out" ]; then echo "    [turn] $u/$appr -> NO __HERMES__ (transport/exit error)" >&2; return; fi
   st="$(printf '%s' "$out" | "$PY" -c 'import sys,json;print(json.load(sys.stdin).get("status"))' 2>/dev/null)"
