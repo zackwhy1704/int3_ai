@@ -99,7 +99,11 @@ its own connection file, just re-run the command.
 
 ## Hermes Desktop version, and "do not update" for the pilot
 
-The backend is pinned to a **published release**: **Hermes Agent v0.21.7** (tag
+> **Re-pinned 2026-11-03 (launcher M0): the backend is now Hermes Agent v0.22.6** (tag `v0.22.6` →
+> commit `f0d94882e89ab8d4098b5bb2f166adfb9ee0a0ab`, `build-base.sh`), route allowlist re-measured.
+> The v0.21.7 notes below are kept as the record of the earlier pin.
+
+The backend was pinned to a **published release**: **Hermes Agent v0.21.7** (tag
 `v0.21.7` → commit `71d34bad1045610252eda02ee79549436896e784`,
 `deploy/hermes/build-base.sh`). Release page:
 <https://github.com/NousResearch/hermes-agent/releases/tag/v0.21.7>. Per its notes,

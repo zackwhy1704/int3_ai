@@ -45,8 +45,8 @@ def load_documents(conn, seed_dir: Path) -> None:
     assert_owner_is_member(people)   # fail before any DB write if the seed is leaky
     for u in people["users"]:
         conn.execute(
-            "INSERT INTO users (id, name, title, email) VALUES (%s, %s, %s, %s)",
-            (u["id"], u["name"], u["title"], u["email"].lower()),
+            "INSERT INTO users (id, name, title, email, is_admin) VALUES (%s, %s, %s, %s, %s)",
+            (u["id"], u["name"], u["title"], u["email"].lower(), bool(u.get("admin", False))),
         )
     for s in people["scopes"]:
         conn.execute(

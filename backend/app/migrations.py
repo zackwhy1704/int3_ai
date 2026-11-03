@@ -13,8 +13,11 @@ it only gets the schema_migrations bookkeeping.
 
 # v1: capture schema + the SECURITY DEFINER write path.
 # v2: REVOKE EXECUTE on the capture functions FROM PUBLIC (default-deny execute).
-TENANT_VERSION = 2
-CONTROL_VERSION = 1
+# v3: users.is_admin (launcher: admin-only usage + BYOK link).
+TENANT_VERSION = 3
+# v2: launcher tables (invites, devices, tokens, user_backends, hermes_compat). Applied by
+# admin.init(), which re-runs control_schema.sql idempotently.
+CONTROL_VERSION = 2
 
 
 def ensure_table(conn) -> None:

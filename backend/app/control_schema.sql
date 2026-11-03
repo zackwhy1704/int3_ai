@@ -189,3 +189,110 @@ ALTER FUNCTION consume_key_link(text, text, text) OWNER TO key_writer;
 ALTER FUNCTION record_key_link_failure(text) OWNER TO key_writer;
 REVOKE EXECUTE ON FUNCTION consume_key_link(text, text, text) FROM PUBLIC;
 REVOKE EXECUTE ON FUNCTION record_key_link_failure(text) FROM PUBLIC;
+
+-- ── Launcher (M0) ────────────────────────────────────────────────────────────
+-- The Company Brain Launcher signs a user in on a device, lists their brains by name, and
+-- hands stock Hermes Desktop a SHORT-LIVED desktop token for that user's gated backend.
+-- No brain content is ever stored here. Every secret is stored as its SHA-256 only.
+
+-- The per-user gated backend the launcher connects to. Written by provision-user.sh (operator
+-- credentials). ingress_secret_hash authenticates that backend's ingress to /launcher/introspect
+-- and BINDS it: an ingress can only ever check tokens for its own backend_id.
+CREATE TABLE IF NOT EXISTS user_backends (
+    tenant_id           text NOT NULL REFERENCES tenants(id),
+    user_id             text NOT NULL,
+    backend_id          text NOT NULL UNIQUE,
+    url                 text NOT NULL,          -- what the desktop dials (the ingress)
+    hermes_release      text NOT NULL,          -- e.g. v0.22.6
+    ingress_secret_hash text NOT NULL UNIQUE,
+    updated_at          timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, user_id)
+);
+
+-- Single-use invite codes (delivered out of band, e.g. WhatsApp). Minted by the operator CLI.
+CREATE TABLE IF NOT EXISTS launcher_invites (
+    token_hash  text PRIMARY KEY,
+    tenant_id   text NOT NULL REFERENCES tenants(id),
+    user_id     text NOT NULL,
+    expires_at  timestamptz NOT NULL,
+    used_at     timestamptz,
+    created_by  text NOT NULL,
+    created_at  timestamptz NOT NULL DEFAULT now()
+);
+
+-- One row per signed-in launcher install. Revoking a device revokes every token it holds.
+CREATE TABLE IF NOT EXISTS launcher_devices (
+    id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id   text NOT NULL REFERENCES tenants(id),
+    user_id     text NOT NULL,
+    label       text NOT NULL,
+    platform    text NOT NULL,
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    last_seen   timestamptz NOT NULL DEFAULT now(),
+    revoked_at  timestamptz
+);
+
+-- access (15 min, launcher API), refresh (30 d, single use, rotated; reuse revokes the device),
+-- desktop (12 h, bound to one backend; the only token written into Hermes's connections.json).
+CREATE TABLE IF NOT EXISTS launcher_tokens (
+    token_hash  text PRIMARY KEY,
+    kind        text NOT NULL CHECK (kind IN ('access', 'refresh', 'desktop')),
+    device_id   uuid NOT NULL REFERENCES launcher_devices(id) ON DELETE CASCADE,
+    backend_id  text,
+    expires_at  timestamptz NOT NULL,
+    used_at     timestamptz,
+    revoked_at  timestamptz,
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    CHECK ((kind = 'desktop') = (backend_id IS NOT NULL))
+);
+CREATE INDEX IF NOT EXISTS launcher_tokens_device ON launcher_tokens(device_id);
+
+-- Hermes Desktop builds the launcher knows about. state: supported (tested against our backend),
+-- untested (warn, allow), blocked (refuse). registry_version = the connections.json version whose
+-- shape we verified for that release. Exactly one release is the backend pin.
+CREATE TABLE IF NOT EXISTS hermes_compat (
+    release          text PRIMARY KEY,
+    state            text NOT NULL CHECK (state IN ('supported', 'untested', 'blocked')),
+    registry_version integer NOT NULL,
+    is_backend       boolean NOT NULL DEFAULT false,
+    note             text NOT NULL DEFAULT ''
+);
+CREATE UNIQUE INDEX IF NOT EXISTS hermes_compat_one_backend ON hermes_compat(is_backend) WHERE is_backend;
+-- Observed native package versions (MSIX quads are timestamp-derived, msix-shared.mjs:98-107, so
+-- they cannot be computed from the tag; record what an official install actually reports).
+CREATE TABLE IF NOT EXISTS hermes_desktop_builds (
+    platform         text NOT NULL CHECK (platform IN ('windows', 'macos')),
+    package_version  text NOT NULL,
+    release          text NOT NULL REFERENCES hermes_compat(release),
+    PRIMARY KEY (platform, package_version)
+);
+
+-- v0.22.6 is the backend pin (build-base.sh). connections.json shape: REGISTRY_VERSION 2
+-- (connection-registry.ts:40) and the {encoding:'plain'} token envelope (main.ts:8066-8106), both
+-- byte-identical to v0.21.7. A v0.21.7 desktop against a v0.22.6 backend has not been tested.
+INSERT INTO hermes_compat (release, state, registry_version, is_backend, note) VALUES
+    ('v0.22.6', 'supported', 2, true,  'backend pin; route allowlist re-measured for this release'),
+    ('v0.21.7', 'untested',  2, false, 'previous pin; desktop not tested against the v0.22.6 backend')
+ON CONFLICT (release) DO NOTHING;
+
+-- BYOK key-entry link minted from the launcher by a tenant admin. Same NOLOGIN key_writer owner
+-- as consume_key_link, so the API role never gets INSERT on key_entry_links or SELECT on
+-- tenant_providers. Returns: no_provider | not_byok | created | created_replacing.
+GRANT INSERT ON key_entry_links TO key_writer;
+GRANT SELECT (tenant_id, provider, key_owner) ON tenant_providers TO key_writer;
+CREATE OR REPLACE FUNCTION create_key_link(p_token_hash text, p_tenant text, p_provider text,
+                                           p_ttl_hours numeric, p_created_by text)
+RETURNS text LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE v_owner text; v_had boolean;
+BEGIN
+  SELECT key_owner, (key_ciphertext IS NOT NULL) INTO v_owner, v_had FROM tenant_providers
+    WHERE tenant_id = p_tenant AND provider = p_provider;
+  IF NOT FOUND THEN RETURN 'no_provider'; END IF;
+  IF v_owner <> 'theirs' THEN RETURN 'not_byok'; END IF;
+  INSERT INTO key_entry_links (token_hash, tenant_id, provider, expires_at, created_by)
+    VALUES (p_token_hash, p_tenant, p_provider,
+            now() + make_interval(secs => greatest(0, least(p_ttl_hours, 24)) * 3600), p_created_by);
+  RETURN CASE WHEN v_had THEN 'created_replacing' ELSE 'created' END;
+END $$;
+ALTER FUNCTION create_key_link(text, text, text, numeric, text) OWNER TO key_writer;
+REVOKE EXECUTE ON FUNCTION create_key_link(text, text, text, numeric, text) FROM PUBLIC;

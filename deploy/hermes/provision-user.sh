@@ -4,6 +4,14 @@
 #   ./provision-user.sh <tenant> <user> [ingress-port] [--key-owner ours|theirs] [--cap-usd N]
 #   ./provision-user.sh brindlewood marcus 9131 --key-owner theirs
 #
+# INGRESS_MODE (env):
+#   legacy   (default) socat forwarder; the backend's static session token goes into a connect
+#            file for connect-desktop.ps1. Kept until the launcher (M1) replaces that path.
+#   launcher ingress auth proxy (ingress/ingress_auth.py) in the forwarder's slot. The backend's
+#            session token stays server-side; the desktop gets short-lived launcher desktop
+#            tokens instead, checked per request via /launcher/introspect. Writes the
+#            user_backends row; writes NO connect file and NO token to disk.
+#
 # Isolation (both layers — the cross-user hole this closes):
 #   NETWORK: a per-user internal network u-<tenant>-<user> holds ONLY this user's
 #     Hermes backend + MCP sidecar. gateway and edge are connected to it under
@@ -54,6 +62,10 @@ EDGE_CTR="$PROJECT-edge-1"
 GATEWAY_IMAGE="${GATEWAY_IMAGE:-$PROJECT-gateway}"
 MCP_IMAGE="${MCP_IMAGE:-hermes-deploy-brain-mcp}"
 GATED_IMAGE="${GATED_IMAGE:-hermes-gated}"
+INGRESS_MODE="${INGRESS_MODE:-legacy}"
+case "$INGRESS_MODE" in legacy|launcher) ;; *) echo "INGRESS_MODE must be legacy|launcher" >&2; exit 2 ;; esac
+INGRESS_IMAGE="${INGRESS_IMAGE:-hermes-ingress}"
+HERMES_RELEASE="${HERMES_RELEASE:-v0.22.6}"   # must match build-base.sh and hermes_compat
 # Pinned by digest: a reproducible, supply-chain-fixed forwarder image (not :latest).
 SOCAT_IMAGE="${SOCAT_IMAGE:-alpine/socat@sha256:fb3862c949af7c79996d0e514ee96128644d840835ed5368eeecb14a869de361}"
 
@@ -257,10 +269,22 @@ say "ok: $hermes_name is serving on 9122"
 # u-net (so it can reach the backend's route proxy on 9122). The backend itself
 # stays internal and egress-locked; nothing else about its isolation changes.
 fwd_name="fwd-${NS}$TENANT-$USER_ID"
-say "starting host-ingress forwarder $fwd_name (127.0.0.1:$INGRESS_PORT -> $hermes_name:9122)"
 docker rm -f "$fwd_name" >/dev/null 2>&1 || true
-docker run -d --name "$fwd_name" -p "127.0.0.1:$INGRESS_PORT:$INGRESS_PORT" \
-  "$SOCAT_IMAGE" "TCP-LISTEN:$INGRESS_PORT,fork,reuseaddr" "TCP:$hermes_name:9122" >/dev/null
+if [ "$INGRESS_MODE" = launcher ]; then
+  # Ingress auth proxy: published port + u-net (reach the backend's route proxy) + ext (reach
+  # the brain API's /launcher/introspect). It holds THIS backend's internal token only.
+  INGRESS_SECRET="cb_ing_$(openssl rand -hex 32)"
+  say "starting ingress auth proxy $fwd_name (127.0.0.1:$INGRESS_PORT -> $hermes_name:9122, launcher tokens)"
+  docker run -d --name "$fwd_name" -p "127.0.0.1:$INGRESS_PORT:$INGRESS_PORT" --network "$EXT_NET" \
+    -e INGRESS_PORT="$INGRESS_PORT" -e INGRESS_UPSTREAM="http://$hermes_name:9122" \
+    -e INGRESS_INTERNAL_TOKEN="$INGRESS_TOKEN" -e INGRESS_SECRET="$INGRESS_SECRET" \
+    -e INGRESS_INTROSPECT_URL="http://brain:8000/launcher/introspect" \
+    "$INGRESS_IMAGE" >/dev/null
+else
+  say "starting host-ingress forwarder $fwd_name (127.0.0.1:$INGRESS_PORT -> $hermes_name:9122)"
+  docker run -d --name "$fwd_name" -p "127.0.0.1:$INGRESS_PORT:$INGRESS_PORT" \
+    "$SOCAT_IMAGE" "TCP-LISTEN:$INGRESS_PORT,fork,reuseaddr" "TCP:$hermes_name:9122" >/dev/null
+fi
 docker network connect "$UNET" "$fwd_name"
 
 # --- 5. ASSERT the brain token is not reachable from the Hermes container ------
@@ -270,6 +294,25 @@ if docker exec "$hermes_name" sh -c "cat /proc/1/environ 2>/dev/null | tr '\0' '
   echo "[provision] FATAL: brain token found inside the Hermes container" >&2; exit 1
 fi
 say "ok: brain token only in the sidecar $mcp_name"
+
+# --- 6a. launcher mode: register the backend; no token leaves the server -------
+if [ "$INGRESS_MODE" = launcher ]; then
+  ingress_sha="$(printf '%s' "$INGRESS_SECRET" | sha256sum | cut -d' ' -f1)"
+  docker exec -i -e PGPASSWORD="$ADMIN_DB_PASSWORD" "$DB" \
+    psql -U "$ADMIN_DB_USER" -d control -qtA -v ON_ERROR_STOP=1 \
+      -v tenant="$TENANT" -v uid="$USER_ID" -v bid="$hermes_name" \
+      -v url="http://127.0.0.1:$INGRESS_PORT" -v rel="$HERMES_RELEASE" -v sha="$ingress_sha" >/dev/null <<'SQL'
+INSERT INTO user_backends (tenant_id, user_id, backend_id, url, hermes_release, ingress_secret_hash)
+VALUES (:'tenant', :'uid', :'bid', :'url', :'rel', :'sha')
+ON CONFLICT (tenant_id, user_id) DO UPDATE SET backend_id = EXCLUDED.backend_id, url = EXCLUDED.url,
+  hermes_release = EXCLUDED.hermes_release, ingress_secret_hash = EXCLUDED.ingress_secret_hash,
+  updated_at = now();
+SQL
+  rm -f "$CONNECT_DIR/$TENANT-$USER_ID.connect.json"   # a stale legacy token file must not linger
+  say "registered $hermes_name for the launcher (no connect file, no token on disk)"
+  say "invite: docker compose run --rm init python -m app.launcher.admin invite --tenant $TENANT --user $USER_ID"
+  exit 0
+fi
 
 # --- 6. connect file for stock Hermes Desktop (host-only until Phase 3 TLS) ----
 connect="$CONNECT_DIR/$TENANT-$USER_ID.connect.json"

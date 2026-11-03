@@ -105,8 +105,20 @@ def init() -> None:
             GRANT SELECT, INSERT, UPDATE, DELETE ON login_attempts, sessions TO {r};
             GRANT SELECT, INSERT, UPDATE, DELETE ON service_tokens TO {r};
             GRANT SELECT, INSERT ON retrievals TO {r};
+            GRANT SELECT ON user_backends, hermes_compat, hermes_desktop_builds TO {r};
+            GRANT SELECT ON launcher_invites TO {r};
+            GRANT UPDATE (used_at) ON launcher_invites TO {r};
+            GRANT SELECT, INSERT ON launcher_devices, launcher_tokens TO {r};
+            GRANT UPDATE (last_seen, revoked_at) ON launcher_devices TO {r};
+            GRANT UPDATE (used_at, revoked_at) ON launcher_tokens TO {r};
+            GRANT EXECUTE ON FUNCTION create_key_link(text, text, text, numeric, text) TO {r};
         """).format(r=sql.Identifier(config.CONTROL_ROLE))
         )
+        # key_writer OWNS the SECURITY DEFINER key functions (consume_key_link,
+        # record_key_link_failure, create_key_link), so their bodies run with ITS privileges.
+        # After the REVOKE ... FROM PUBLIC above it needs schema USAGE or none of their tables
+        # resolve ("relation does not exist"). NOLOGIN: nobody can connect as it.
+        conn.execute("GRANT USAGE ON SCHEMA public TO key_writer")
 
         # Least-privilege gateway role: SELECT on service_tokens (verify tokens)
         # and tenant_providers (routing/keys), plus SELECT/INSERT/UPDATE on the
@@ -331,7 +343,8 @@ def _provision_database(
             seed.load_claims(tconn, seed_dir)
         else:
             tconn.execute(
-                "INSERT INTO users (id, name, title, email) VALUES ('admin', %s, 'Admin', %s)",
+                "INSERT INTO users (id, name, title, email, is_admin)"
+                " VALUES ('admin', %s, 'Admin', %s, true)",
                 (admin_name, admin_email.lower()),
             )
             tconn.execute(

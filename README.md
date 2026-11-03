@@ -9,7 +9,7 @@ On this branch (`spike/remote-thin-client`) it reaches the user as a **thin clie
 
 ```
 stock Hermes Desktop  ──▶  per-user gated Hermes backend  ──▶  brain (MCP)  ──▶  BYOK LLM gateway
-   (the official app)        (STOCK Hermes v0.21.7 in our         (truth layer)      (customer's own
+   (the official app)        (STOCK Hermes v0.22.6 in our         (truth layer)      (customer's own
                               gated container, one per user)                         model key, capped)
 ```
 

@@ -9,6 +9,7 @@ from .api.v1 import router as v1_router
 from .auth import oidc
 from .auth.principal import Principal, csrf_protected, principal
 from .auth.routes import router as auth_router
+from .launcher.routes import router as launcher_router
 
 logging.basicConfig(level=logging.INFO)
 
@@ -25,6 +26,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Company Brain", lifespan=lifespan)
 app.include_router(auth_router)
 app.include_router(v1_router)
+app.include_router(launcher_router)
 
 
 @app.get("/api/brains")

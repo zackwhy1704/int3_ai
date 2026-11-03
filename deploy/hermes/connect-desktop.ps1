@@ -71,7 +71,7 @@ param(
   # Omitted: auto-detect; a per-project file wins over the flat one, hermes-demo wins a tie.
   [string] $Project,
   [string] $UserDataDir,
-  [string] $ExpectedVersion = '0.21.7',
+  [string] $ExpectedVersion = '0.22.6',
   # Explicit path to an UNPACKED standalone build's Hermes.exe (release\win-unpacked\Hermes.exe,
   # produced by scripts\install.ps1 -IncludeDesktop). If omitted, it is auto-detected.
   [string] $UnpackedExe,

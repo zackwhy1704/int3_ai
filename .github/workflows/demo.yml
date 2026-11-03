@@ -89,7 +89,7 @@ jobs:
           ( while true; do free -m | awk '/^Mem:/{print $3}'; sleep 5; done ) > mem.log 2>/dev/null &
           echo "MEM_SAMPLER_PID=$!" >> "$GITHUB_ENV"
 
-      # First build = the Hermes base image (clones + compiles Hermes v0.21.7). Time it
+      # First build = the Hermes base image (clones + compiles Hermes v0.22.6). Time it
       # on its own so the report can state first-build duration distinctly; make demo
       # then finds the image present and skips rebuilding it.
       - name: Build Hermes base image (first build, timed)

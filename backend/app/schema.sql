@@ -8,6 +8,9 @@ CREATE TABLE IF NOT EXISTS users (
     email  text NOT NULL UNIQUE CHECK (email = lower(email)),
     active boolean NOT NULL DEFAULT true
 );
+-- Tenant admin (launcher M0): may see tenant spend and mint a BYOK key-entry link from the
+-- launcher. Not a scope permission: it never widens what brains a user can read.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin boolean NOT NULL DEFAULT false;
 
 CREATE TABLE IF NOT EXISTS scopes (
     id            text PRIMARY KEY,

@@ -36,7 +36,7 @@
 [CmdletBinding()]
 param(
   [string] $Tenant = 'brindlewood',
-  [string] $ExpectedVersion = '0.21.7',
+  [string] $ExpectedVersion = '0.22.6',
   [int]    $WaitSeconds = 45,
   [string] $OutDir,
   # Explicit path to an UNPACKED standalone build's Hermes.exe (release\win-unpacked\Hermes.exe,

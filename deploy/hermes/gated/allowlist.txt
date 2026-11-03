@@ -8,6 +8,14 @@
 # artifacts, scheduled jobs, files pane, review pane), then the app was re-run
 # with only these rules to see what broke. See TASK H in the spike report.
 #
+# RE-MEASURED for Hermes v0.22.6 (launcher M0, 2026-11-03): stock v0.22.6 desktop (dev build)
+# against a v0.22.6 backend with route_proxy in MEASURE mode: boot, chat send over /api/ws,
+# session reopen, Artifacts, Scheduled jobs, Capabilities, Messaging, files pane, settings.
+# 33 distinct routes seen, 13 not on the v0.21.7 list; 9 admitted below (marked v0.22.6),
+# 5 excluded at the bottom. Handlers cited at v0.22.6 (hermes_cli/web_routers/*). NOT
+# exercised (model key rejected during the run): tool-call turns, assistant output, artifacts
+# produced by answers.
+#
 # NOTE on /api/ws: it is ONE route but it is the gateway's JSON-RPC channel.
 # Admitting it admits every method behind it, including shell.exec. A path
 # allowlist cannot constrain what travels inside the socket.
@@ -19,10 +27,21 @@ GET  /api/config                    # composer + UI settings
 GET  /api/config/defaults           # settings defaults merged at boot
 GET  /api/profiles                  # profile list (single profile in practice)
 GET  /api/profiles/active           # which profile the window is on
+GET  /api/audio/voice-live/status   # v0.22.6 boot poll; read-only status (audio.py:180)
+GET  /api/tools/terminal/backends   # v0.22.6 boot; read-only list (tools.py:645). Choosing one is a
+                                    # config write (PUT /api/config), which stays excluded.
 
 # --- chat ----------------------------------------------------------------
 GET  /api/ws                        # gateway WebSocket: prompts, streaming replies, tool events
 GET  /api/model/info                # composer shows the active model
+GET  /api/model/options             # v0.22.6 model picker list; read-only (models.py:138)
+GET  /api/model/auxiliary           # v0.22.6 settings: auxiliary models; read-only (models.py:219)
+GET  /api/model/moa                 # v0.22.6 settings: mixture-of-agents; GET only (models.py:272;
+                                    # PUT models.py:303 excluded)
+GET  /api/config/schema             # v0.22.6 settings form schema; read-only (config_env.py:100)
+GET  /api/tools/toolsets            # v0.22.6 capabilities: toolset list; read-only (tools.py:223)
+GET  /api/skills                    # v0.22.6 capabilities: installed skills; GET only (skills.py:343;
+                                    # POST skills.py:457 = install, excluded)
 GET  /api/sessions/*                # transcript load: /{id}/messages, /{id}/timeline
 POST /api/sessions/owner-backfill   # boot-time ownership repair for the session list
 
@@ -58,5 +77,17 @@ GET  /api/cron/blueprints           # job templates shown on the Cron page
 
 # --- MCP tool calls ---------------------------------------------------------
 # None at this layer: the agent calls MCP tools from inside the backend process.
+POST /api/mcp/servers/brain/test    # v0.22.6 boot: connect to OUR provisioned brain server, list its
+                                    # tools, disconnect; no config write (mcp.py:204-240). Exact path:
+                                    # no other server name is testable.
 # EXCLUDED: /api/mcp/servers (add/edit/delete), /api/mcp/catalog/install — the
 #           brain MCP server is provisioned container-side; users do not add tools.
+
+# --- seen in the v0.22.6 measurement and deliberately EXCLUDED -----------------
+# GET /api/hermes/update/check   (actions.py:289) update surface; the backend is pinned by us
+#                                (build-base.sh) and never updated from the desktop.
+# GET /api/messaging/platforms   (messaging.py:938) and GET /api/pairing (ops.py:84): messaging
+#                                bots / pairing are not part of the pilot.
+# GET /api/audio/elevenlabs/voices (audio.py:220) external TTS provider listing (egress-locked).
+# GET /api/skills/hub/official   (skills.py:123) installable-skills catalog; installs are not
+#                                offered to users.

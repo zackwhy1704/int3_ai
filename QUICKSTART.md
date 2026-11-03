@@ -29,7 +29,7 @@ demo. "Hermes under the hood" is literally true: every step in the demo goes ove
 ## 2. Run it
 
 > **If you are a tester's Claude Code (or any agent): run this in the BACKGROUND and poll a log.**
-> The first run clones and compiles Hermes v0.21.7 — **≈ 20–30 minutes**, longer than one
+> The first run clones and compiles Hermes v0.22.6 — **≈ 20–30 minutes**, longer than one
 > foreground shell call will wait. Start it detached, send output to a log, and poll that log. Do
 > **not** cut the build short, shorten its timeout, or launch a second `make demo` in parallel —
 > two full stacks OOM the host. Let the one run finish.
@@ -116,16 +116,18 @@ The demo already proves the agent path; this step just lets you watch it in the 
 
 **Install the official, stock Hermes Desktop, pinned to the demo's version.** The installer is
 Nous's, in the `NousResearch/hermes-agent` repo (not this repo). On Windows, download it from the
-v0.21.7 tag to `%TEMP%` and run it with the desktop stage, pinned to the commit:
+v0.22.6 tag to `%TEMP%` and run it with the desktop stage, pinned to the commit:
 
 ```powershell
-$u = 'https://raw.githubusercontent.com/NousResearch/hermes-agent/v0.21.7/scripts/install.ps1'
+$u = 'https://raw.githubusercontent.com/NousResearch/hermes-agent/v0.22.6/scripts/install.ps1'
 Invoke-WebRequest -Uri $u -OutFile "$env:TEMP\hermes-install.ps1"
-& "$env:TEMP\hermes-install.ps1" -IncludeDesktop -Commit 71d34bad1045610252eda02ee79549436896e784
+& "$env:TEMP\hermes-install.ps1" -IncludeDesktop -Commit f0d94882e89ab8d4098b5bb2f166adfb9ee0a0ab
 ```
 
-`-IncludeDesktop` (`scripts/install.ps1:33` in hermes-agent) adds the desktop stage; `-Commit`
-pins it to tag v0.21.7 (`:962`); the build produces **`release\win-unpacked\Hermes.exe`** (`:1232`).
+`-IncludeDesktop` (`scripts/install.ps1:38` at v0.22.6) adds the desktop stage; `-Commit` (`:26`)
+pins it to tag v0.22.6; the build produces **`release\win-unpacked\Hermes.exe`** (`:1455`).
+This recipe was re-pointed at v0.22.6 in launcher M0 by reading install.ps1 at that tag; the
+install itself was NOT re-run at v0.22.6. Note v0.22.6 needs Node >= 26 (package.json:74).
 That unpacked build is a standalone app (not the Store package), which is what you want for a
 pinned demo. Then point it at a user's connect file:
 

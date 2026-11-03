@@ -15,7 +15,7 @@ The way it reaches a user's machine is the thing that is new on this branch
 stock Hermes Desktop (thin client)          the user installs Nous's official Hermes app
    │  one connection (url + session_token)   and points it at a connect file — no custom
    ▼                                          desktop build, "Hermes under the hood"
-per-user gated Hermes backend (container)    STOCK Hermes v0.21.7 in our gated container
+per-user gated Hermes backend (container)    STOCK Hermes v0.22.6 in our gated container
    │  MCP (per-user brain token)              one isolated container per user; default-deny
    ▼                                          route + egress proxies; startup gate
 Company Brain (brain + per-user MCP sidecar) the truth layer; the ONLY thing that holds
@@ -106,9 +106,14 @@ gateway** behind it.
   (`ANTHROPIC_API_KEY=…`). You edit that file yourself — never paste a key into chat.
 - **Component-tier check:** `make e2e` (bypasses Hermes; `DEPLOY_PROJECT=hermes-e2e`).
 
-## Desktop: the stock app
-- **Pilots run Nous's official, stock Hermes Desktop** pointed at a per-user connect file. We do
-  not build, fork, or ship a desktop. The desktop launches its own local `hermes serve` backend
+## Desktop: the stock app + our launcher
+- **Pilots run Nous's official, stock Hermes Desktop.** We never build, fork, or modify Hermes
+  (desktop or backend). We DO ship our own **Company Brain Launcher** (approved 2026-11-03): a small
+  separate app that signs the user in (invite links), lists their brains by name, writes the
+  connection into Hermes's `connections.json`, and starts stock Hermes. It never stores brain
+  content, documents, answers or claims, and never holds a provider key. Design:
+  `docs/LAUNCHER_AUTH_NOTE.md` (auth choice); server side under `backend/app/launcher/`.
+- The desktop launches its own local `hermes serve` backend
   for *local* profiles (`apps/desktop/electron/backend-command.ts`), but when the active
   connection is our **remote** gated backend it routes to that backend and does not spawn a local
   child for it (`connection-config.ts:886-892`, `backend-start-failure.ts:28`) — the remote
@@ -136,4 +141,5 @@ gateway** behind it.
 ## Out of scope for the spike — do not build
 Self-serve signup, billing, SaaS onboarding, a second LLM provider wired into a tenant
 allowlist (the gateway's OpenAI path is built + unit-tested but not evaluated, not
-offered), connectors, a design system, a custom desktop build.
+offered), connectors, a design system, a custom or forked HERMES desktop build (the launcher is
+ours and in scope; Hermes itself stays stock).

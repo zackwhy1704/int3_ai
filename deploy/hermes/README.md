@@ -30,7 +30,7 @@ What each piece guarantees:
   pinned commit** — no hand-built local image:
 
   ```
-  ./build-base.sh        # NousResearch/hermes-agent @ v0.21.7 (71d34bad1045610252eda02ee79549436896e784)
+  ./build-base.sh        # NousResearch/hermes-agent @ v0.22.6 (f0d94882e89ab8d4098b5bb2f166adfb9ee0a0ab)
   ```
 
   It builds `hermes-base-pinned` from a git build context, so the server-side

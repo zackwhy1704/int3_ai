@@ -71,6 +71,7 @@ services:
         python -m app.tenants.admin provision --id brindlewood \
           --name "Brindlewood Supply Co." --seed /seed/brindlewood \
           || echo "[init] brindlewood already provisioned — skipping"
+        python -m app.tenants.admin migrate
     environment:
       <<: *admin-env
       ENV: ${ENV:-development}

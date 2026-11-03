@@ -49,3 +49,11 @@ MOCK_OIDC_URL = os.environ.get("MOCK_OIDC_URL", "")  # as the backend reaches it
 MOCK_OIDC_PUBLIC_URL = os.environ.get(
     "MOCK_OIDC_PUBLIC_URL", ""
 )  # as the browser reaches it
+
+# Launcher (M0). Lifetimes of the three launcher token kinds and of an invite code.
+LAUNCHER_ACCESS_MINUTES = 15
+LAUNCHER_REFRESH_DAYS = 30
+LAUNCHER_DESKTOP_HOURS = 12
+LAUNCHER_INVITE_MAX_HOURS = 168
+# Public base URL of the key-intake service; the BYOK link the launcher opens is <base>/key/<token>.
+KEY_INTAKE_BASE_URL = os.environ.get("KEY_INTAKE_BASE_URL", "")
