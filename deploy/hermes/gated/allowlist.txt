@@ -57,6 +57,13 @@ GET  /api/fs/default-cwd            # pane's starting directory
 GET  /api/fs/list                   # directory listing (confined by HERMES_DASHBOARD_FILES_ROOT)
 GET  /api/fs/read-text              # text preview
 GET  /api/fs/read-data-url          # image/PDF preview
+GET  /api/fs/git-root               # v0.22.6 pane boot: nearest .git ancestor of the pane's folder, or
+                                    # null (files.py:1383-1397). Read-only, but NOT behind
+                                    # _hosted_fs_read_guard: it can name a .git ancestor of ANY path. In
+                                    # the gated image the only ones outside /opt/data are uv-cache
+                                    # sentinels (/opt/hermes/uv-cache/sdists-v10, /root/.hermes/cache/
+                                    # uv/sdists-v10); no file content is returned. Without it the
+                                    # pane shows "Unreadable" (measured 2026-11-04, workspace cwd).
 # EXCLUDED: POST /api/fs/write-text — unconfined write (no Request, no guard,
 #           no sensitive-path denylist). Not needed: users ask, they do not edit.
 
