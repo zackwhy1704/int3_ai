@@ -1,4 +1,4 @@
-// Company Brain launcher UI. Every action is a Rust command (src-tauri/src/main.rs); this page
+// int3 launcher UI. Every action is a Rust command (src-tauri/src/main.rs); this page
 // never sees a token and stores nothing.
 'use strict'
 
@@ -63,8 +63,11 @@ async function refreshHermesLine() {
   const line = $('hermes-line')
   try {
     const h = await call('hermes_status')
+    $('get-hermes').hidden = h.found
     if (!h.found) {
-      line.textContent = 'Hermes Desktop is not installed.'
+      line.textContent = h.os_supported
+        ? 'Hermes Desktop is not installed.'
+        : `Hermes Desktop needs Windows 11 (version 22H2 or later). This PC runs Windows build ${h.os_build}.`
       $('launch').disabled = true
       return
     }
@@ -168,6 +171,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   $('signin').onclick = signIn
   $('invite').onkeydown = ev => { if (ev.key === 'Enter') signIn() }
   $('launch').onclick = () => launch(false)
+  $('get-hermes').onclick = () => call('open_hermes_download').then(refreshHermesLine, () => {})
   $('restart-ok').onclick = () => { $('restart-dialog').close(); launch(true) }
   $('restart-cancel').onclick = () => $('restart-dialog').close()
   $('sign-out').onclick = signOut

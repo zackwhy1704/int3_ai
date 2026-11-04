@@ -109,7 +109,7 @@ gateway** behind it.
 
 ## Desktop: the stock app + our launcher
 - **Pilots run Nous's official, stock Hermes Desktop.** We never build, fork, or modify Hermes
-  (desktop or backend). We DO ship our own **Company Brain Launcher** (approved 2026-11-03): a small
+  (desktop or backend). We DO ship our own **launcher, branded int3** (approved 2026-11-03): a small
   separate app that signs the user in (invite links), lists their brains by name, writes the
   connection into Hermes's `connections.json`, and starts stock Hermes. It never stores brain
   content, documents, answers or claims, and never holds a provider key. Design:
@@ -117,7 +117,11 @@ gateway** behind it.
   (Tauri 2, Windows alpha) under `launcher/`; host entry = `launcher-edge` (compose, default-deny
   `gated/launcher-edge.allowlist`). Caveat: STOCK Hermes Desktop itself caches recent transcript
   tails in its own Local Storage (`apps/desktop/src/store/transcript-tail-cache.ts` @v0.22.6);
-  that is Hermes's store, not the launcher's, and is an open owner decision.
+  that is Hermes's store, not the launcher's. Owner decision for the MVP: document it
+  (`launcher/README.md`, `docs/PARTNER_GUIDE.md`), no wipe.
+- The launcher ships as **int3** (productName/publisher `int3`, identifier `ai.int3.launcher`,
+  final: never change it). Hermes connection labels are `int3 - <user>@<tenant>`. Internal ids
+  keep their prefixes (`cb-` registry entries, `cb_inv_`/`cb_dt_` tokens).
 - The desktop launches its own local `hermes serve` backend
   for *local* profiles (`apps/desktop/electron/backend-command.ts`), but when the active
   connection is our **remote** gated backend it routes to that backend and does not spawn a local

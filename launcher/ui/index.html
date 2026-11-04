@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Company Brain</title>
+  <title>int3</title>
   <link rel="stylesheet" href="style.css">
   <script src="app.js" defer></script>
 </head>
@@ -11,7 +11,7 @@
   <!-- Sign in -->
   <main id="view-signin" class="view center" hidden>
     <section class="card narrow">
-      <div class="brand"><span class="logo" aria-hidden="true"></span>Company Brain</div>
+      <div class="brand"><span class="logo" aria-hidden="true"></span>int3</div>
       <h1>Sign in</h1>
       <p class="muted">Paste the invite link you were sent. It works once.</p>
       <!-- Deliberately NOT a <form>: WebView2 saved submitted invite links into its autofill store
@@ -30,7 +30,7 @@
   <!-- Library -->
   <div id="view-app" class="view app" hidden>
     <aside class="sidebar">
-      <div class="brand"><span class="logo" aria-hidden="true"></span>Company Brain</div>
+      <div class="brand"><span class="logo" aria-hidden="true"></span>int3</div>
       <nav>
         <button class="nav active" data-tab="library">Library</button>
         <button class="nav" data-tab="account">Account</button>
@@ -47,11 +47,12 @@
           <div>
             <p class="eyebrow" id="hero-tenant"></p>
             <h1>Your brains</h1>
-            <p class="muted">Hermes opens connected to your own Company Brain. Everything you can ask about is listed here.</p>
+            <p class="muted">Hermes opens connected to your company brain. Everything you can ask about is listed here.</p>
           </div>
           <div class="launch-box">
             <button id="launch" class="primary big">Launch Hermes</button>
             <p id="hermes-line" class="muted small"></p>
+            <button id="get-hermes" class="secondary small" hidden>Get Hermes Desktop</button>
           </div>
         </header>
         <p id="launch-msg" class="notice" role="status" hidden></p>

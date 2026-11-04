@@ -12,7 +12,7 @@
 # against a v0.22.6 backend with route_proxy in MEASURE mode: boot, chat send over /api/ws,
 # session reopen, Artifacts, Scheduled jobs, Capabilities, Messaging, files pane, settings.
 # 33 distinct routes seen, 13 not on the v0.21.7 list; 9 admitted below (marked v0.22.6),
-# 5 excluded at the bottom. Handlers cited at v0.22.6 (hermes_cli/web_routers/*). NOT
+# 5 excluded at the bottom (messaging/platforms is now a stub, see the end). Handlers cited at v0.22.6 (hermes_cli/web_routers/*). NOT
 # exercised (model key rejected during the run): tool-call turns, assistant output, artifacts
 # produced by answers.
 #
@@ -93,8 +93,17 @@ POST /api/mcp/servers/brain/test    # v0.22.6 boot: connect to OUR provisioned b
 # --- seen in the v0.22.6 measurement and deliberately EXCLUDED -----------------
 # GET /api/hermes/update/check   (actions.py:289) update surface; the backend is pinned by us
 #                                (build-base.sh) and never updated from the desktop.
-# GET /api/messaging/platforms   (messaging.py:938) and GET /api/pairing (ops.py:84): messaging
-#                                bots / pairing are not part of the pilot.
+# GET /api/pairing               (ops.py:84) pairing is not part of the pilot. The Messaging page
+#                                swallows this failure by design (apps/desktop/src/app/messaging/
+#                                index.tsx:239-253), so it stays a plain 403.
 # GET /api/audio/elevenlabs/voices (audio.py:220) external TTS provider listing (egress-locked).
 # GET /api/skills/hub/official   (skills.py:123) installable-skills catalog; installs are not
 #                                offered to users.
+
+# --- stubs: answered by the proxy itself, never forwarded (route_proxy.py) --------
+# GET /api/messaging/platforms (messaging.py:938) is NOT reached: the real handler returns the
+# backend's env path and per-platform credential state, and messaging bots are not offered. A 403
+# here made the Messaging page spin forever with a "failed to load" toast (index.tsx:213-223,572);
+# an empty catalog renders the page's own empty list. PUT/test on a platform stay denied (no rows
+# to act on anyway).
+GET /api/messaging/platforms => {"platforms": []}

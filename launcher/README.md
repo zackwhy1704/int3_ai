@@ -1,44 +1,52 @@
-# Company Brain launcher (M1 — Windows alpha)
+# int3 launcher (M1 — Windows alpha)
 
 A small desktop app (Tauri 2, ~1.7 MB installer) that signs you in with an invite link, shows
 the brains you can use **by name only**, and launches the **stock** Hermes Desktop already
-connected to your own Company Brain backend. It never modifies Hermes: it writes Hermes's own
-`connections.json` (v2 registry) and starts the app.
+connected to your own company-brain backend. It never modifies Hermes: it writes Hermes's own
+`connections.json` (v2 registry) and starts the app. Identifier `ai.int3.launcher` (final: the
+WebView2 profile and the installer's upgrade identity hang off it; never change it).
 
 | | |
 |---|---|
 | Sign in | paste the invite link (`https://<server>/invite#cb_inv_…`), single use |
 | Library | brain names from `GET /launcher/me` |
-| Launch | `POST /launcher/launch` → a 12 h desktop token for *your* backend, written into Hermes's registry; Hermes started |
+| Launch | `POST /launcher/launch` → a 12 h desktop token for *your* backend, written into Hermes's registry as **int3 - &lt;user&gt;@&lt;tenant&gt;**; Hermes started |
 | Account | name, company, role, server health, signed-in devices (sign out others), **admin only:** set the company model key (opens the key-entry page in the browser) |
 | Switch user / Sign out | revokes this device on the server, removes our entries from Hermes's registry (Hermes falls back to its local connection), forgets the refresh token |
+| No Hermes | **Get Hermes Desktop** opens Nous's product page, `https://hermes-agent.nousresearch.com/desktop` (linked from Hermes v0.22.6 `website/docs/user-guide/desktop.md:25`; it carries the Microsoft Store listing and the `.appinstaller`). On Windows builds below 22621 the launcher says Hermes needs Windows 11 22H2 (`apps/desktop/BUILDING.md:14`). |
 
-What it keeps on this computer: `%APPDATA%\CompanyBrain\launcher.json` = `{"server": "<origin>"}`,
-and the refresh token in Windows Credential Manager (`CompanyBrainLauncher`). No brain content,
-no provider keys. The page never sees a token: every call is a Rust command
-(`src-tauri/src/main.rs`), and WebView2 autofill is off (`tauri.conf.json`) so the invite link is
-never saved by the webview.
+What it keeps on this computer: `%APPDATA%\int3\launcher.json` = `{"server": "<origin>"}`, and
+the refresh token in Windows Credential Manager (`int3Launcher`). No brain content, no provider
+keys. The page never sees a token: every call is a Rust command (`src-tauri/src/main.rs`), and
+WebView2 autofill is off (`tauri.conf.json`) so the invite link is never saved by the webview.
 
-**Not the launcher's to control:** stock Hermes Desktop keeps its own durable cache of recent
-transcript tails in its Local Storage (`src/store/transcript-tail-cache.ts`, up to 50 sessions).
-See the M1 report.
+## What Hermes itself keeps on disk (not the launcher's to control)
+
+Stock Hermes Desktop keeps a **durable cache of recent transcript tails** in its own Local
+Storage so a reopened chat paints instantly: `apps/desktop/src/store/transcript-tail-cache.ts`
+@v0.22.6, up to 50 sessions (`MAX_ENTRIES`), at most 256 KB per entry, keyed per connection,
+no setting to turn it off. So the last answers a user saw from their brain **are on that
+laptop** inside Hermes's profile (`%APPDATA%\Hermes\Local Storage` for a packaged install), even
+after the launcher signs out. Observed in the M1 no-brain-content scan.
+
+Decision for the MVP (owner, 2026-11-04): **document, no wipe.** Wiping Hermes's Local Storage
+on sign-out would also erase Hermes's own UI preferences and is a write into Hermes's data. Told
+to partners in `docs/PARTNER_GUIDE.md`. Revisit before any customer with a shared-laptop or
+data-at-rest requirement (options: wipe on sign-out, ask Nous for a setting).
 
 ## Install (partners)
 
-1. Download `Company Brain_<version>_x64-setup.exe` from the GitHub release.
-2. Windows shows **"Windows protected your PC"** because the installer is not code-signed yet.
-   Click **More info**, check *Application: Company Brain_…_x64-setup.exe*, then **Run anyway**.
-3. The installer is per-user (no admin prompt) and goes to `%LOCALAPPDATA%\Company Brain`.
-4. Install the official Hermes Desktop (Microsoft Store or Nous's release page) if you do not have it.
-5. Open Company Brain, paste the invite link you were sent, click **Launch Hermes**.
+See `docs/PARTNER_GUIDE.md`. Short version: download `int3_<version>_x64-setup.exe`, click
+**More info → Run anyway** on the SmartScreen prompt (unsigned), install the official Hermes
+Desktop (Windows 11 22H2+), paste your invite link, **Launch Hermes**.
 
 ## Build and test (developers)
 
 ```bash
 cd launcher
 npm ci                                  # @tauri-apps/cli 2.12.1 (exact)
-npm test                                # cargo test: registry merge/refusals, invite parsing, version policy
-./node_modules/.bin/tauri build         # -> src-tauri/target/release/bundle/nsis/*.exe
+npm test                                # cargo test: registry merge/refusals, invite parsing, version policy, OS build parse
+./node_modules/.bin/tauri build         # -> src-tauri/target/release/bundle/nsis/int3_<version>_x64-setup.exe
 ```
 
 Contract test against Hermes's own registry normalizer (needs a hermes-agent checkout at the
@@ -57,12 +65,26 @@ from-source Hermes instead of an installed MSIX, start the launcher with
 `CB_LAUNCHER_USER_DATA_DIR` (see `src-tauri/src/hermes.rs`); `CB_LAUNCHER_DATA_DIR` and
 `CB_LAUNCHER_KEYRING_SERVICE` isolate a test run's own state.
 
+### Testing an official Microsoft Store Hermes (Windows 11 22H2+)
+
+```bash
+bash launcher/e2e/stack-up.sh                       # once, if no launcher-mode stack is up (INVITE_DIR=…)
+bash deploy/hermes/store-test.sh --user priya       # invite -> clipboard (never printed); or --out <file>
+# install int3 + Store Hermes, paste the invite, Launch; note the version the launcher shows
+bash deploy/hermes/store-test.sh --record <package-version> --release v0.22.6
+```
+
+`--record` writes `hermes_desktop_builds`; from then on the launcher reports that build with the
+release's state (`supported` for v0.22.6) instead of "untested".
+
 ## Known limits (alpha)
 
-- Windows only. Unsigned installer (SmartScreen click-through above); no auto-update.
-- Packaged Hermes is detected via MSIX only (Store / out-of-store App Installer). An MSIX
-  install has not been exercised end to end on this machine (none installed); the e2e used a
-  from-source v0.22.6 build through the dev-command hook.
-- Every installed Hermes build is "untested" until its package version is recorded in
-  `hermes_desktop_builds` (control DB); "blocked" builds are refused.
+- Windows only. Unsigned installer (SmartScreen click-through); no auto-update.
+- Packaged Hermes is detected via MSIX only (Store / out-of-store App Installer), which needs
+  Windows 11 22H2. Hermes on Windows 10 exists only as Nous's source install (`install.ps1`),
+  which the launcher does not detect.
+- An MSIX install has not been exercised end to end yet (the dev machine is Windows 10); the
+  e2e used a from-source v0.22.6 build through the dev-command hook.
+- Every installed Hermes build is "untested" until its package version is recorded (above);
+  "blocked" builds are refused.
 - A dev-command Hermes is not restarted by the launcher; a packaged one is (after you confirm).

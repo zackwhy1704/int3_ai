@@ -48,6 +48,33 @@ fn hidden(cmd: &mut Command) -> &mut Command {
     cmd
 }
 
+/// The official Hermes MSIX requires Windows 11 22H2 (build 22621): v0.22.6
+/// apps/desktop/BUILDING.md:14, website/docs/getting-started/platform-support.md:20.
+pub const MSIX_MIN_BUILD: u32 = 22621;
+
+/// This PC's Windows build number (CurrentBuildNumber), or None if it cannot be read.
+pub fn os_build() -> Option<u32> {
+    let out = hidden(Command::new("reg").args([
+        "query",
+        r"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion",
+        "/v",
+        "CurrentBuildNumber",
+    ]))
+    .output()
+    .ok()?;
+    parse_build(&String::from_utf8_lossy(&out.stdout))
+}
+
+fn parse_build(reg_output: &str) -> Option<u32> {
+    reg_output
+        .lines()
+        .find(|l| l.trim_start().starts_with("CurrentBuildNumber"))?
+        .split_whitespace()
+        .last()?
+        .parse()
+        .ok()
+}
+
 pub fn detect() -> Option<Install> {
     if let Ok(exe) = std::env::var("CB_LAUNCHER_HERMES_EXE") {
         let dir = std::env::var("CB_LAUNCHER_USER_DATA_DIR").ok()?;
@@ -191,6 +218,14 @@ mod tests {
                "releases": [{"release": "v0.22.6", "state": "supported"}, {"release": "v0.20.0", "state": "blocked"}],
                "desktop_builds": [{"platform": "windows", "package_version": "2026.7300.1.0", "release": "v0.22.6"},
                                   {"platform": "windows", "package_version": "2025.100.1.0", "release": "v0.20.0"}]})
+    }
+
+    #[test]
+    fn parses_reg_query_build_number() {
+        let out = "\r\nHKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\r\n    CurrentBuildNumber    REG_SZ    19045\r\n\r\n";
+        assert_eq!(parse_build(out), Some(19045));
+        assert_eq!(parse_build("garbage"), None);
+        assert!(19045 < MSIX_MIN_BUILD && 22621 >= MSIX_MIN_BUILD);
     }
 
     #[test]

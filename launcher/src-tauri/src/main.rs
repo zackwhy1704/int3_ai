@@ -1,5 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-//! Company Brain launcher (M1, Windows alpha). Sign in with an invite link, see your brains by
+//! int3 launcher (M1, Windows alpha). Sign in with an invite link, see your brains by
 //! name, launch STOCK Hermes Desktop against your own gated backend, switch user, sign out.
 //!
 //! On disk this launcher keeps exactly one file, launcher.json = {"server": "<origin>"}; the
@@ -15,12 +15,15 @@ use serde_json::{json, Value};
 use std::path::PathBuf;
 use tauri::State;
 
-const HERMES_DOWNLOAD: &str = "https://github.com/NousResearch/hermes-agent/releases";
+/// Nous's end-user download page for Hermes Desktop, as linked from the v0.22.6 docs
+/// (website/docs/user-guide/desktop.md:25 "Hermes Desktop product page"). GitHub releases carry
+/// no installers; the product page links the Microsoft Store listing and the .appinstaller.
+const HERMES_DOWNLOAD: &str = "https://hermes-agent.nousresearch.com/desktop";
 
 fn data_dir() -> PathBuf {
     std::env::var("CB_LAUNCHER_DATA_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from(std::env::var("APPDATA").unwrap_or_default()).join("CompanyBrain"))
+        .unwrap_or_else(|_| PathBuf::from(std::env::var("APPDATA").unwrap_or_default()).join("int3"))
 }
 
 fn config_path() -> PathBuf {
@@ -105,10 +108,23 @@ async fn byok_link(session: State<'_, Session>) -> Result<Value, Value> {
     Ok(json!({"opened": true, "expires_in_hours": link["expires_in_hours"], "replaces_existing_key": link["replaces_existing_key"]}))
 }
 
+/// Open Nous's download page (a constant: the page cannot choose what is opened).
+#[tauri::command]
+fn open_hermes_download() -> Result<(), Value> {
+    std::process::Command::new("rundll32").args(["url.dll,FileProtocolHandler", HERMES_DOWNLOAD]).spawn().map_err(|e| fail(e.to_string()))?;
+    Ok(())
+}
+
 #[tauri::command]
 async fn hermes_status(session: State<'_, Session>) -> Result<Value, Value> {
     let Some(install) = hermes::detect() else {
-        return Ok(json!({"found": false, "download": HERMES_DOWNLOAD}));
+        let build = hermes::os_build();
+        return Ok(json!({
+            "found": false,
+            "download": HERMES_DOWNLOAD,
+            "os_build": build,
+            "os_supported": build.map_or(true, |b| b >= hermes::MSIX_MIN_BUILD),
+        }));
     };
     let compat = session.authed(Method::GET, "/launcher/compat", None).await.map_err(err)?;
     let policy = hermes::policy(&install, &compat);
@@ -141,7 +157,7 @@ async fn launch(session: State<'_, Session>, restart: bool) -> Result<Value, Val
     let grant = session.authed(Method::POST, "/launcher/launch", None).await.map_err(err)?;
     let id = format!("cb-{}-{}", me["tenant"]["id"].as_str().unwrap_or("t"), me["user"]["id"].as_str().unwrap_or("u"));
     let url = grant["backend"]["url"].as_str().unwrap_or_default().to_string();
-    let entry = registry::our_entry(&id, grant["backend"]["label"].as_str().unwrap_or("Company Brain"), &url,
+    let entry = registry::our_entry(&id, grant["backend"]["label"].as_str().unwrap_or("int3"), &url,
                                     grant["desktop_token"].as_str().unwrap_or_default());
     for (dir, text) in install.user_data_dirs.iter().zip(existing) {
         let merged = registry::merge_launch(text.as_deref(), entry.clone()).map_err(|e| fail(e.to_string()))?;
@@ -182,7 +198,7 @@ async fn sign_out(session: State<'_, Session>) -> Result<Value, Value> {
 fn main() {
     tauri::Builder::default()
         .manage(Session::new(load_server()))
-        .invoke_handler(tauri::generate_handler![status, sign_in, me, account, revoke_device, byok_link, hermes_status, launch, sign_out])
+        .invoke_handler(tauri::generate_handler![status, sign_in, me, account, revoke_device, byok_link, hermes_status, open_hermes_download, launch, sign_out])
         .run(tauri::generate_context!())
-        .expect("error while running the Company Brain launcher");
+        .expect("error while running the int3 launcher");
 }

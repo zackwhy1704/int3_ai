@@ -16,7 +16,13 @@ Two jobs:
 Matching is on the PATH ONLY (query strings are ignored), against either an
 exact path or a "prefix*" entry. Deliberately dumb: the whole point is that the
 rule set is auditable in one screen.
+
+A STUB rule (``GET /exact/path => {json}``) is answered BY THE PROXY with 200 and
+that body; the request never reaches the backend. Only GET, only exact paths: it
+exists so a page the pilot does not offer renders its own empty state instead of
+an error, and a stubbed write would lie about success.
 """
+import json
 import os
 import socket
 import sys
@@ -32,11 +38,12 @@ LOG_PATH = os.environ.get("PROXY_LOG", "/tmp/routes.log")
 ALLOWLIST_FILE = os.environ.get("ALLOWLIST_FILE", "").strip()
 
 
-def _load_rules(path: str) -> list[tuple[str, str]]:
+def _load_rules(path: str) -> list[tuple[str, str, bytes | None]]:
     """One rule per line: ``METHOD /path`` or ``METHOD /prefix*``; ``#`` comments.
 
     Method-aware on purpose: path-only matching would let ``POST /api/cron/jobs``
     (create a scheduled job) ride on an allowlisted ``GET /api/cron/jobs``.
+    ``GET /path => {json}`` is a stub (third field = the body; no ``#`` in it).
     """
     rules = []
     with open(path, encoding="utf-8") as fh:
@@ -44,8 +51,16 @@ def _load_rules(path: str) -> list[tuple[str, str]]:
             line = raw.split("#", 1)[0].strip()
             if not line:
                 continue
-            method, _, route = line.partition(" ")
-            rules.append((method.strip().upper(), route.strip()))
+            line, arrow, stub = line.partition("=>")
+            method, _, route = line.strip().partition(" ")
+            method, route = method.strip().upper(), route.strip()
+            body = None
+            if arrow:
+                if method != "GET" or route.endswith("*"):
+                    raise ValueError(f"stub rules are GET + exact path only: {raw.strip()!r}")
+                json.loads(stub)  # refuse to start on a malformed stub body
+                body = stub.strip().encode()
+            rules.append((method, route, body))
     return rules
 
 
@@ -58,16 +73,21 @@ _SKIP_REQ = {"host", "connection", "keep-alive", "transfer-encoding", "upgrade"}
 _SKIP_RESP = {"connection", "keep-alive", "transfer-encoding", "content-encoding", "content-length"}
 
 
-def permitted(method: str, path: str) -> bool:
-    for rule_method, rule in ALLOW:
+def match(method: str, path: str) -> tuple[bool, bytes | None]:
+    """(permitted, stub body or None). The first matching rule wins."""
+    for rule_method, rule, stub in ALLOW:
         if rule_method not in ("*", method):
             continue
         if rule.endswith("*"):
             if path.startswith(rule[:-1]):
-                return True
+                return True, stub
         elif path == rule:
-            return True
-    return False
+            return True, stub
+    return False, None
+
+
+def permitted(method: str, path: str) -> bool:
+    return match(method, path)[0]
 
 
 def record(line: str) -> None:
@@ -82,18 +102,31 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):  # keep stderr clean; we keep our own log
         return
 
+    def _reply(self, status: int, body: bytes) -> None:
+        self.send_response(status)
+        self.send_header("content-type", "application/json")
+        self.send_header("content-length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _drain(self) -> None:
+        length = int(self.headers.get("content-length") or 0)
+        if length:
+            self.rfile.read(length)
+
     def _proxy(self) -> None:
         path = self.path.split("?", 1)[0]
         record(f"{self.command} {path}")
 
-        if ENFORCING and not permitted(self.command, path):
+        allowed, stub = match(self.command, path) if ENFORCING else (True, None)
+        if not allowed:
             record(f"  DENIED {self.command} {path}")
-            body = b'{"detail":"route not on proxy allowlist"}'
-            self.send_response(403)
-            self.send_header("content-type", "application/json")
-            self.send_header("content-length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            self._reply(403, b'{"detail":"route not on proxy allowlist"}')
+            return
+        if stub is not None:
+            record(f"  STUB {self.command} {path}")
+            self._drain()
+            self._reply(200, stub)
             return
 
         # The desktop's gateway channel is a WebSocket (/api/ws). urllib cannot

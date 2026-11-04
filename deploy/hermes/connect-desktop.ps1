@@ -129,7 +129,7 @@ if (-not $connect.url -or -not $connect.session_token) {
 
 # --- the remote connection entry (stock Hermes v2 registry shape) --------------
 $connId = "cb-$Tenant-$User"
-$label  = "Company Brain - $User@$Tenant"
+$label  = "int3 - $User@$Tenant"
 $remote = [ordered]@{
   id       = $connId
   kind     = 'remote'

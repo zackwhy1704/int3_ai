@@ -58,7 +58,7 @@ fi
 registry="$target/connections.json"
 
 # --- merge: keep the 'local' device + other users, replace THIS user, make it primary ---
-CONN_ID="cb-$TENANT-$USER_ID" LABEL="Company Brain - $USER_ID@$TENANT" \
+CONN_ID="cb-$TENANT-$USER_ID" LABEL="int3 - $USER_ID@$TENANT" \
 REGISTRY="$registry" CONNECT_FILE="$connect_file" \
 "$PY" - <<'PY'
 import json, os
@@ -100,7 +100,7 @@ cat <<EOF
 # remove the token.
 ######################################################################
 
-Active Hermes Desktop connection is now: Company Brain - $USER_ID@$TENANT
+Active Hermes Desktop connection is now: int3 - $USER_ID@$TENANT
   url   : $(sed -n 's/.*"url"[^"]*"\([^"]*\)".*/\1/p' "$connect_file" | head -1)
   files : $registry
 EOF

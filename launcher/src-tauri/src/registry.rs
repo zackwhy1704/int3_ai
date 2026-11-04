@@ -157,7 +157,7 @@ mod tests {
     const ID: &str = "cb-brindlewood-priya";
 
     fn ours() -> Value {
-        our_entry(ID, "Company Brain - priya@brindlewood", "http://127.0.0.1:9432", "cb_dt_test")
+        our_entry(ID, "int3 - priya@brindlewood", "http://127.0.0.1:9432", "cb_dt_test")
     }
     fn parsed(s: &str) -> Value {
         serde_json::from_str(s).unwrap()
@@ -196,7 +196,7 @@ mod tests {
 
     #[test]
     fn switching_user_removes_every_previous_cb_entry() {
-        let first = merge_launch(None, our_entry("cb-brindlewood-ada", "Company Brain - ada@brindlewood", "http://127.0.0.1:9433", "cb_dt_ada")).unwrap();
+        let first = merge_launch(None, our_entry("cb-brindlewood-ada", "int3 - ada@brindlewood", "http://127.0.0.1:9433", "cb_dt_ada")).unwrap();
         let v = parsed(&merge_launch(Some(&first), ours()).unwrap());
         assert_eq!(ids(&v), vec!["local", ID]);
         assert!(!serde_json::to_string(&v).unwrap().contains("cb_dt_ada"), "the previous user's token must be gone");
@@ -282,7 +282,7 @@ mod tests {
         let mixed = merge_launch(Some(r#"{"version":2,"primary":"local","launchMode":"last-used","lastUsed":"home",
           "connections":[{"id":"local","kind":"local","label":"My PC"},
                          {"id":"home","kind":"remote","label":"Home server","url":"https://h.example","authMode":"token","token":{"encoding":"plain","value":"x"}},
-                         {"id":"cb-brindlewood-ada","kind":"remote","label":"Company Brain - ada@brindlewood","url":"http://127.0.0.1:9433","authMode":"token","token":{"encoding":"plain","value":"cb_dt_ada"}}],
+                         {"id":"cb-brindlewood-ada","kind":"remote","label":"int3 - ada@brindlewood","url":"http://127.0.0.1:9433","authMode":"token","token":{"encoding":"plain","value":"cb_dt_ada"}}],
           "quarantined":[{"reason":"entry-malformed","entry":"junk"}]}"#), ours()).unwrap();
         let signed_out = merge_signout(Some(&mixed)).unwrap().unwrap();
         for (name, text) in [("launch-fresh", fresh), ("launch-mixed", mixed), ("signout", signed_out)] {

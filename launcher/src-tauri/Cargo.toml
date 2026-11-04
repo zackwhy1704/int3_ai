@@ -1,8 +1,8 @@
 [package]
-name = "company-brain-launcher"
+name = "int3-launcher"
 version = "0.1.0"
 edition = "2021"
-description = "Company Brain launcher: sign in, pick up your brains, launch stock Hermes Desktop"
+description = "int3 launcher: sign in, pick up your brains, launch stock Hermes Desktop"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

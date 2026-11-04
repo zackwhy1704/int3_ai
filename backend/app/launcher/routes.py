@@ -182,7 +182,7 @@ def launch(p: Principal = Depends(launcher_principal)) -> dict:
             "id": backend["backend_id"],
             "url": backend["url"],
             "hermes_release": backend["hermes_release"],
-            "label": f"Company Brain - {p.user_id}@{p.tenant_id}",
+            "label": f"int3 - {p.user_id}@{p.tenant_id}",
         },
         "desktop_token": token,
         "expires_at": expires.isoformat(),

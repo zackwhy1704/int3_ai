@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 use std::sync::Mutex;
 use url::Url;
 
-pub const KEYRING_SERVICE: &str = "CompanyBrainLauncher";
+pub const KEYRING_SERVICE: &str = "int3Launcher";
 
 #[derive(Debug)]
 pub enum ApiError {
