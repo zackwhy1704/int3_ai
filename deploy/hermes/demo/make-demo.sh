@@ -63,7 +63,7 @@ docker logs "${DEPLOY_PROJECT}-init-1" 2>&1 | grep -iE "provisioned|already" | t
 
 echo "== demo: provision marcus/priya/ada (key-owner ours, \$${CAP} cap) =="
 for up in "${PORTS[@]}"; do
-  bash deploy/hermes/provision-user.sh brindlewood "${up%%:*}" "${up##*:}" --key-owner ours --cap-usd "$CAP"
+  INGRESS_MODE=legacy bash deploy/hermes/provision-user.sh brindlewood "${up%%:*}" "${up##*:}" --key-owner ours --cap-usd "$CAP"
 done
 
 echo "== demo: run the scenario through the REAL Hermes agent (/api/ws) =="

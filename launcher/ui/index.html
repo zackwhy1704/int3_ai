@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Company Brain</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <!-- Sign in -->
+  <main id="view-signin" class="view center" hidden>
+    <section class="card narrow">
+      <div class="brand"><span class="logo" aria-hidden="true"></span>Company Brain</div>
+      <h1>Sign in</h1>
+      <p class="muted">Paste the invite link you were sent. It works once.</p>
+      <!-- Deliberately NOT a <form>: WebView2 saved submitted invite links into its autofill store
+           (EBWebView\Default\Web Data) despite autocomplete="off". With autofill disabled for the
+           window (tauri.conf.json generalAutofillEnabled=false) and no form submission, the field
+           is cleared and never persisted. -->
+      <div class="signin">
+        <label for="invite">Invite link</label>
+        <input id="invite" type="text" autocomplete="off" spellcheck="false" placeholder="https://…/invite#cb_inv_…">
+        <button type="button" id="signin" class="primary">Sign in</button>
+      </div>
+      <p id="signin-error" class="error" role="alert" hidden></p>
+    </section>
+  </main>
+
+  <!-- Library -->
+  <div id="view-app" class="view app" hidden>
+    <aside class="sidebar">
+      <div class="brand"><span class="logo" aria-hidden="true"></span>Company Brain</div>
+      <nav>
+        <button class="nav active" data-tab="library">Library</button>
+        <button class="nav" data-tab="account">Account</button>
+      </nav>
+      <div class="whoami">
+        <div id="who-name" class="who-name"></div>
+        <div id="who-tenant" class="muted small"></div>
+      </div>
+    </aside>
+
+    <main class="content">
+      <section id="tab-library" class="tab">
+        <header class="hero">
+          <div>
+            <p class="eyebrow" id="hero-tenant"></p>
+            <h1>Your brains</h1>
+            <p class="muted">Hermes opens connected to your own Company Brain. Everything you can ask about is listed here.</p>
+          </div>
+          <div class="launch-box">
+            <button id="launch" class="primary big">Launch Hermes</button>
+            <p id="hermes-line" class="muted small"></p>
+          </div>
+        </header>
+        <p id="launch-msg" class="notice" role="status" hidden></p>
+        <ul id="brains" class="brains"></ul>
+      </section>
+
+      <section id="tab-account" class="tab" hidden>
+        <h1>Account</h1>
+        <div class="grid">
+          <div class="card">
+            <h2>You</h2>
+            <dl id="acct-me"></dl>
+          </div>
+          <div class="card">
+            <h2>Health</h2>
+            <dl id="acct-health"></dl>
+          </div>
+          <div class="card" id="acct-byok" hidden>
+            <h2>Model key</h2>
+            <p class="muted small">Admins set the company's own Anthropic key. It is entered in your browser and never passes through this app.</p>
+            <button id="byok" class="secondary">Set the company key…</button>
+            <p id="byok-msg" class="muted small" role="status"></p>
+          </div>
+          <div class="card wide">
+            <h2>Signed-in devices</h2>
+            <ul id="devices" class="devices"></ul>
+          </div>
+        </div>
+        <div class="actions">
+          <button id="switch-user" class="secondary">Switch user</button>
+          <button id="sign-out" class="danger">Sign out</button>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="restart-dialog">
+    <p>Hermes is open. It has to restart to pick up your connection.</p>
+    <div class="actions">
+      <button value="cancel" class="secondary" id="restart-cancel">Cancel</button>
+      <button value="ok" class="primary" id="restart-ok">Restart Hermes</button>
+    </div>
+  </dialog>
+</body>
+</html>

@@ -58,7 +58,7 @@ Build the gated image once, then provision each user:
 ```
 docker build -t hermes-gated --build-arg BASE=hermes-base-pinned \
   -f gated/Dockerfile.gated gated
-./provision-user.sh brindlewood marcus 9131 --key-owner theirs
+INGRESS_MODE=legacy ./provision-user.sh brindlewood marcus 9131 --key-owner theirs
 ```
 
 Run `./verify-isolation.sh` after provisioning two users to assert a user cannot

@@ -1,0 +1,17 @@
+# Launcher edge: the ONLY host-facing door to the brain API, and only for the launcher's own
+# public routes (backend/app/launcher/routes.py). Same default-deny proxy and format as the
+# per-user backend allowlist (route_proxy.py; METHOD /path or METHOD /prefix*; query ignored).
+# Everything else on the brain (/v1/*, web auth, admin) stays unreachable from the host.
+#
+# EXCLUDED on purpose: POST /launcher/introspect. Only each backend's ingress auth proxy calls it,
+# on the compose network (http://brain:8000); exposing it would hand the host an oracle for
+# desktop tokens.
+POST /launcher/auth/invite      # redeem a single-use invite -> device session
+POST /launcher/auth/refresh     # rotate the refresh token (reuse revokes the device)
+POST /launcher/auth/revoke      # sign out: revoke this device
+GET  /launcher/devices          # account: this user's signed-in devices
+POST /launcher/devices/*        # account: /{id}/revoke (own devices only; 404 otherwise)
+GET  /launcher/me               # user, tenant, brain names
+GET  /launcher/compat           # Hermes desktop versions we accept
+POST /launcher/launch           # per-launch desktop token for the user's own backend
+POST /launcher/byok/link        # admin only: one-time key-entry link (opened in the browser)

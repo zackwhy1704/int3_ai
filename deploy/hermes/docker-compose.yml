@@ -95,12 +95,36 @@ services:
       TENANT_DB_KEY: ${TENANT_DB_KEY:?set TENANT_DB_KEY in .env}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-5-5}
+      # Where /launcher/byok/link points the admin's browser (the key-intake service below).
+      KEY_INTAKE_BASE_URL: ${KEY_INTAKE_BASE_URL:-http://127.0.0.1:8099}
     networks:
       ext: {}
       brain-net:
         aliases: [brain]        # ONLY the MCP sidecars reach it, at http://brain:8000
     depends_on:
       init: {condition: service_completed_successfully}
+
+  # Launcher edge: the ONLY host-facing door to the brain, and only for the launcher's public
+  # /launcher/* routes. The stock default-deny route proxy (gated/route_proxy.py) with its own
+  # allowlist (gated/launcher-edge.allowlist); /launcher/introspect is deliberately NOT on it.
+  # Logs METHOD + path only (no query, headers or bodies, so no invite codes or tokens).
+  # LOOPBACK ONLY: the hosted pilot puts TLS in front instead.
+  launcher-edge:
+    image: python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1
+    command: ["python", "/opt/proxy/route_proxy.py"]
+    user: "65534"
+    environment:
+      PROXY_UPSTREAM: http://brain:8000
+      PROXY_PORT: "8100"
+      ALLOWLIST_FILE: /opt/proxy/launcher-edge.allowlist
+      PROXY_LOG: /tmp/routes.log
+    volumes:
+      - ./gated/route_proxy.py:/opt/proxy/route_proxy.py:ro
+      - ./gated/launcher-edge.allowlist:/opt/proxy/launcher-edge.allowlist:ro
+    ports:
+      - "127.0.0.1:${LAUNCHER_EDGE_PORT:-8100}:8100"
+    networks: [ext]
+    depends_on: [brain]
 
   # BYOK gateway, service mode: resolves a per-user token -> tenant/user, injects
   # the TENANT's provider key, enforces the per-tenant model allowlist + caps.

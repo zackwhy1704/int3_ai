@@ -33,9 +33,9 @@ docker compose -f deploy/hermes/docker-compose.yml up -d --build
 # 2. Provision the three demo users (sidecar + gated backend + connect file each)
 #    Needs deploy/hermes/.env (ADMIN_DB_PASSWORD, TENANT_KEY_KEK, ANTHROPIC_API_KEY).
 set -a; . deploy/hermes/.env; set +a
-bash deploy/hermes/provision-user.sh brindlewood marcus 9131 --key-owner theirs
-bash deploy/hermes/provision-user.sh brindlewood priya  9132 --key-owner theirs
-bash deploy/hermes/provision-user.sh brindlewood ada    9133 --key-owner theirs
+INGRESS_MODE=legacy bash deploy/hermes/provision-user.sh brindlewood marcus 9131 --key-owner theirs
+INGRESS_MODE=legacy bash deploy/hermes/provision-user.sh brindlewood priya  9132 --key-owner theirs
+INGRESS_MODE=legacy bash deploy/hermes/provision-user.sh brindlewood ada    9133 --key-owner theirs
 ```
 
 Each user gets a connect file at `deploy/hermes/connect/brindlewood-<user>.connect.json`

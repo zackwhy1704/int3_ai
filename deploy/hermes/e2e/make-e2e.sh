@@ -36,7 +36,7 @@ docker logs "${DEPLOY_PROJECT}-init-1" 2>&1 | grep -iE "provisioned|already" | t
 
 echo "== e2e: provision 3 users (key-owner ours, \$${CAP} cap) =="
 for up in "${PORTS[@]}"; do
-  bash deploy/hermes/provision-user.sh brindlewood "${up%%:*}" "${up##*:}" --key-owner ours --cap-usd "$CAP"
+  INGRESS_MODE=legacy bash deploy/hermes/provision-user.sh brindlewood "${up%%:*}" "${up##*:}" --key-owner ours --cap-usd "$CAP"
 done
 
 echo "== e2e: run scenario (fresh volume -> brain already clean = DEMO.md Reset) =="

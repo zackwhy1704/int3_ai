@@ -1,0 +1,25 @@
+[package]
+name = "company-brain-launcher"
+version = "0.1.0"
+edition = "2021"
+description = "Company Brain launcher: sign in, pick up your brains, launch stock Hermes Desktop"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+# preserve_order: connections.json keeps Hermes's own key order when we rewrite it.
+serde_json = { version = "1", features = ["preserve_order"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+# Refresh token lives in the OS credential store (Windows Credential Manager), never in a file.
+keyring = { version = "3", features = ["windows-native"] }
+url = "2"
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1
+opt-level = "s"
+panic = "abort"

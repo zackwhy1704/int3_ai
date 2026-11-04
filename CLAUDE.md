@@ -113,7 +113,11 @@ gateway** behind it.
   separate app that signs the user in (invite links), lists their brains by name, writes the
   connection into Hermes's `connections.json`, and starts stock Hermes. It never stores brain
   content, documents, answers or claims, and never holds a provider key. Design:
-  `docs/LAUNCHER_AUTH_NOTE.md` (auth choice); server side under `backend/app/launcher/`.
+  `docs/LAUNCHER_AUTH_NOTE.md` (auth choice); server side under `backend/app/launcher/`; the app
+  (Tauri 2, Windows alpha) under `launcher/`; host entry = `launcher-edge` (compose, default-deny
+  `gated/launcher-edge.allowlist`). Caveat: STOCK Hermes Desktop itself caches recent transcript
+  tails in its own Local Storage (`apps/desktop/src/store/transcript-tail-cache.ts` @v0.22.6);
+  that is Hermes's store, not the launcher's, and is an open owner decision.
 - The desktop launches its own local `hermes serve` backend
   for *local* profiles (`apps/desktop/electron/backend-command.ts`), but when the active
   connection is our **remote** gated backend it routes to that backend and does not spawn a local

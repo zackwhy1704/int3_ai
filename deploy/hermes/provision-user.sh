@@ -5,12 +5,13 @@
 #   ./provision-user.sh brindlewood marcus 9131 --key-owner theirs
 #
 # INGRESS_MODE (env):
-#   legacy   (default) socat forwarder; the backend's static session token goes into a connect
-#            file for connect-desktop.ps1. Kept until the launcher (M1) replaces that path.
-#   launcher ingress auth proxy (ingress/ingress_auth.py) in the forwarder's slot. The backend's
+#   launcher (default since M1) ingress auth proxy (ingress/ingress_auth.py) in the forwarder's slot. The backend's
 #            session token stays server-side; the desktop gets short-lived launcher desktop
 #            tokens instead, checked per request via /launcher/introspect. Writes the
 #            user_backends row; writes NO connect file and NO token to disk.
+#   legacy   socat forwarder; the backend's static session token goes into a connect file for
+#            connect-desktop.ps1. Kept for `make demo` / `make e2e`, whose drivers talk to the
+#            backend with that connect file (they set INGRESS_MODE=legacy explicitly).
 #
 # Isolation (both layers — the cross-user hole this closes):
 #   NETWORK: a per-user internal network u-<tenant>-<user> holds ONLY this user's
@@ -62,7 +63,7 @@ EDGE_CTR="$PROJECT-edge-1"
 GATEWAY_IMAGE="${GATEWAY_IMAGE:-$PROJECT-gateway}"
 MCP_IMAGE="${MCP_IMAGE:-hermes-deploy-brain-mcp}"
 GATED_IMAGE="${GATED_IMAGE:-hermes-gated}"
-INGRESS_MODE="${INGRESS_MODE:-legacy}"
+INGRESS_MODE="${INGRESS_MODE:-launcher}"
 case "$INGRESS_MODE" in legacy|launcher) ;; *) echo "INGRESS_MODE must be legacy|launcher" >&2; exit 2 ;; esac
 INGRESS_IMAGE="${INGRESS_IMAGE:-hermes-ingress}"
 HERMES_RELEASE="${HERMES_RELEASE:-v0.22.6}"   # must match build-base.sh and hermes_compat
