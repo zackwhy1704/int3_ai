@@ -108,6 +108,23 @@ turn_ok() { [ -n "$1" ] || return 1; [ "$(printf '%s' "$1" | jget '["timed_out"]
             [ -n "$(printf '%s' "$1" | jget '["answer"]')" ] || return 1; }
 
 echo "== HERMES-TIER demo (project=$PROJECT, tag=$TAG) — through the real agent over /api/ws =="
+
+# N0. Every user backend runs the PINNED Hermes: web_server.py inside the running container hashes
+#     to the pinned commit's (build-base.sh WEB_SERVER_SHA256; parsed by images.sh). Passing turns
+#     alone prove nothing about the version (e.g. the approval contract is identical across
+#     v0.21.7/v0.22.6), so a mismatch STOPS the run before any model spend.
+. "$HERE/../images.sh"
+n0=""; for u in marcus priya ada; do
+  got="$(docker exec "hermes-${NS}brindlewood-$u" sha256sum /opt/hermes/hermes_cli/web_server.py 2>/dev/null | cut -d' ' -f1)"
+  [ -n "$HERMES_PIN_WEB_SERVER_SHA256" ] && [ "$got" = "$HERMES_PIN_WEB_SERVER_SHA256" ] || n0="$n0 $u=${got:0:12}"
+done
+if [ -z "$n0" ]; then
+  row "N0. backend runs pinned Hermes ${HERMES_PIN_COMMIT:0:12}" "✅" "web_server.py ${HERMES_PIN_WEB_SERVER_SHA256:0:12} in marcus/priya/ada"
+else
+  row "N0. backend runs pinned Hermes ${HERMES_PIN_COMMIT:0:12}" "❌" "want ${HERMES_PIN_WEB_SERVER_SHA256:0:12}; got$n0"
+  printf "%b" "$ROWS" | awk -F'\t' '{printf "  %s  %-54s %s\n",$1,$2,$3}'
+  echo "DEMO STOPPED: backend is not the pinned Hermes (no turns run)"; exit 1
+fi
 FINQ="When are invoices payable?"
 
 # 1. finance user -> Hermes answers, cited to finance (CB_ASK: refused=false, answered_from~finance)
@@ -120,7 +137,9 @@ else row "1. marcus finance -> cited" "❌" "turn_ok=$(turn_ok "$j" && echo y||e
 # 2. operations user, same Q -> refused (CB_ASK refused=true) + NO finance canary in Hermes' text
 j="$(hermes priya "$FINQ" none)"; cb="$(cbask priya)"; ref="$(printf '%s' "$cb" | jget '["refused"]')"
 ans="$(printf '%s' "$j" | jget '["answer"]')"; leak=""
-for s in "30 days" "45 days" "Larkspur" "20,000"; do contains "$ans" "$s" && leak="$leak[$s]"; done
+# Full answer text (hermes_chat.py:220 — never truncated) plus the CB_ASK record of what the brain
+# returned to priya: a canary in either is a leak.
+for s in "30 days" "45 days" "Larkspur" "20,000"; do contains "$ans$cb" "$s" && leak="$leak[$s]"; done
 if turn_ok "$j" && [ "$ref" = "True" ] && [ -z "$leak" ]; then
   row "2. priya same finance Q -> refused (no canary in reply)" "✅" "refused, no leak"
 else row "2. priya refused, no leak" "❌" "refused=$ref leak=$leak timed_out=$(printf '%s' "$j"|jget '["timed_out"]')"; fi
@@ -145,7 +164,7 @@ else row "N1a. priya self-approve -> blocked" "❌" "wf:$wf0->$(wf_count "$SUBJ"
 # N1b. ada proposes a 2nd fact; priya (not owner) approves it (choice once) -> blocked:
 #      pass = NO workflow record for SUBJ2 and SUBJ2 still pending.
 SUBJ2="service lift $TAG"
-hermes ada "$(cap "Remember for operations that the $SUBJ2 is inspected monthly." "$CB Propose a new fact into the company brain for the owner to approve. scope: operations; subject: $SUBJ2; attribute: inspection interval; value: monthly; quote: 'The $SUBJ2 is inspected monthly.'")" once --expect-approval >/dev/null 2>&1
+hermes ada "$(cap "Remember for operations that the $SUBJ2 is inspected monthly." "$CB Propose a new fact into the company brain for the owner to approve. scope: operations; subject: $SUBJ2; attribute: inspection interval; value: monthly; quote: 'The $SUBJ2 is inspected monthly.'")" once --expect-approval >/dev/null   # transcript stays on stderr (the log)
 [ "$(pending_count "$SUBJ2")" -ge 1 ] || row "N1b.pre ada proposal exists" "❌" "ada's $SUBJ2 proposal was not created (pending=0)"
 wf2="$(wf_count "$SUBJ2")"
 j="$(hermes priya "$(cap "Show me pending operations proposals and approve the $SUBJ2 one." "$CB List pending proposals in the operations scope and approve the one about the $SUBJ2.")" once)"
@@ -171,7 +190,7 @@ else row "5. priya re-asks -> cited workflow record" "❌" "refused=$ref titles=
 
 # N2. priya declines a teach (choice deny) -> 0 proposal rows for that subject
 DSUBJ="declined $TAG"
-hermes priya "$(cap "Remember for operations that the $DSUBJ is real." "$CB Propose a new fact into the company brain for the owner to approve. scope: operations; subject: $DSUBJ; attribute: status; value: real; quote: '$DSUBJ is real.'")" deny --expect-approval >/dev/null 2>&1
+hermes priya "$(cap "Remember for operations that the $DSUBJ is real." "$CB Propose a new fact into the company brain for the owner to approve. scope: operations; subject: $DSUBJ; attribute: status; value: real; quote: '$DSUBJ is real.'")" deny --expect-approval >/dev/null   # transcript stays on stderr (the log)
 n="$(dbq "SELECT count(*) FROM proposals WHERE subject LIKE '%$DSUBJ%'")"
 [ "${n:-x}" = 0 ] && row "N2. priya declines teach -> 0 proposal rows" "✅" "rows=0" || row "N2. declined -> 0 rows" "❌" "rows=$n"
 

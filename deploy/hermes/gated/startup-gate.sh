@@ -12,7 +12,8 @@
 #              all set and byte-equal; WRITE_SAFE_ROOT a SINGLE os.pathsep entry.
 #   STATIC  2. config.yaml terminal.backend absent or not "ssh".
 #   LIVE    3. route proxy up AND enforcing (an excluded route 403s).
-#   LIVE    4. read boundary real: in-boundary path 200, out-of-boundary 403.
+#   LIVE    4. read boundary real: in-boundary path 200, out-of-boundary 403; the files
+#              pane's start folder (GET /api/fs/default-cwd) is inside HERMES_HOME.
 #   LIVE    5. egress locked: an allowed host connects, a disallowed one does not.
 #
 # Usage (as the container command):  startup-gate.sh serve --host 127.0.0.1 --port 9119
@@ -106,7 +107,15 @@ IN=$(code "${AUTH[@]}" "http://127.0.0.1:$PORT_PROXY/api/fs/list?path=$HERMES_HO
 OUT=$(code "${AUTH[@]}" "http://127.0.0.1:$PORT_PROXY/api/fs/list?path=/etc")
 [ "$IN" = 200 ] || fatal "in-boundary read of $HERMES_HOME returned $IN, expected 200"
 [ "$OUT" = 403 ] || fatal "out-of-boundary read of /etc returned $OUT, expected 403 — boundary not active"
-ok "read boundary live (in=200 /etc=403)"
+# The pane opens at default-cwd (terminal.cwd, else home: files.py:258-286 @v0.22.6). Outside
+# HERMES_HOME it would only show a 403, but it also means terminal.cwd drifted off the managed root.
+CWD=$(curl -s --max-time 15 "${AUTH[@]}" "http://127.0.0.1:$PORT_PROXY/api/fs/default-cwd" \
+      | python3 -c 'import sys,json; print(json.load(sys.stdin).get("cwd",""))' 2>/dev/null)
+case "$CWD/" in
+  "$HERMES_HOME"/*) ;;
+  *) fatal "files pane start folder (default-cwd) '$CWD' is outside $HERMES_HOME — set terminal.cwd inside it" ;;
+esac
+ok "read boundary live (in=200 /etc=403; default-cwd=$CWD)"
 
 # --- LIVE 5: egress locked, provider NOT direct, gateway up -------------------
 # positive liveness: our in-network gateway must answer (inference path alive).

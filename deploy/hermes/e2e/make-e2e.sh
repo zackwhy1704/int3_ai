@@ -19,10 +19,9 @@ teardown() { [ "${E2E_NO_TEARDOWN:-0}" = 1 ] && { echo "(E2E_NO_TEARDOWN=1: leav
              DEPLOY_PROJECT="$DEPLOY_PROJECT" bash deploy/hermes/e2e/teardown.sh || true; }
 trap teardown EXIT
 
-echo "== e2e: build shared images (if missing) =="
-docker image inspect hermes-base-pinned     >/dev/null 2>&1 || bash deploy/hermes/build-base.sh
-docker image inspect hermes-gated           >/dev/null 2>&1 || docker build -t hermes-gated --build-arg BASE=hermes-base-pinned -f deploy/hermes/gated/Dockerfile.gated deploy/hermes/gated
-docker image inspect hermes-deploy-brain-mcp >/dev/null 2>&1 || docker build -t hermes-deploy-brain-mcp deploy/hermes/brain-mcp
+echo "== e2e: shared images (version-safe: deploy/hermes/images.sh) =="
+. deploy/hermes/images.sh
+ensure_images || { echo "image build/verification failed"; exit 2; }
 
 echo "== e2e: fresh isolated stack ($DEPLOY_PROJECT) =="
 teardown

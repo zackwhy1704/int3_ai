@@ -13,7 +13,7 @@ The way it reaches a user's machine is the thing that is new on this branch
 
 ```
 stock Hermes Desktop (thin client)          the user installs Nous's official Hermes app
-   │  one connection (url + session_token)   and points it at a connect file — no custom
+   │  one connection (url + session_token)   and our launcher writes that connection — no custom
    ▼                                          desktop build, "Hermes under the hood"
 per-user gated Hermes backend (container)    STOCK Hermes v0.22.6 in our gated container
    │  MCP (per-user brain token)              one isolated container per user; default-deny
@@ -60,8 +60,9 @@ gateway** behind it.
 - **Capture is owner-gated in two load-bearing layers:** the app layer (`_require_owner`
   in `backend/app/capture.py`) and the SECURITY DEFINER DB function
   (`approve_workflow_proposal` in `backend/app/schema.sql`, which also enforces no
-  self-approval). The CI demo removes both and asserts the behaviour regresses, then
-  restores them (RED→GREEN). No bypass flag ships.
+  self-approval). The demo shows a non-owner blocked on the real agent (N1a/N1b); the CI
+  RED→GREEN regression that would *prove* both layers load-bearing is **UNVALIDATED**
+  (manual-only; never run to a full GREEN→RED→GREEN). No bypass flag ships.
 - **The isolation boundary is Postgres + the container network, not application code.**
   One database per tenant (`t_<id>`), reachable only by its own role; one container +
   one MCP sidecar per user; the brain token lives only in the sidecar (provisioning

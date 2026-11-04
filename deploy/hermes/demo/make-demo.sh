@@ -48,10 +48,9 @@ set -a; . "$ENVF"; set +a
 
 teardown() { DEPLOY_PROJECT="$DEPLOY_PROJECT" bash deploy/hermes/e2e/teardown.sh || true; }
 
-echo "== demo: build shared images (if missing) =="
-docker image inspect hermes-base-pinned      >/dev/null 2>&1 || bash deploy/hermes/build-base.sh
-docker image inspect hermes-gated            >/dev/null 2>&1 || docker build -t hermes-gated --build-arg BASE=hermes-base-pinned -f deploy/hermes/gated/Dockerfile.gated deploy/hermes/gated
-docker image inspect hermes-deploy-brain-mcp >/dev/null 2>&1 || docker build -t hermes-deploy-brain-mcp deploy/hermes/brain-mcp
+echo "== demo: shared images (version-safe: deploy/hermes/images.sh) =="
+. deploy/hermes/images.sh
+ensure_images || { echo "image build/verification failed"; exit 2; }
 
 echo "== demo: fresh isolated stack ($DEPLOY_PROJECT) =="
 teardown

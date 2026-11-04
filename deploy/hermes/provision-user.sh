@@ -147,6 +147,14 @@ model:
   provider: "custom"
   base_url: "http://brain-gateway:8001/v1"
   api_key: "$GATEWAY_TOKEN"
+terminal:
+  # Start folder for new sessions, the browser terminal AND the desktop files pane: the pane asks
+  # GET /api/fs/default-cwd, which answers terminal.cwd when it names a folder, else the home
+  # folder (hermes_cli/web_routers/files.py:258-286 @v0.22.6). The shipped default is "."
+  # (config_defaults.py:285-293), which resolved to "/" here, OUTSIDE the read boundary, so the
+  # pane opened on a 403. A folder inside HERMES_HOME (created below) keeps it in bounds; the
+  # startup gate asserts default-cwd is inside HERMES_HOME (startup-gate.sh LIVE 4).
+  cwd: "/opt/data/workspace"
 mcp_servers:
   brain:
     url: "http://$mcp_name:9000/mcp"
@@ -185,7 +193,8 @@ memory:
   user_profile_enabled: false
 YAML
 docker run --rm -i -v "$vol:/opt/data" busybox \
-  sh -c 'cat > /opt/data/config.yaml; chown 1000:1000 /opt/data/config.yaml 2>/dev/null || true' < "$cfg"
+  sh -c 'cat > /opt/data/config.yaml; chown 1000:1000 /opt/data/config.yaml 2>/dev/null || true
+          mkdir -p /opt/data/workspace; chown 1000:1000 /opt/data/workspace 2>/dev/null || true' < "$cfg"
 rm -f "$cfg"
 
 # Standing operator instruction = SOUL.md in HERMES_HOME (/opt/data). SOUL.md is the agent's
