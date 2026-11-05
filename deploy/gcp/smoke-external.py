@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """External check of the hosted path, from a machine outside the VM. Certificates are verified.
 
-    <invite-link on stdin> python deploy/gcp/smoke-external.py chat "When are invoices payable?"
+    <invite-link on stdin> python deploy/gcp/smoke-external.py chat "When are invoices payable?" [once|deny]
     <invite-link on stdin> python deploy/gcp/smoke-external.py idle 960
 
 Redeems a single-use invite exactly as the launcher does, gets a desktop token for that user's own
@@ -48,13 +48,13 @@ def sign_in() -> tuple[str, dict, dict]:
     return server, session, grant
 
 
-def chat(grant: dict, prompt: str) -> int:
+def chat(grant: dict, prompt: str, approve: str = "none") -> int:
     fd, path = tempfile.mkstemp(suffix=".json")
     try:
         with os.fdopen(fd, "w") as f:
             json.dump({"url": grant["backend"]["url"], "session_token": grant["desktop_token"], "name": "smoke"}, f)
         return subprocess.call([sys.executable, str(HERMES_CHAT), "--connect", path, "--say", prompt,
-                                "--turn-timeout", "180"])
+                                "--turn-timeout", "180", "--approve", approve])
     finally:
         os.unlink(path)
 
@@ -98,7 +98,9 @@ def main() -> int:
     mode, arg = sys.argv[1], sys.argv[2]
     server, session, grant = sign_in()
     try:
-        return chat(grant, arg) if mode == "chat" else asyncio.run(idle(grant, int(arg)))
+        if mode == "chat":
+            return chat(grant, arg, sys.argv[3] if len(sys.argv) > 3 else "none")
+        return asyncio.run(idle(grant, int(arg)))
     finally:
         # The access token lasts 15 minutes and an idle run outlives it, so refresh first.
         fresh = api(server, "POST", "/launcher/auth/refresh", body={"refresh_token": session["refresh_token"]})

@@ -99,8 +99,8 @@ invites. The cap is per tenant, per day, and we pay it.
 
 ## Installer
 
-Published as a GitHub pre-release (the repo is public): tag `launcher-v0.1.0`, asset
-`int3_0.1.0_x64-setup.exe`, SHA-256 in the release notes. Build: `launcher/README.md`.
+Published as a GitHub pre-release (the repo is public): tag `launcher-v0.1.1`, asset
+`int3_0.1.1_x64-setup.exe`, SHA-256 in the release notes. Build: `launcher/README.md`.
 
 ## Day to day
 

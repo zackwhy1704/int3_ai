@@ -1,6 +1,6 @@
 [package]
 name = "int3-launcher"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "int3 launcher: sign in, pick up your brains, launch stock Hermes Desktop"
 
