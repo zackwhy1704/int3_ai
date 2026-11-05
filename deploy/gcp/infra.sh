@@ -7,7 +7,6 @@
 # A dedicated VPC, because the project's `default` network has SSH and RDP open to 0.0.0.0/0. On
 # int3-net the only inbound rules are 443 from anywhere and 22 from Google's IAP range.
 set -euo pipefail
-export MSYS_NO_PATHCONV=1
 HERE="$(cd "$(dirname "$0")" && pwd)"
 . "$HERE/config.env"
 G=(gcloud --project "$GCP_PROJECT" --quiet)

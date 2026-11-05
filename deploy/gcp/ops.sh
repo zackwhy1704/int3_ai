@@ -6,7 +6,7 @@
 # A stopped VM bills no compute; the disk and static IP keep billing. Everything returns on start:
 # the stack via int3-stack.service, the per-user containers via their restart policy.
 set -euo pipefail
-export MSYS_NO_PATHCONV=1
+export MSYS2_ARG_CONV_EXCL="--path="
 HERE="$(cd "$(dirname "$0")" && pwd)"
 . "$HERE/config.env"
 G=(gcloud --project "$GCP_PROJECT")
