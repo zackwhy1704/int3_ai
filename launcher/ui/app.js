@@ -72,8 +72,11 @@ async function refreshHermesLine() {
       return
     }
     $('launch').disabled = h.policy.state === 'blocked'
-    line.textContent = `Hermes ${h.version === 'dev' ? '(development build)' : h.version} · ${h.policy.state}`
-    line.title = h.policy.message
+    // The exact version stays on screen so it can be screenshotted and recorded (store-test.sh --record).
+    line.textContent = `Hermes version: ${h.version === 'dev' ? 'development build' : h.version}`
+    const note = $('hermes-note')
+    note.textContent = h.policy.state === 'supported' ? '' : h.policy.message
+    note.hidden = h.policy.state === 'supported'
   } catch (e) {
     line.textContent = message(e)
   }
@@ -102,7 +105,6 @@ async function launch(restart) {
     }
     const until = new Date(r.expires_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     msg.textContent = `Hermes is starting, connected as ${r.label}. ${r.backend_online ? 'Your backend is online.' : 'Your backend did not answer yet.'} This connection is valid until ${until}; launch again from here after that.`
-    if (r.policy && r.policy.state !== 'supported') msg.textContent += ` Note: ${r.policy.message}`
   } catch (e) {
     msg.className = 'notice error'
     msg.textContent = message(e)

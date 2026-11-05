@@ -72,6 +72,7 @@ button.small { padding: 4px 10px; font-size: 12px; }
 .eyebrow { margin: 0 0 4px; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
 .launch-box { text-align: right; }
 .launch-box p { margin: 8px 0 0; }
+.hermes-note { max-width: 300px; margin-left: auto !important; padding: 8px 10px; border-radius: 8px; background: var(--tile); text-align: left; }
 #get-hermes { margin-top: 8px; }
 .notice { margin: 16px 0 0; padding: 10px 12px; border-radius: 8px; background: var(--tile); }
 .notice.error { color: var(--danger); }

@@ -85,6 +85,6 @@ release's state (`supported` for v0.22.6) instead of "untested".
   which the launcher does not detect.
 - An MSIX install has not been exercised end to end yet (the dev machine is Windows 10); the
   e2e used a from-source v0.22.6 build through the dev-command hook.
-- Every installed Hermes build is "untested" until its package version is recorded (above);
-  "blocked" builds are refused.
+- Every installed Hermes build is "untested" until its package version is recorded (above). Untested
+  warns on screen and still launches, showing the exact version; only "blocked" builds are refused.
 - A dev-command Hermes is not restarted by the launcher; a packaged one is (after you confirm).

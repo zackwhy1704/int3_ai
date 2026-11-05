@@ -145,10 +145,11 @@ pub fn policy(install: &Install, compat: &Value) -> Policy {
         .flatten()
         .find(|b| b["platform"] == "windows" && b["package_version"].as_str() == Some(install.version.as_str()));
     let Some(build) = build else {
-        let what = if install.version == "dev" { "a development build of Hermes".to_string() } else { format!("Hermes package {}", install.version) };
+        // Warn, never block: an unknown build is what a partner gets the day Nous ships a new one.
+        let what = if install.version == "dev" { "This development build of Hermes".to_string() } else { format!("Hermes {}", install.version) };
         return Policy {
             state: "untested".into(),
-            message: format!("{what} has not been checked against this server (backend Hermes {backend}). It will probably work; report anything odd."),
+            message: format!("{what} has not been tested with int3 yet (server: Hermes {backend}). You can still continue. If anything looks odd, send us a screenshot."),
         };
     };
     let release = build["release"].as_str().unwrap_or("?");
@@ -236,7 +237,10 @@ mod tests {
 
     #[test]
     fn unknown_and_dev_builds_are_untested() {
-        assert_eq!(policy(&install("2026.9999.1.0"), &compat()).state, "untested");
+        let unknown = policy(&install("2026.9999.1.0"), &compat());
+        assert_eq!(unknown.state, "untested");
+        assert!(unknown.message.contains("2026.9999.1.0"), "the partner must see the exact version");
+        assert!(unknown.message.contains("You can still continue"));
         let dev = policy(&install("dev"), &compat());
         assert_eq!(dev.state, "untested");
         assert!(dev.message.contains("development build"));
