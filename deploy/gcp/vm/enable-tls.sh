@@ -27,11 +27,10 @@ done
 echo "[tls] wildcard resolves to $ip on 1.1.1.1 and 8.8.8.8"
 
 render_caddy "$issuer"
-if docker ps --format '{{.Names}}' | grep -qx int3-caddy; then
-  docker exec int3-caddy caddy reload --config /etc/caddy/Caddyfile
-else
-  docker compose -f "$GCP_ROOT/caddy/compose.yml" up -d
-fi
+# Restart, not reload: a reload keeps certificates cached in memory, so switching from staging to
+# production would go on serving the staging certificate.
+docker compose -f "$GCP_ROOT/caddy/compose.yml" up -d
+docker restart int3-caddy >/dev/null
 
 launcher_id="$(awk -F'\t' '$3=="launcher"{print $1; exit}' "$ROUTES")"
 host="$launcher_id.$INT3_BASE_DOMAIN"

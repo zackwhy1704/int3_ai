@@ -35,8 +35,12 @@ if docker exec -e PGPASSWORD="$ADMIN_DB_PASSWORD" "$DEPLOY_PROJECT-db-1" psql -U
      "SELECT 1 FROM tenants WHERE id = '$NAME'" | grep -q 1; then
   echo "tenant $NAME exists"
 else
+  # identities.email is unique across tenants, so each partner's copy of the seed gets its own domain.
+  seed="/tmp/seed-$NAME"
+  docker exec "$BRAIN" sh -c "rm -rf $seed && cp -r /app/seed/brindlewood $seed && sed -i 's/@brindlewood\.example/@$NAME.example/' $seed/users.yaml"
   docker exec "${admin_env[@]}" "$BRAIN" python -m app.tenants.admin provision --id "$NAME" \
-    --name "$NAME (synthetic demo data)" --seed /app/seed/brindlewood >/dev/null
+    --name "$NAME (synthetic demo data)" --seed "$seed" >/dev/null
+  docker exec "$BRAIN" rm -rf "$seed"
   echo "tenant $NAME created from the synthetic seed"
 fi
 

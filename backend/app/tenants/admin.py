@@ -315,6 +315,9 @@ def provision(
                 )
             )
             control.execute(
+                sql.SQL("DROP ROLE IF EXISTS {}").format(sql.Identifier(f"{db}_wr"))
+            )
+            control.execute(
                 sql.SQL("DROP ROLE IF EXISTS {}").format(sql.Identifier(db))
             )
         raise
