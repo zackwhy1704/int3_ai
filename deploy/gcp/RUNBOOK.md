@@ -20,6 +20,17 @@ certificates use TLS-ALPN-01 on 443. `provision-user.sh` refuses a non-https pub
 refuses a non-https server, and the launcher refuses any non-https, non-loopback backend or link and
 follows no redirects.
 
+**Why Host is rewritten, not `dashboard.public_url`.** Stock Hermes bound to 127.0.0.1 answers a public
+Host with 400 on HTTP and refuses it on `/api/ws` (`web_server_boundary.py:84-108,197-222` @v0.22.6).
+Declaring the host in `dashboard.public_url` (the source of `trusted_public_hosts`) also works: measured on
+the gated image, a public Host then gets 200, and a `?token=` websocket gets 101. But it needs one more
+per-user Hermes setting, and it engages Hermes's dashboard auth gate even on a loopback bind
+(`web_server.py:368-377`), a path `make demo` never exercises. It adds no protection here: every request
+has already passed our ingress token check and route allowlist. So Caddy rewrites Host instead, and the
+backend sees byte-for-byte what it sees on a tested local stack. The only Host-derived URLs in Hermes are
+in `mcp.py:77` and `webapp.py:266`, and neither route is on our allowlist. Revisit if Hermes starts building
+user-visible links from Host.
+
 ## Network and access
 
 | | |
@@ -113,7 +124,8 @@ The bucket is private and the VM can write and read but not delete.
 its counts must equal the manifest. Run by hand: `sudo systemctl start int3-restore-test; sudo journalctl
 -u int3-restore-test`.
 
-**Alert:** `int3-backup-metrics.timer` publishes the age of the last good backup and restore test hourly;
+**Alert** (needs `roles/monitoring.metricWriter` on the VM's service account, granted by `infra.sh`):
+`int3-backup-metrics.timer` publishes the age of the last good backup and restore test hourly;
 `bash deploy/gcp/ops.sh backup-alert` sets the policy (backup older than 26 h, restore test older than 8 days).
 
 **Real restore:** stop the stack, remove the `int3_pgdata` volume, `compose up -d db`, then

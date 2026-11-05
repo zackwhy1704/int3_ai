@@ -127,9 +127,8 @@ gateway** behind it.
   connection is our **remote** gated backend it routes to that backend and does not spawn a local
   child for it (`connection-config.ts:886-892`, `backend-start-failure.ts:28`) — the remote
   connection is the agent in the path. **No desktop fork is decided.**
-- **Windows is the current target.** The connect flow is host-only (127.0.0.1 forwarder); a
-  **hosted TLS pilot is the next step once the cloud account exists** (not paused by decision —
-  just not built yet).
+- **Windows is the current target.** Local stacks use the 127.0.0.1 forwarder. The **hosted pilot**
+  is `deploy/gcp` (`RUNBOOK.md`): one VM, Caddy on 443 only, hosts `<random-id>.app.int3labs.app`.
 
 ## How we work
 - **Plan before large changes.** Anything touching token issuance, scope filtering, the
