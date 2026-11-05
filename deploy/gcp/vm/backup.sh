@@ -17,4 +17,5 @@ for vol in $(docker volume ls -q --filter "name=hermes-home-$DEPLOY_PROJECT-"); 
   docker run --rm -v "$vol:/v:ro" busybox tar -C /v -czf - . > "$tmp/$vol.tar.gz"
 done
 gcloud --project "$GCP_PROJECT" --quiet storage cp "$tmp"/* "gs://$INT3_BUCKET/$stamp/" >/dev/null
+touch /var/lib/int3/last-backup.ok    # publish-backup-metrics.sh alerts on the age of this
 echo "[backup] gs://$INT3_BUCKET/$stamp/: $(ls "$tmp" | wc -l) files, $(du -sh "$tmp" | cut -f1)"

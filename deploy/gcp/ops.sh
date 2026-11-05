@@ -2,6 +2,7 @@
 # Operator commands, from your PC:
 #   bash deploy/gcp/ops.sh status | stop | start | ssh | ip
 #   bash deploy/gcp/ops.sh uptime <launcher-hostname>   # uptime check + email alert (once, after TLS)
+#   bash deploy/gcp/ops.sh backup-alert                 # alert when backups or restore tests go stale
 #
 # A stopped VM bills no compute; the disk and static IP keep billing. Everything returns on start:
 # the stack via int3-stack.service, the per-user containers via their restart policy.
@@ -40,5 +41,20 @@ JSON
     rm -f "$policy"
     echo "uptime check on https://$host/launcher/healthz; alerts go to the notification channel 'int3 alerts'"
     ;;
-  *) sed -n 2,6p "$0"; exit 2 ;;
+  backup-alert)
+    channel="$("${G[@]}" beta monitoring channels list --filter='displayName="int3 alerts"' --format='value(name)' | head -1)"
+    [ -n "$channel" ] || { echo "run ops.sh uptime first: it creates the alert channel" >&2; exit 2; }
+    cond() {  # <title> <metric> <hours>
+      printf '{"displayName":"%s","conditionThreshold":{"filter":"metric.type=\\"custom.googleapis.com/int3/%s\\" AND resource.type=\\"global\\"","aggregations":[{"alignmentPeriod":"3600s","perSeriesAligner":"ALIGN_MAX"}],"comparison":"COMPARISON_GT","thresholdValue":%s,"duration":"0s","trigger":{"count":1}}}' "$1" "$2" "$3"
+    }
+    policy="$(mktemp)"
+    printf '{"displayName":"int3 backups stale","combiner":"OR","notificationChannels":["%s"],"conditions":[%s,%s]}' "$channel" \
+      "$(cond 'last good backup older than 26h' backup_age_hours 26)" \
+      "$(cond 'last good restore test older than 8 days' restore_test_age_hours 192)" > "$policy"
+    "${G[@]}" alpha monitoring policies list --filter='displayName="int3 backups stale"' --format='value(name)' | grep -q . \
+      || "${G[@]}" alpha monitoring policies create --policy-from-file="$(cygpath -w "$policy" 2>/dev/null || echo "$policy")" >/dev/null
+    rm -f "$policy"
+    echo "alert policy 'int3 backups stale' is set"
+    ;;
+  *) sed -n 2,7p "$0"; exit 2 ;;
 esac

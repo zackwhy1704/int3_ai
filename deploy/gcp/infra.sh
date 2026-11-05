@@ -44,6 +44,10 @@ exists "${G[@]}" iam service-accounts describe "$SA_EMAIL" \
   --role roles/secretmanager.viewer \
   --condition "title=int3-secrets-only,expression=resource.name.startsWith(\"projects/$PROJECT_NUMBER/secrets/int3-\")" >/dev/null
 
+# Backup-age gauges for the backup-failure alert (deploy/gcp/vm/publish-backup-metrics.sh).
+"${G[@]}" projects add-iam-policy-binding "$GCP_PROJECT" --member "serviceAccount:$SA_EMAIL" \
+  --role roles/monitoring.metricWriter --condition=None >/dev/null
+
 echo "== secret: int3-stack-env (generated on the VM at first boot, never leaves it but to here) =="
 exists "${G[@]}" secrets describe int3-stack-env \
   || "${G[@]}" secrets create int3-stack-env --replication-policy=user-managed --locations="$GCP_REGION" >/dev/null

@@ -42,5 +42,6 @@ if ! diff "$tmp/counts.txt" "$tmp/restored.txt" >"$tmp/diff.txt"; then
   exit 1
 fi
 [ "$unexpected" = 0 ] || { echo "[restore-test] FAILED: $unexpected unexpected restore errors" >&2; grep -E 'ERROR:' "$tmp/restore.log" | head -5 >&2; exit 1; }
+[ $# -eq 2 ] || touch /var/lib/int3/last-restore-test.ok   # only a real bucket restore counts
 echo "[restore-test] OK: $(wc -l < "$tmp/restored.txt") counts match, 0 unexpected errors"
 cat "$tmp/restored.txt"

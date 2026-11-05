@@ -83,7 +83,7 @@ sudo bash /opt/int3/deploy/gcp/provision-partner.sh <name> [--cap-usd 5] [--ttl-
 ```
 Creates a synthetic tenant (the fictional Brindlewood seed), users priya, marcus and ada, each with a
 gated backend and a random hostname, and prints three single-use invite links **to your terminal only**:
-it refuses if its output is piped or redirected. Each backend takes about 420 MiB. Run it again for fresh
+it refuses if its output is piped or redirected. `--no-invites` provisions without minting any. Each backend takes about 420 MiB. Run it again for fresh
 invites. The cap is per tenant, per day, and we pay it.
 
 ## Installer
@@ -111,7 +111,10 @@ The bucket is private and the VM can write and read but not delete.
 
 `int3-restore-test.timer`, weekly: the newest dump goes into a throwaway Postgres with no network, and
 its counts must equal the manifest. Run by hand: `sudo systemctl start int3-restore-test; sudo journalctl
--u int3-restore-test`. A failed timer is visible only in the journal: nothing alerts on it yet.
+-u int3-restore-test`.
+
+**Alert:** `int3-backup-metrics.timer` publishes the age of the last good backup and restore test hourly;
+`bash deploy/gcp/ops.sh backup-alert` sets the policy (backup older than 26 h, restore test older than 8 days).
 
 **Real restore:** stop the stack, remove the `int3_pgdata` volume, `compose up -d db`, then
 `gunzip -c postgres.sql.gz | docker exec -i int3-db-1 psql -U brain -d postgres`, then start the stack.

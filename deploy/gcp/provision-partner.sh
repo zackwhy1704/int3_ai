@@ -1,26 +1,27 @@
 #!/usr/bin/env bash
 # On the VM, by the operator, in an interactive SSH session:
 #
-#   sudo bash /opt/int3/deploy/gcp/provision-partner.sh <name> [--cap-usd N] [--ttl-hours N]
+#   sudo bash /opt/int3/deploy/gcp/provision-partner.sh <name> [--cap-usd N] [--ttl-hours N] [--no-invites]
 #
 # Creates a synthetic tenant for one partner (the fictional Brindlewood seed, under the partner's
 # name), three users with their own gated backends and random hostnames, and prints one single-use
 # invite link per user TO THIS TERMINAL ONLY. It refuses to run if its output is piped, redirected
 # or captured, so invites cannot land in a log. Re-running for an existing partner adds nothing and
-# just prints fresh invites.
+# just prints fresh invites. --no-invites provisions without minting any, so it needs no terminal.
 set -euo pipefail
 . "$(dirname "$0")/vm/lib.sh"
 NAME="${1:?usage: provision-partner.sh <name> [--cap-usd N] [--ttl-hours N]}"; shift
-CAP=5 TTL=72
+CAP=5 TTL=72 INVITES=1
 while [ $# -gt 0 ]; do
   case "$1" in
     --cap-usd) CAP="$2"; shift 2 ;;
     --ttl-hours) TTL="$2"; shift 2 ;;
+    --no-invites) INVITES=""; shift ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
 [[ "$NAME" =~ ^[a-z][a-z0-9]{1,30}$ ]] || { echo "partner name must be lowercase letters and digits" >&2; exit 2; }
-[ -t 1 ] || { echo "refusing: invites print to an interactive terminal only" >&2; exit 2; }
+[ -z "$INVITES" ] || [ -t 1 ] || { echo "refusing: invites print to an interactive terminal only" >&2; exit 2; }
 load_secrets
 [ -n "${ANTHROPIC_API_KEY:-}" ] || { echo "the Anthropic key is not in Secret Manager yet (see RUNBOOK.md)" >&2; exit 2; }
 docker ps --format '{{.Names}}' | grep -qx int3-caddy \
@@ -56,6 +57,7 @@ done
 render_caddy production
 docker exec int3-caddy caddy reload --config /etc/caddy/Caddyfile
 
+[ -n "$INVITES" ] || { echo "provisioned $NAME; no invites minted"; exit 0; }
 echo
 echo "Invite links for $NAME: single use, ${TTL}h. Send each one privately to that person."
 for user in priya marcus ada; do

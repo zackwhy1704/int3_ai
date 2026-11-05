@@ -1,0 +1,7 @@
+[Unit]
+Description=int3 publish backup and restore-test ages to Cloud Monitoring
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /opt/int3/deploy/gcp/vm/publish-backup-metrics.sh

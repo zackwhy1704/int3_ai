@@ -30,6 +30,6 @@ fi
 install -m 0700 -d /var/lib/int3
 install -m 0644 /opt/int3/deploy/gcp/systemd/*.service /opt/int3/deploy/gcp/systemd/*.timer /etc/systemd/system/
 systemctl daemon-reload
-systemctl enable --now int3-backup.timer int3-restore-test.timer
+systemctl enable --now int3-backup.timer int3-restore-test.timer int3-backup-metrics.timer
 systemctl enable int3-stack.service
 systemctl start --no-block int3-stack.service
