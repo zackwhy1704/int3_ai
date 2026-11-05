@@ -1,0 +1,8 @@
+[Unit]
+Description=int3 daily backup to Cloud Storage
+Requires=docker.service
+After=docker.service int3-stack.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /opt/int3/deploy/gcp/vm/backup.sh

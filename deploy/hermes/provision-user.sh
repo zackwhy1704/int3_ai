@@ -66,6 +66,12 @@ GATED_IMAGE="${GATED_IMAGE:-hermes-gated}"
 INGRESS_MODE="${INGRESS_MODE:-launcher}"
 case "$INGRESS_MODE" in legacy|launcher) ;; *) echo "INGRESS_MODE must be legacy|launcher" >&2; exit 2 ;; esac
 INGRESS_IMAGE="${INGRESS_IMAGE:-hermes-ingress}"
+# Hosted (deploy/gcp): the https URL the desktop reaches this backend at, written to user_backends.
+# Unset -> the local loopback ingress. Never plain http for a real host.
+BACKEND_PUBLIC_URL="${BACKEND_PUBLIC_URL:-}"
+case "$BACKEND_PUBLIC_URL" in ""|https://*) ;; *) echo "BACKEND_PUBLIC_URL must be https: $BACKEND_PUBLIC_URL" >&2; exit 2 ;; esac
+# Hosted: unless-stopped, so a VM reboot brings every per-user container back. Local default: no.
+CONTAINER_RESTART="${CONTAINER_RESTART:-no}"
 HERMES_RELEASE="${HERMES_RELEASE:-v0.22.6}"   # must match build-base.sh and hermes_compat
 # Pinned by digest: a reproducible, supply-chain-fixed forwarder image (not :latest).
 SOCAT_IMAGE="${SOCAT_IMAGE:-alpine/socat@sha256:fb3862c949af7c79996d0e514ee96128644d840835ed5368eeecb14a869de361}"
@@ -134,7 +140,7 @@ connect_alias "$EDGE_CTR" edge
 # --- 3. the user's MCP sidecar: u-net (reach from Hermes) + brain-net (reach brain)
 say "starting MCP sidecar $mcp_name (u-net + brain-net, X-MCP-Secret required)"
 docker rm -f "$mcp_name" >/dev/null 2>&1 || true
-docker run -d --name "$mcp_name" --network "$UNET" \
+docker run -d --name "$mcp_name" --restart "$CONTAINER_RESTART" --network "$UNET" \
   -e BRAIN_URL=http://brain:8000 -e BRAIN_SERVICE_TOKEN="$BRAIN_TOKEN" -e MCP_SECRET="$MCP_SECRET" \
   "$MCP_IMAGE" >/dev/null
 docker network connect "$BRAIN_NET" "$mcp_name"      # sidecar also reaches the brain
@@ -240,7 +246,7 @@ rm -f "$soul"
 INGRESS_TOKEN="$(openssl rand -hex 24)"
 say "starting gated Hermes backend $hermes_name (u-net only, ingress 127.0.0.1:$INGRESS_PORT)"
 docker rm -f "$hermes_name" >/dev/null 2>&1 || true
-docker run -d --name "$hermes_name" --init --network "$UNET" \
+docker run -d --name "$hermes_name" --restart "$CONTAINER_RESTART" --init --network "$UNET" \
   --entrypoint /opt/proxy/startup-gate.sh \
   -e HERMES_DASHBOARD_SESSION_TOKEN="$INGRESS_TOKEN" \
   -e HERMES_HOME=/opt/data -e HERMES_DASHBOARD_FILES_ROOT=/opt/data -e HERMES_WRITE_SAFE_ROOT=/opt/data \
@@ -285,14 +291,14 @@ if [ "$INGRESS_MODE" = launcher ]; then
   # the brain API's /launcher/introspect). It holds THIS backend's internal token only.
   INGRESS_SECRET="cb_ing_$(openssl rand -hex 32)"
   say "starting ingress auth proxy $fwd_name (127.0.0.1:$INGRESS_PORT -> $hermes_name:9122, launcher tokens)"
-  docker run -d --name "$fwd_name" -p "127.0.0.1:$INGRESS_PORT:$INGRESS_PORT" --network "$EXT_NET" \
+  docker run -d --name "$fwd_name" --restart "$CONTAINER_RESTART" -p "127.0.0.1:$INGRESS_PORT:$INGRESS_PORT" --network "$EXT_NET" \
     -e INGRESS_PORT="$INGRESS_PORT" -e INGRESS_UPSTREAM="http://$hermes_name:9122" \
     -e INGRESS_INTERNAL_TOKEN="$INGRESS_TOKEN" -e INGRESS_SECRET="$INGRESS_SECRET" \
     -e INGRESS_INTROSPECT_URL="http://brain:8000/launcher/introspect" \
     "$INGRESS_IMAGE" >/dev/null
 else
   say "starting host-ingress forwarder $fwd_name (127.0.0.1:$INGRESS_PORT -> $hermes_name:9122)"
-  docker run -d --name "$fwd_name" -p "127.0.0.1:$INGRESS_PORT:$INGRESS_PORT" \
+  docker run -d --name "$fwd_name" --restart "$CONTAINER_RESTART" -p "127.0.0.1:$INGRESS_PORT:$INGRESS_PORT" \
     "$SOCAT_IMAGE" "TCP-LISTEN:$INGRESS_PORT,fork,reuseaddr" "TCP:$hermes_name:9122" >/dev/null
 fi
 docker network connect "$UNET" "$fwd_name"
@@ -311,7 +317,7 @@ if [ "$INGRESS_MODE" = launcher ]; then
   docker exec -i -e PGPASSWORD="$ADMIN_DB_PASSWORD" "$DB" \
     psql -U "$ADMIN_DB_USER" -d control -qtA -v ON_ERROR_STOP=1 \
       -v tenant="$TENANT" -v uid="$USER_ID" -v bid="$hermes_name" \
-      -v url="http://127.0.0.1:$INGRESS_PORT" -v rel="$HERMES_RELEASE" -v sha="$ingress_sha" >/dev/null <<'SQL'
+      -v url="${BACKEND_PUBLIC_URL:-http://127.0.0.1:$INGRESS_PORT}" -v rel="$HERMES_RELEASE" -v sha="$ingress_sha" >/dev/null <<'SQL'
 INSERT INTO user_backends (tenant_id, user_id, backend_id, url, hermes_release, ingress_secret_hash)
 VALUES (:'tenant', :'uid', :'bid', :'url', :'rel', :'sha')
 ON CONFLICT (tenant_id, user_id) DO UPDATE SET backend_id = EXCLUDED.backend_id, url = EXCLUDED.url,

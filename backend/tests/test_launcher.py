@@ -66,6 +66,12 @@ def _introspect(client, user_ingress: str, token: str) -> dict:
 # ── invites ─────────────────────────────────────────────────────────────────
 
 
+def test_healthz_is_public_and_reveals_nothing(client):
+    r = client.get("/launcher/healthz")
+    assert r.status_code == 200
+    assert r.json() == {"ok": True}
+
+
 def test_invite_is_single_use(client):
     code = _invite("priya")
     body = {"invite": code, "label": "laptop", "platform": "windows"}

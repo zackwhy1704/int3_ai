@@ -1,0 +1,9 @@
+[Unit]
+Description=int3 daily backup, 02:00 Singapore time
+
+[Timer]
+OnCalendar=*-*-* 18:00:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target

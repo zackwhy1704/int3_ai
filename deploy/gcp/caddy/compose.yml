@@ -1,0 +1,17 @@
+# Caddy, the only public listener. Started by deploy/gcp/vm/enable-tls.sh and only after the owner
+# confirms DNS. Host networking: it reaches the loopback-only ports. HTTP/3 is off and UDP 443 is
+# closed. The certificates volume must survive, or Let's Encrypt rate limits become a real risk.
+name: int3-caddy
+services:
+  caddy:
+    image: caddy:2.10-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
+    container_name: int3-caddy
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - /var/lib/int3/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+volumes:
+  caddy_data:
+  caddy_config:

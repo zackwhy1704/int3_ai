@@ -101,7 +101,7 @@ async fn byok_link(session: State<'_, Session>) -> Result<Value, Value> {
     let link = session.authed(Method::POST, "/launcher/byok/link", Some(json!({"provider": "anthropic"}))).await.map_err(err)?;
     let url = link["url"].as_str().unwrap_or_default();
     let parsed = url::Url::parse(url).map_err(|_| fail("the server returned a bad link"))?;
-    if !matches!(parsed.scheme(), "https" | "http") {
+    if !api::is_secure_url(&parsed) {
         return Err(fail("the server returned a bad link"));
     }
     std::process::Command::new("rundll32").args(["url.dll,FileProtocolHandler", parsed.as_str()]).spawn().map_err(|e| fail(e.to_string()))?;
@@ -157,6 +157,9 @@ async fn launch(session: State<'_, Session>, restart: bool) -> Result<Value, Val
     let grant = session.authed(Method::POST, "/launcher/launch", None).await.map_err(err)?;
     let id = format!("cb-{}-{}", me["tenant"]["id"].as_str().unwrap_or("t"), me["user"]["id"].as_str().unwrap_or("u"));
     let url = grant["backend"]["url"].as_str().unwrap_or_default().to_string();
+    if !url::Url::parse(&url).map_or(false, |u| api::is_secure_url(&u)) {
+        return Err(fail("the server returned a backend address that is not https"));
+    }
     let entry = registry::our_entry(&id, grant["backend"]["label"].as_str().unwrap_or("int3"), &url,
                                     grant["desktop_token"].as_str().unwrap_or_default());
     for (dir, text) in install.user_data_dirs.iter().zip(existing) {

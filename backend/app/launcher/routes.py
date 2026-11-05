@@ -70,6 +70,17 @@ class InviteRedeem(BaseModel):
     platform: str = Field(pattern="^(windows|macos)$")
 
 
+@router.get("/healthz")
+def healthz() -> dict:
+    """Uptime check: the API answers and the control DB is reachable. Reveals nothing else."""
+    try:
+        with control_conn() as control:
+            control.execute("SELECT 1").fetchone()
+    except Exception:
+        raise HTTPException(503, "unavailable") from None
+    return {"ok": True}
+
+
 @router.post("/auth/invite")
 def redeem_invite(body: InviteRedeem) -> dict:
     with control_conn() as control:

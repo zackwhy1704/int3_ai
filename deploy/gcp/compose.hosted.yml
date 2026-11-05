@@ -1,0 +1,26 @@
+# Hosted overlay on deploy/hermes/docker-compose.yml. Everything stays bound to loopback: Caddy is
+# the only public listener. Adds restart policies (a VM reboot brings the stack back) and makes the
+# public https URLs required, so a missing setting fails instead of falling back to plain http.
+x-restart: &restart
+  restart: unless-stopped
+
+services:
+  db:
+    <<: *restart
+  brain:
+    <<: *restart
+    environment:
+      APP_ORIGIN: ${APP_ORIGIN:?set by deploy/gcp/vm/stack-up.sh}
+      KEY_INTAKE_BASE_URL: ${KEY_INTAKE_BASE_URL:?set by deploy/gcp/vm/stack-up.sh}
+  launcher-edge:
+    <<: *restart
+  gateway:
+    <<: *restart
+  edge:
+    <<: *restart
+    # Same pinned image as the launcher edge (the base file's tag floats).
+    image: python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1
+  key-intake:
+    <<: *restart
+    environment:
+      KEY_INTAKE_BASE_URL: ${KEY_INTAKE_BASE_URL:?set by deploy/gcp/vm/stack-up.sh}

@@ -33,6 +33,13 @@ impl std::fmt::Display for ApiError {
     }
 }
 
+/// True for https, or http on loopback only (local stack / tests). Every URL the server hands us
+/// (backend, key-entry link) passes this before it is written into Hermes or opened.
+pub fn is_secure_url(url: &Url) -> bool {
+    let loopback = matches!(url.host_str().unwrap_or_default(), "127.0.0.1" | "localhost" | "[::1]");
+    url.scheme() == "https" || (url.scheme() == "http" && loopback)
+}
+
 /// `<server>/invite#<code>` (backend/app/launcher/admin.py prints this). The server is the link's
 /// origin; https is required except on loopback (local stack / tests).
 pub fn parse_invite(link: &str) -> Result<(String, String), String> {
@@ -41,9 +48,7 @@ pub fn parse_invite(link: &str) -> Result<(String, String), String> {
     if url.path().trim_end_matches('/') != "/invite" || !code.starts_with("cb_inv_") {
         return Err("That is not an invite link.".into());
     }
-    let host = url.host_str().unwrap_or_default();
-    let loopback = matches!(host, "127.0.0.1" | "localhost" | "[::1]");
-    if url.scheme() != "https" && !(url.scheme() == "http" && loopback) {
+    if !is_secure_url(&url) {
         return Err("Invite links must use https.".into());
     }
     let server = url.origin().ascii_serialization();
@@ -62,6 +67,8 @@ impl Session {
         Session {
             http: reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(20))
+                // The API never redirects; following one could downgrade https to http.
+                .redirect(reqwest::redirect::Policy::none())
                 .build()
                 .expect("http client"),
             server: Mutex::new(server),
@@ -175,7 +182,8 @@ impl Session {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_invite;
+    use super::{is_secure_url, parse_invite};
+    use url::Url;
 
     #[test]
     fn invite_link_gives_server_and_code() {
@@ -184,6 +192,16 @@ mod tests {
             ("https://brain.example.com".to_string(), "cb_inv_abc".to_string())
         );
         assert_eq!(parse_invite(" http://127.0.0.1:8100/invite#cb_inv_x ").unwrap().0, "http://127.0.0.1:8100");
+    }
+
+    #[test]
+    fn only_https_or_loopback_http_is_secure() {
+        let ok = |u: &str| is_secure_url(&Url::parse(u).unwrap());
+        assert!(ok("https://0123456789abcdef.app.int3labs.app"));
+        assert!(ok("http://127.0.0.1:9432"));
+        assert!(!ok("http://0123456789abcdef.app.int3labs.app"));
+        assert!(!ok("http://127.0.0.1.evil.example"));
+        assert!(!ok("ftp://127.0.0.1"));
     }
 
     #[test]

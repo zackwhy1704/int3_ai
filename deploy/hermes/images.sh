@@ -32,9 +32,10 @@ ensure_images() {
   docker build -q -t hermes-gated --build-arg BASE=hermes-base-pinned \
     -f deploy/hermes/gated/Dockerfile.gated deploy/hermes/gated >/dev/null || return 1
   docker build -q -t hermes-deploy-brain-mcp deploy/hermes/brain-mcp >/dev/null || return 1
+  docker build -q -t hermes-ingress deploy/hermes/ingress >/dev/null || return 1
   local base n
   base="$(_layers hermes-base-pinned)"; n="$(printf '%s\n' "$base" | wc -l)"
   [ "$(_layers hermes-gated | head -n "$n")" = "$base" ] \
     || { echo "  FATAL: hermes-gated is not built on the current hermes-base-pinned"; return 1; }
-  echo "  gated: rebuilt on hermes-base-pinned (first $n layers identical); brain-mcp: rebuilt"
+  echo "  gated: rebuilt on hermes-base-pinned (first $n layers identical); brain-mcp, ingress: rebuilt"
 }

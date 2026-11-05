@@ -6,6 +6,7 @@
 # EXCLUDED on purpose: POST /launcher/introspect. Only each backend's ingress auth proxy calls it,
 # on the compose network (http://brain:8000); exposing it would hand the host an oracle for
 # desktop tokens.
+GET  /launcher/healthz          # uptime check: {"ok": true}, no auth, no data
 POST /launcher/auth/invite      # redeem a single-use invite -> device session
 POST /launcher/auth/refresh     # rotate the refresh token (reuse revokes the device)
 POST /launcher/auth/revoke      # sign out: revoke this device

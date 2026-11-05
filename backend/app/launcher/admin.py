@@ -16,10 +16,21 @@ reports that build with the release's state instead of "untested".
 import argparse
 import getpass
 import os
+from urllib.parse import urlsplit
 
 from .. import config
 from ..tenants.admin import admin_conn
 from . import tokens
+
+
+def _require_secure(url: str) -> str:
+    """No plain-http fallback: http is accepted for loopback only (local stack / tests)."""
+    parts = urlsplit(url)
+    if parts.scheme == "https" or (
+        parts.scheme == "http" and parts.hostname in ("127.0.0.1", "localhost", "::1")
+    ):
+        return url
+    raise SystemExit(f"refusing a non-https server URL: {url}")
 
 
 def main() -> None:
@@ -44,12 +55,13 @@ def main() -> None:
 
     with admin_conn(config.CONTROL_DB) as control:
         if a.cmd == "invite":
+            server_url = _require_secure(a.server_url)
             code = tokens.mint_invite(
                 control, a.tenant, a.user, a.ttl_hours, f"operator:{getpass.getuser()}"
             )
             print(f"single-use launcher invite for {a.user}@{a.tenant}"
                   f" (expires in {min(a.ttl_hours, config.LAUNCHER_INVITE_MAX_HOURS):g}h):")
-            print(f"  {a.server_url.rstrip('/')}/invite#{code}")
+            print(f"  {server_url.rstrip('/')}/invite#{code}")
         elif a.cmd == "record-build":
             if not all(part.isdigit() for part in a.package_version.split(".")):
                 raise SystemExit("package version must be dotted digits, e.g. 2026.7300.1.0")
