@@ -73,7 +73,8 @@ def world():
         def do_GET(self):
             w.seen.append({"path": self.path, "token": self.headers.get("x-hermes-session-token"),
                            "headers": dict(self.headers)})
-            out = b'{"ok":true}'
+            out = (b'{"auth_required":false,"version":"v9","install_id":"secret-id","active_sessions":3}'
+                   if self.path == "/api/status" else b'{"ok":true}')
             self.send_response(200)
             self.send_header("content-length", str(len(out)))
             self.end_headers()
@@ -86,6 +87,7 @@ def world():
                ThreadingHTTPServer(("127.0.0.1", up_port), Upstream)]
     for s in servers:
         threading.Thread(target=s.serve_forever, daemon=True).start()
+    w.upstream_servers = servers[1:]
 
     # Raw WebSocket stand-in: read the head, answer 101, then echo bytes.
     ws_listener = socket.socket()
@@ -128,7 +130,7 @@ def world():
     w.base = f"http://127.0.0.1:{port}"
     w.ws_addr = ("127.0.0.1", w.ws.server_address[1])
     yield w
-    for s in servers + [w.http, w.ws]:
+    for s in [servers[0], w.http, w.ws] + ([] if getattr(w, "upstream_stopped", False) else servers[1:]):
         s.shutdown()
     ws_listener.close()
 
@@ -142,11 +144,53 @@ def _get(url: str, headers: dict | None = None) -> tuple[int, bytes]:
         return e.code, e.read()
 
 
-def test_no_token_is_forwarded_untouched_and_never_gets_the_internal_token(world):
-    status, _ = _get(world.base + "/api/status")
+def test_tokenless_status_returns_only_what_the_desktop_probe_needs(world):
+    status, body = _get(world.base + "/api/status")
     assert status == 200
+    assert json.loads(body) == {"auth_required": False}
     assert world.seen[-1]["token"] is None
     assert world.introspect_calls == []
+
+
+def test_tokenless_status_reports_a_dead_backend(world):
+    for s in world.upstream_servers:
+        s.shutdown()
+        s.server_close()
+    world.upstream_stopped = True
+    status, _ = _get(world.base + "/api/status")
+    assert status == 502
+
+
+def test_a_live_token_gets_the_full_status(world):
+    status, body = _get(world.base + "/api/status", {"X-Hermes-Session-Token": LIVE})
+    assert status == 200
+    assert json.loads(body)["install_id"] == "secret-id"
+    assert world.seen[-1]["token"] == INTERNAL
+
+
+@pytest.mark.parametrize("path", ["/api/health", "/api/model/info", "/api/config/schema",
+                                  "/api/config/defaults", "/api/messaging/platforms", "/", "/.env",
+                                  "/api/status/", "/api/status/x"])
+def test_everything_else_needs_a_token_and_never_reaches_the_backend(world, path):
+    status, _ = _get(world.base + path)
+    assert status == 401
+    assert world.seen == []
+
+
+def test_tokenless_writes_to_status_are_refused(world):
+    req = urllib.request.Request(world.base + "/api/status", data=b"{}", method="POST")
+    with pytest.raises(urllib.error.HTTPError) as e:
+        urllib.request.urlopen(req, timeout=5)
+    assert e.value.code == 401
+    assert world.seen == []
+
+
+def test_tokenless_websocket_is_refused(world):
+    s = socket.create_connection(world.ws_addr, timeout=5)
+    s.sendall(b"GET /api/ws HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\n\r\n")
+    assert b" 401 " in s.recv(4096).split(b"\r\n")[0]
+    assert world.ws_heads == []
+    s.close()
 
 
 def test_live_header_token_is_swapped_for_the_internal_token(world):
@@ -159,7 +203,7 @@ def test_live_header_token_is_swapped_for_the_internal_token(world):
 def test_dead_token_is_401_and_never_reaches_the_backend(world):
     status, body = _get(world.base + "/api/config", {"X-Hermes-Session-Token": DEAD})
     assert status == 401
-    assert b"relaunch" in body
+    assert b"relaunch from int3" in body
     assert world.seen == []
 
 

@@ -14,9 +14,13 @@ This proxy makes the client-side token short-lived and revocable WITHOUT modifyi
     launcher API (/launcher/introspect, authenticated with this ingress's own secret, which
     also pins the backend) whether it is live. Live -> the token is REPLACED by the backend's
     internal token and forwarded. Anything else -> 401, and the backend never sees it.
-  * A request with NO token is forwarded untouched: Hermes itself answers its public routes
-    (the desktop's /api/status auth-mode probe sends no token) and 401s the rest. The internal
-    token is never injected into a request that did not present a live desktop token.
+  * A request with NO token never reaches a backend route, with one exception: GET /api/status,
+    which Desktop's auth-mode probe sends with no credentials (apps/desktop/electron/main.ts:10139,
+    15317 at v0.22.6) and which the launcher uses as a liveness check. It is answered from the backend
+    but reduced to PUBLIC_STATUS_FIELDS. Hermes's own public routes (full /api/status with the install
+    id, disk and session counts, /api/health, /api/model/info, /api/config/schema) are public on a
+    loopback bind; here they are on the internet, so everything else gets 401. The internal token is
+    never injected into a request that did not present a live desktop token.
   * Open WebSockets are re-checked every SWEEP_SECONDS; a revoked or expired token's sockets
     are closed.
 
@@ -146,6 +150,12 @@ def sweep_once(checker: Checker, sockets: Sockets) -> int:
     return closed
 
 
+# All Desktop reads from a tokenless /api/status: authModeFromStatus() uses only auth_required
+# (connection-config.ts:1131-1133 at v0.22.6). The probe also copies `version`, tolerating its absence
+# (main.ts: `status?.version || null`), so it stays behind the token.
+PUBLIC_STATUS_FIELDS = ("auth_required",)
+
+
 def make_handler(checker: Checker, sockets: Sockets, upstream: str, internal_token: str):
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
@@ -168,11 +178,29 @@ def make_handler(checker: Checker, sockets: Sockets, upstream: str, internal_tok
             found += [v for k, v in query if k == "token"]
             return found, parts, query
 
+        def _public_status(self) -> None:
+            try:
+                with urllib.request.urlopen(upstream + "/api/status", timeout=10) as resp:
+                    full = json.loads(resp.read())
+            except Exception:
+                self._reply(502, "backend unreachable")
+                return
+            body = json.dumps({k: full[k] for k in PUBLIC_STATUS_FIELDS if k in full}).encode()
+            self.send_response(200)
+            self.send_header("content-type", "application/json")
+            self.send_header("content-length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
         def _authorize(self) -> tuple[str, str | None] | None:
             """(path to forward, the presented token or None). None = already answered."""
             found, parts, query = self._presented()
             if not found:
-                return self.path, None
+                if self.command == "GET" and parts.path == "/api/status":
+                    self._public_status()
+                else:
+                    self._reply(401, "sign in required")
+                return None
             token = found[0]
             if any(v != token for v in found):
                 self._reply(401, "conflicting session tokens")
@@ -183,7 +211,7 @@ def make_handler(checker: Checker, sockets: Sockets, upstream: str, internal_tok
                 self._reply(503, "sign-in service unreachable; try again")
                 return None
             if not ok:
-                self._reply(401, "session expired or revoked; relaunch from Company Brain")
+                self._reply(401, "session expired or revoked; relaunch from int3")
                 return None
             if not any(k == "token" for k, _ in query):
                 return self.path, token  # header-only: leave the request target byte-identical

@@ -117,6 +117,9 @@ mint() {
   docker exec -i -e PGPASSWORD="$ADMIN_DB_PASSWORD" "$DB" \
     psql -U "$ADMIN_DB_USER" -d control -qtA \
       -v hash="$sha" -v tenant="$TENANT" -v uid="$USER_ID" -v label="$label" >/dev/null <<'SQL'
+-- Re-provisioning replaces this backend's token: the previous one must stop working.
+UPDATE service_tokens SET revoked_at = now()
+ WHERE tenant_id = :'tenant' AND user_id = :'uid' AND label = :'label' AND revoked_at IS NULL;
 INSERT INTO service_tokens(token_hash,tenant_id,user_id,label)
 VALUES (:'hash',:'tenant',:'uid',:'label') ON CONFLICT DO NOTHING;
 SQL

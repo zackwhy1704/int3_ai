@@ -1,22 +1,26 @@
 #!/usr/bin/env bash
 # On the VM, by the operator, in an interactive SSH session:
 #
-#   sudo bash /opt/int3/deploy/gcp/provision-partner.sh <name> [--cap-usd N] [--ttl-hours N] [--no-invites]
+#   sudo bash /opt/int3/deploy/gcp/provision-partner.sh <name> [--cap-usd N] [--ttl-hours N] [--no-invites] [--reprovision]
 #
 # Creates a synthetic tenant for one partner (the fictional Brindlewood seed, under the partner's
 # name), three users with their own gated backends and random hostnames, and prints one single-use
 # invite link per user TO THIS TERMINAL ONLY. It refuses to run if its output is piped, redirected
 # or captured, so invites cannot land in a log. Re-running for an existing partner adds nothing and
 # just prints fresh invites. --no-invites provisions without minting any, so it needs no terminal.
+# --reprovision recreates each existing user's containers on the same hostname, port and data volume,
+# which re-encrypts the current Anthropic key into the tenant and picks up new images. Signed-in
+# devices stay valid, and open connections drop until they reconnect.
 set -euo pipefail
 . "$(dirname "$0")/vm/lib.sh"
 NAME="${1:?usage: provision-partner.sh <name> [--cap-usd N] [--ttl-hours N]}"; shift
-CAP=5 TTL=72 INVITES=1
+CAP=5 TTL=72 INVITES=1 REPROVISION=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --cap-usd) CAP="$2"; shift 2 ;;
     --ttl-hours) TTL="$2"; shift 2 ;;
     --no-invites) INVITES=""; shift ;;
+    --reprovision) REPROVISION=1; shift ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -46,11 +50,12 @@ fi
 
 for user in priya marcus ada; do
   label="$NAME/$user"
-  if grep -qP "\t\Q$label\E\$" "$ROUTES"; then
+  if grep -qP "\t\Q$label\E\$" "$ROUTES" && [ -z "$REPROVISION" ]; then
     echo "$label: backend exists"
     continue
   fi
-  port="$(next_port)"
+  port="$(awk -F'\t' -v l="$label" '$4==l{print $2; exit}' "$ROUTES")"
+  [ -n "$port" ] || port="$(next_port)"
   id="$(route_id user "$port" "$label")"
   BACKEND_PUBLIC_URL="$(public_url "$id")" CONTAINER_RESTART=unless-stopped INGRESS_MODE=launcher \
     PROVIDER_KEY="$ANTHROPIC_API_KEY" GATEWAY_IMAGE="$DEPLOY_PROJECT-gateway" \
