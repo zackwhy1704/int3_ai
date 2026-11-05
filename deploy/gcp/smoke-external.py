@@ -34,7 +34,7 @@ def api(server: str, method: str, path: str, token: str | None = None, body: dic
         return json.loads(r.read() or b"{}")
 
 
-def sign_in() -> tuple[str, str, dict]:
+def sign_in() -> tuple[str, dict, dict]:
     link = sys.stdin.read().strip()
     parts = urllib.parse.urlsplit(link)
     if parts.scheme != "https" or not parts.fragment.startswith("cb_inv_"):
@@ -45,7 +45,7 @@ def sign_in() -> tuple[str, str, dict]:
     access = session["access_token"]
     grant = api(server, "POST", "/launcher/launch", token=access)
     print(f"[smoke] signed in over https; backend {grant['backend']['url']} label {grant['backend']['label']!r}")
-    return server, access, grant
+    return server, session, grant
 
 
 def chat(grant: dict, prompt: str) -> int:
@@ -96,11 +96,13 @@ async def idle(grant: dict, seconds: int) -> int:
 
 def main() -> int:
     mode, arg = sys.argv[1], sys.argv[2]
-    server, access, grant = sign_in()
+    server, session, grant = sign_in()
     try:
         return chat(grant, arg) if mode == "chat" else asyncio.run(idle(grant, int(arg)))
     finally:
-        api(server, "POST", "/launcher/auth/revoke", token=access)
+        # The access token lasts 15 minutes and an idle run outlives it, so refresh first.
+        fresh = api(server, "POST", "/launcher/auth/refresh", body={"refresh_token": session["refresh_token"]})
+        api(server, "POST", "/launcher/auth/revoke", token=fresh["access_token"])
         print("[smoke] device revoked")
 
 
