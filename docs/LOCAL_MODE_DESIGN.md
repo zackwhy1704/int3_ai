@@ -115,7 +115,7 @@ memory:
 agent:
   disabled_toolsets: [terminal, code_execution, browser, web, search, x_search, computer_use,
                       file, image_gen, video_gen, tts, connections, delegation, cronjob,
-                      desktop_ui, kanban]       # (:266); names from toolsets.py:72-152, 166
+                      desktop_ui, kanban]       # (:266); names from toolsets.py:72-153
 approvals:
   mode: manual                     # smart | manual | off (website/docs/user-guide/security.md:30-62)
   cron_mode: deny
@@ -131,7 +131,7 @@ telemetry:
   shared_metrics: {enabled: false, send: false}   # already the default (config_defaults.py:2311-2318)
 fallback_providers: []             # no silent second model (:24)
 skills:
-  inline_shell: false              # already the default (:1450-1453)
+  inline_shell: false              # already the default (:1452)
 ```
 
 - **Toolset names.**
@@ -140,10 +140,10 @@ skills:
   - I propose adding:
     - `x_search`, `computer_use`, `image_gen`, `video_gen`, `tts` and `connections`, which send data to
       third parties;
-    - `file`, so nothing writes into synced folders (see leak table);
+    - `file`, so nothing writes into synced folders (`toolsets.py:118`; see leak table);
     - `delegation` and `cronjob`, which spawn unattended agents;
     - `desktop_ui`, whose `drive_preview` and `read_terminal` let the agent drive Desktop's browser pane
-      and read its terminal (`toolsets.py:136-141`);
+      and read its terminal (`toolsets.py:135-141`);
     - `kanban`.
   - That leaves the brain, our memory tools, `clarify`, `todo`, `vision` (local image to the chosen
     model), `skills` (read/view) and `session_search` (local history).
@@ -236,10 +236,10 @@ skills:
   (pattern: `plugins/memory/retaindb/plugin.yaml`, `retaindb/__init__.py:491-493`;
   layouts: `website/docs/developer-guide/memory-provider-plugin.md:15-63`).
   - Stdlib only (urllib, json), so it has no dependency surface and never joins Hermes's managed
-    dependency set (`:617-625`).
-  - Hermes updates don't delete or rewrite `$HERMES_HOME/plugins/**` (`:621`).
+    dependency set (`:617-624`).
+  - Hermes updates don't delete or rewrite `$HERMES_HOME/plugins/**` (`:622`).
 - **Activation.** `memory.provider: int3`. Discovery never imports a provider until it's named
-  (`memory-provider-plugin.md:34-35`). Only `plugins.disabled` can park it (`plugins/memory/__init__.py:558-572`).
+  (`memory-provider-plugin.md:35`). Only `plugins.disabled` can park it (`plugins/memory/__init__.py:558-572`).
 - **Offline or revoked.**
   - `is_available()` is true when a token exists; no network check (`agent/memory_provider.py:116-118`).
   - Recall failures return "" and the turn proceeds.
@@ -300,7 +300,7 @@ skills:
 | Discord | **pull** (gateway websocket via discord.py) | `plugins/platforms/discord/adapter.py:1446` |
 | Email | **pull** (IMAP), SMTP out | `plugins/platforms/email/adapter.py:7,121` |
 | Signal | **pull**, but needs a local `signal-cli` daemon (Java) | `plugins/platforms/signal/adapter.py:1-3` |
-| Matrix | pull (`/sync`) | adapter |
+| Matrix | pull (mautrix client) | `plugins/platforms/matrix/adapter.py:2` |
 | Mattermost | pull (websocket) | `plugins/platforms/mattermost/adapter.py:488` |
 | ntfy | pull (HTTP stream) | `plugins/platforms/ntfy/adapter.py:1` |
 | DingTalk | pull (stream websocket) | `plugins/platforms/dingtalk/adapter.py:72` |
