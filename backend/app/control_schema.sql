@@ -296,3 +296,44 @@ BEGIN
 END $$;
 ALTER FUNCTION create_key_link(text, text, text, numeric, text) OWNER TO key_writer;
 REVOKE EXECUTE ON FUNCTION create_key_link(text, text, text, numeric, text) FROM PUBLIC;
+
+-- ── Local mode (M1, docs/LOCAL_MODE_DESIGN.md) ─────────────────────────────────────────────────
+-- A tenant runs either the hosted pilot (one gated Hermes container per user) or local mode (stock
+-- Hermes on the user's PC, our brain over MCP). Existing tenants stay hosted.
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS launch_mode text NOT NULL DEFAULT 'hosted';
+ALTER TABLE tenants DROP CONSTRAINT IF EXISTS tenants_launch_mode_check;
+ALTER TABLE tenants ADD CONSTRAINT tenants_launch_mode_check CHECK (launch_mode IN ('hosted', 'local'));
+
+-- brain: 24 h, one device, local mode only. Sent by Hermes to the brain MCP endpoint as a header
+-- and checked on EVERY call (revocation, expiry, the device's Hermes-setup report).
+ALTER TABLE launcher_tokens DROP CONSTRAINT IF EXISTS launcher_tokens_kind_check;
+ALTER TABLE launcher_tokens ADD CONSTRAINT launcher_tokens_kind_check
+    CHECK (kind IN ('access', 'refresh', 'desktop', 'brain'));
+
+-- The launcher's latest report of the local Hermes setup, judged server-side against the policy
+-- (app/launcher/local_policy.py). The brain refuses a device whose latest report is not ok.
+CREATE TABLE IF NOT EXISTS launcher_posture (
+    device_id      uuid PRIMARY KEY REFERENCES launcher_devices(id) ON DELETE CASCADE,
+    reported_at    timestamptz NOT NULL DEFAULT now(),
+    hermes_version text NOT NULL DEFAULT '',
+    report         jsonb NOT NULL,
+    ok             boolean NOT NULL,
+    reasons        text[] NOT NULL DEFAULT '{}'
+);
+
+-- Every brain call from local mode: who, which tool, the question, what was returned (claim ids),
+-- and the outcome. Append-only for the API role (no UPDATE/DELETE grant).
+CREATE TABLE IF NOT EXISTS brain_audit (
+    id            bigserial PRIMARY KEY,
+    at            timestamptz NOT NULL DEFAULT now(),
+    tenant_id     text NOT NULL,
+    user_id       text NOT NULL,
+    device_id     uuid,
+    tool          text NOT NULL,
+    query         text,
+    retrieval_id  uuid,
+    claim_ids     int[] NOT NULL DEFAULT '{}',
+    invalid_ids   int[] NOT NULL DEFAULT '{}',
+    outcome       text NOT NULL CHECK (outcome IN ('ok', 'empty', 'refused', 'rate_limited', 'error'))
+);
+CREATE INDEX IF NOT EXISTS brain_audit_user_day ON brain_audit(tenant_id, user_id, at);

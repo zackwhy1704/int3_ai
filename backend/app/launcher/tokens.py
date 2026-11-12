@@ -8,6 +8,8 @@ Four secrets, all stored as SHA-256 only (as session ids and service tokens are)
            means it was copied: the whole device is revoked.
   desktop  12 h, bound to one device AND one backend. The only token that is written into
            Hermes's connections.json; the backend's ingress checks it via introspect().
+  brain    24 h, local mode: bound to one device. Written into the local Hermes .env; the brain
+           checks it (and the device's latest Hermes-setup report) on every /v1 call.
 
 A device session always resolves through identities, so removing a user's identity row ends
 every launcher credential they hold on their next use, as with browser sessions.
@@ -22,7 +24,8 @@ from .. import config
 
 log = logging.getLogger("launcher")
 
-_PREFIX = {"access": "cb_la_", "refresh": "cb_lr_", "desktop": "cb_dt_"}
+_PREFIX = {"access": "cb_la_", "refresh": "cb_lr_", "desktop": "cb_dt_", "brain": "cb_bt_"}
+BRAIN_PREFIX = _PREFIX["brain"]
 INVITE_PREFIX = "cb_inv_"
 INGRESS_PREFIX = "cb_ing_"
 
@@ -164,6 +167,35 @@ def mint_desktop(control, device_id, backend_id: str):
         timedelta(hours=config.LAUNCHER_DESKTOP_HOURS),
         backend_id=backend_id,
     )
+
+
+def mint_brain(control, device_id):
+    """A fresh brain token for this device; earlier live brain tokens of the device are revoked."""
+    control.execute(
+        "UPDATE launcher_tokens SET revoked_at = now()"
+        " WHERE device_id = %s AND kind = 'brain' AND revoked_at IS NULL",
+        (device_id,),
+    )
+    return _issue(control, "brain", device_id, timedelta(hours=config.LAUNCHER_BRAIN_HOURS))
+
+
+def resolve_brain(control, brain_token: str) -> dict | None:
+    """The live brain token's (tenant_id, user_id, device_id, posture_ok, posture_reasons), else None.
+    Live = not revoked or expired, device not revoked, identity present, tenant in local mode."""
+    if not brain_token or not brain_token.startswith(BRAIN_PREFIX):
+        return None
+    return control.execute(
+        "SELECT d.tenant_id, d.user_id, d.id AS device_id,"
+        "  coalesce(p.ok, false) AS posture_ok, coalesce(p.reasons, '{no report}') AS posture_reasons"
+        " FROM launcher_tokens t"
+        " JOIN launcher_devices d ON d.id = t.device_id"
+        " JOIN identities i ON i.tenant_id = d.tenant_id AND i.user_id = d.user_id"
+        " JOIN tenants tn ON tn.id = d.tenant_id AND tn.launch_mode = 'local'"
+        " LEFT JOIN launcher_posture p ON p.device_id = d.id"
+        " WHERE t.token_hash = %s AND t.kind = 'brain' AND t.revoked_at IS NULL"
+        " AND t.expires_at > now() AND d.revoked_at IS NULL",
+        (hash_token(brain_token),),
+    ).fetchone()
 
 
 def backend_for_ingress(control, ingress_secret: str) -> str | None:

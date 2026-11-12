@@ -55,5 +55,14 @@ LAUNCHER_ACCESS_MINUTES = 15
 LAUNCHER_REFRESH_DAYS = 30
 LAUNCHER_DESKTOP_HOURS = 12
 LAUNCHER_INVITE_MAX_HOURS = 168
+# Local mode (M1). The brain token lives a working day; revocation is checked on every call.
+LAUNCHER_BRAIN_HOURS = 24
+# A launch needs a Hermes-setup report this fresh (the launcher writes, reads back, reports, launches).
+LOCAL_POSTURE_MAX_AGE_SECONDS = 600
+# Per-user brain limits in local mode (successful calls).
+BRAIN_RATE_PER_MINUTE = int(os.environ.get("BRAIN_RATE_PER_MINUTE", "30"))
+BRAIN_RATE_PER_DAY = int(os.environ.get("BRAIN_RATE_PER_DAY", "500"))
+# The brain MCP endpoint the launcher writes into the local Hermes config.
+LOCAL_MCP_URL = os.environ.get("LOCAL_MCP_URL", "http://127.0.0.1:8200/mcp")
 # Public base URL of the key-intake service; the BYOK link the launcher opens is <base>/key/<token>.
 KEY_INTAKE_BASE_URL = os.environ.get("KEY_INTAKE_BASE_URL", "")

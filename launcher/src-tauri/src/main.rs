@@ -7,13 +7,14 @@
 
 mod api;
 mod hermes;
+mod local;
 mod registry;
 
 use api::{ApiError, Session};
 use reqwest::Method;
 use serde_json::{json, Value};
 use std::path::PathBuf;
-use tauri::State;
+use tauri::{Manager, State};
 
 /// Nous's end-user download page for Hermes Desktop, as linked from the v0.22.6 docs
 /// (website/docs/user-guide/desktop.md:25 "Hermes Desktop product page"). GitHub releases carry
@@ -181,9 +182,101 @@ async fn launch(session: State<'_, Session>, restart: bool) -> Result<Value, Val
 
 /// Sign out (also how you switch user): revoke this device, remove our entries from Hermes's
 /// connections.json (primary falls back to "local"), forget the server and the refresh token.
+/// Local mode: apply the server's policy to this PC's own Hermes, report what Hermes's config now
+/// says, and only on a good verdict write the brain token and start Hermes (docs/LOCAL_MODE_DESIGN.md).
+#[tauri::command]
+async fn launch_local(app: tauri::AppHandle, session: State<'_, Session>, restart: bool) -> Result<Value, Value> {
+    let install = hermes::detect().ok_or_else(|| fail(format!("Hermes Desktop is not installed. Get it from {HERMES_DOWNLOAD}")))?;
+    let running = hermes::running(&install);
+    if running && !restart {
+        return Ok(json!({"needs_restart": true}));
+    }
+    let policy = session.authed(Method::GET, "/launcher/local/policy", None).await.map_err(err)?;
+    if running {
+        hermes::stop(&install);
+    }
+    let (workspace, synced) = local::apply(&policy).map_err(fail)?;
+    if synced {
+        return Err(fail(format!(
+            "{} is inside a synced folder (OneDrive or similar). int3 keeps the assistant's files out of synced folders.",
+            workspace.display()
+        )));
+    }
+    let mcp_name = policy["mcp_server_name"].as_str().unwrap_or("int3_brain").to_string();
+    let verdict = report_posture(&session, &mcp_name, synced).await?;
+    if verdict["ok"] != true {
+        local::set_token(None).map_err(fail)?;
+        return Err(fail(format!("int3 couldn't set up Hermes safely: {}", join_reasons(&verdict))));
+    }
+    let grant = session.authed(Method::POST, "/launcher/local/launch", None).await.map_err(err)?;
+    local::set_token(grant["brain_token"].as_str()).map_err(fail)?;
+    hermes::start(&install).map_err(|e| fail(format!("could not start Hermes: {e}")))?;
+    start_watch(app, mcp_name);
+    Ok(json!({
+        "launched": true,
+        "mode": "local",
+        "workspace": workspace.to_string_lossy(),
+        "expires_at": grant["expires_at"],
+    }))
+}
+
+async fn report_posture(session: &Session, mcp_name: &str, synced: bool) -> Result<Value, Value> {
+    let body = json!({"hermes_version": local::hermes_version(), "report": local::report(mcp_name, synced)});
+    session.authed(Method::POST, "/launcher/local/posture", Some(body)).await.map_err(err)
+}
+
+fn join_reasons(verdict: &Value) -> String {
+    verdict["reasons"].as_array().map(|r| r.iter().filter_map(Value::as_str).collect::<Vec<_>>().join("; ")).unwrap_or_default()
+}
+
+/// While the launcher runs, re-report whenever Hermes's config, .env or plugins change, so the brain
+/// stops answering soon after the setup is weakened (it checks the latest verdict on every call).
+fn start_watch(app: tauri::AppHandle, mcp_name: String) {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static RUNNING: AtomicBool = AtomicBool::new(false);
+    if RUNNING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    tauri::async_runtime::spawn(async move {
+        let mut last = local::watched_stamp();
+        loop {
+            tokio_sleep(15).await;
+            let session = app.state::<Session>();
+            if !session.has_refresh() {
+                break;
+            }
+            let now = local::watched_stamp();
+            if now != last {
+                last = now;
+                let synced = local::prepare_workspace(&local::workspace("int3-workspace")).map(|(_, s)| s).unwrap_or(true);
+                let _ = report_posture(&session, &mcp_name, synced).await;
+            }
+        }
+        RUNNING.store(false, Ordering::SeqCst);
+    });
+}
+
+async fn tokio_sleep(secs: u64) {
+    let (tx, rx) = std::sync::mpsc::channel::<()>();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(secs));
+        let _ = tx.send(());
+    });
+    let _ = tauri::async_runtime::spawn_blocking(move || rx.recv()).await;
+}
+
+/// Open Hermes's own Providers settings, so the model key or sign-in never passes through int3.
+#[tauri::command]
+fn open_providers() -> Result<(), Value> {
+    std::process::Command::new("rundll32").args(["url.dll,FileProtocolHandler", &local::providers_link()]).spawn().map_err(|e| fail(e.to_string()))?;
+    Ok(())
+}
+
 #[tauri::command]
 async fn sign_out(session: State<'_, Session>) -> Result<Value, Value> {
     session.sign_out().await;
+    // Local mode: the brain token leaves this PC with the session (the server revoked it already).
+    let _ = local::set_token(None);
     let mut cleaned = 0;
     if let Some(install) = hermes::detect() {
         for dir in &install.user_data_dirs {
@@ -201,7 +294,7 @@ async fn sign_out(session: State<'_, Session>) -> Result<Value, Value> {
 fn main() {
     tauri::Builder::default()
         .manage(Session::new(load_server()))
-        .invoke_handler(tauri::generate_handler![status, sign_in, me, account, revoke_device, byok_link, hermes_status, open_hermes_download, launch, sign_out])
+        .invoke_handler(tauri::generate_handler![status, sign_in, me, account, revoke_device, byok_link, hermes_status, open_hermes_download, launch, launch_local, open_providers, sign_out])
         .run(tauri::generate_context!())
         .expect("error while running the int3 launcher");
 }

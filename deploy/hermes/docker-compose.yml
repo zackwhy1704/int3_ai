@@ -97,6 +97,8 @@ services:
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-5-5}
       # Where /launcher/byok/link points the admin's browser (the key-intake service below).
       KEY_INTAKE_BASE_URL: ${KEY_INTAKE_BASE_URL:-http://127.0.0.1:8099}
+      # Local mode: the brain MCP endpoint the launcher writes into users' own Hermes config.
+      LOCAL_MCP_URL: ${LOCAL_MCP_URL:-http://127.0.0.1:8200/mcp}
     networks:
       ext: {}
       brain-net:
@@ -123,6 +125,22 @@ services:
       - ./gated/launcher-edge.allowlist:/opt/proxy/launcher-edge.allowlist:ro
     ports:
       - "127.0.0.1:${LAUNCHER_EDGE_PORT:-8100}:8100"
+    networks: [ext]
+    depends_on: [brain]
+
+  # Local mode (docs/LOCAL_MODE_DESIGN.md): ONE multi-user brain MCP endpoint for stock Hermes on
+  # users' own PCs. Holds no credential: every request carries the user's brain token, which the
+  # brain checks on every call. Behind the `local-mode` profile, so plain stacks and `make demo` are
+  # unchanged. LOOPBACK ONLY here; a hosted deployment puts TLS in front.
+  brain-mcp-local:
+    profiles: ["local-mode"]
+    image: ${MCP_IMAGE:-hermes-deploy-brain-mcp}
+    command: ["python", "local_server.py"]
+    environment:
+      BRAIN_URL: http://brain:8000
+      MCP_PORT: "8200"
+    ports:
+      - "127.0.0.1:${LOCAL_MCP_PORT:-8200}:8200"
     networks: [ext]
     depends_on: [brain]
 

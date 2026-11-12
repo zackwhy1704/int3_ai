@@ -77,6 +77,27 @@ bash deploy/hermes/store-test.sh --record <package-version> --release v0.22.6
 `--record` writes `hermes_desktop_builds`; from then on the launcher reports that build with the
 release's state (`supported` for v0.22.6) instead of "untested".
 
+## Local mode (M1)
+
+For a tenant with `launch_mode = 'local'`, Launch does not connect Hermes to a hosted backend. It sets up
+the user's own Hermes and points it at the int3 brain (docs/LOCAL_MODE_DESIGN.md):
+
+1. fetch `/launcher/local/policy`;
+2. apply it with Hermes's own `hermes config set`;
+3. write the int3 block into `SOUL.md`, and `HERMES_WRITE_SAFE_ROOT` into Hermes's `.env`;
+4. read `config.yaml` back and send it to `/launcher/local/posture`;
+5. only on an ok verdict, write `INT3_BRAIN_TOKEN` and start Hermes.
+
+While the launcher runs, it re-reports within about 15 s of any change to `config.yaml`, `.env` or
+`plugins/`. Sign-out removes the token from `.env`.
+
+| Dev/test override | Default |
+|---|---|
+| `CB_LAUNCHER_HERMES_HOME` | `%LOCALAPPDATA%\hermes` |
+| `CB_LAUNCHER_HERMES_CLI` | the MSIX alias `%LOCALAPPDATA%\Microsoft\WindowsApps\hermes.exe`, else `hermes` |
+| `CB_LAUNCHER_WORKSPACE` | `%USERPROFILE%\int3-workspace` |
+| `CB_LAUNCHER_HERMES_SCHEME` | `hermes` (dev Desktop registers `hermes-dev`) |
+
 ## Known limits (alpha)
 
 - Windows only. Unsigned installer (SmartScreen click-through); no auto-update.

@@ -41,6 +41,7 @@ from .. import llm
 from ..auth.principal import Principal, v1_principal
 from ..db import control_conn
 from ..embed import embed_query
+from ..launcher.brain_auth import record_for
 from ..rerank import rerank as _rerank
 
 log = logging.getLogger("v1")
@@ -123,6 +124,13 @@ class ValidateRequest(BaseModel):
 class ValidateResponse(BaseModel):
     valid: list[int]
     invalid: list[int]
+
+
+def _uuid_or_none(value: str) -> str | None:
+    try:
+        return str(uuid.UUID(value))
+    except (ValueError, TypeError):
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -253,6 +261,7 @@ def search(
     if not context:
         # Record an empty retrieval so validate calls still work correctly.
         rid = _record_retrieval(p.session_id, p.tenant_id, [], [])
+        record_for(p, "search_brain", query=body.query, retrieval_id=rid, outcome="empty")
         return SearchResponse(results=[], retrieval_id=rid)
 
     # Build SearchResult objects from the chunks that passed the gate.
@@ -299,6 +308,7 @@ def search(
 
     # Record the retrieval in the CONTROL DB (not the tenant DB).
     rid = _record_retrieval(p.session_id, p.tenant_id, all_claim_ids, all_chunk_ids)
+    record_for(p, "search_brain", query=body.query, retrieval_id=rid, claim_ids=all_claim_ids)
     return SearchResponse(results=results, retrieval_id=rid)
 
 
@@ -479,6 +489,7 @@ def validate(
     a different retrieval — is returned in invalid[].
     """
     if not body.claim_ids:
+        record_for(p, "validate_citations", retrieval_id=_uuid_or_none(body.retrieval_id))
         return ValidateResponse(valid=[], invalid=[])
 
     with control_conn() as conn:
@@ -495,11 +506,13 @@ def validate(
 
     if row is None:
         # Not found, wrong session, or wrong tenant — all claim IDs are invalid.
+        record_for(p, "validate_citations", invalid_ids=body.claim_ids)
         return ValidateResponse(valid=[], invalid=body.claim_ids)
 
     from datetime import datetime, timezone
 
     if row["expires_at"].replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
+        record_for(p, "validate_citations", retrieval_id=body.retrieval_id, invalid_ids=body.claim_ids)
         return ValidateResponse(valid=[], invalid=body.claim_ids)
 
     retrieved_set: set[int] = set(row["claim_ids"] or [])
@@ -511,6 +524,8 @@ def validate(
         else:
             invalid.append(cid)
 
+    record_for(p, "validate_citations", retrieval_id=body.retrieval_id, claim_ids=valid,
+               invalid_ids=invalid)
     return ValidateResponse(valid=valid, invalid=invalid)
 
 
@@ -545,12 +560,14 @@ class PreviewRequest(BaseModel):
 def proposal_preview(body: PreviewRequest, p: Principal = Depends(v1_principal)) -> dict:
     # The exact statement that would be stored/embedded — the sidecar shows this at
     # propose-time so the human confirms the real text (built by capture_statement).
+    record_for(p, "proposal_preview", query=f"{body.subject} / {body.attribute}")
     return capture.preview(p, subject=body.subject, attribute=body.attribute,
                            value=body.value, condition=body.condition)
 
 
 @router.post("/propose_claim")
 def propose_claim(body: ProposeClaimRequest, p: Principal = Depends(v1_principal)) -> dict:
+    record_for(p, "propose_claim", query=f"{body.scope}: {body.subject} / {body.attribute} = {body.value}")
     return capture.propose(
         p, scope=body.scope, subject=body.subject, attribute=body.attribute,
         value=body.value, quote=body.quote, condition=body.condition,
@@ -560,6 +577,7 @@ def propose_claim(body: ProposeClaimRequest, p: Principal = Depends(v1_principal
 
 @router.get("/proposals")
 def list_proposals(scope: str = Query(...), p: Principal = Depends(v1_principal)) -> dict:
+    record_for(p, "list_proposals", query=scope)
     return {"proposals": capture.list_proposals(p, scope=scope)}
 
 
@@ -567,6 +585,7 @@ def list_proposals(scope: str = Query(...), p: Principal = Depends(v1_principal)
 def get_proposal(proposal_id: str, p: Principal = Depends(v1_principal)) -> dict:
     # Owner-only full detail (statement, quote, proposer, timestamp, conflict) so
     # the sidecar's approve elicitation shows what will be stored, not just an id.
+    record_for(p, "get_proposal", query=proposal_id)
     return capture.get_proposal(p, proposal_id=proposal_id)
 
 
@@ -577,6 +596,7 @@ class ApproveRequest(BaseModel):
 
 @router.post("/approve_proposal")
 def approve_proposal(body: ApproveRequest, p: Principal = Depends(v1_principal)) -> dict:
+    record_for(p, "approve_proposal", query=body.proposal_id)
     return capture.approve(p, proposal_id=body.proposal_id, supersede_anyway=body.supersede_anyway)
 
 
@@ -586,4 +606,5 @@ class RejectRequest(BaseModel):
 
 @router.post("/reject_proposal")
 def reject_proposal(body: RejectRequest, p: Principal = Depends(v1_principal)) -> dict:
+    record_for(p, "reject_proposal", query=body.proposal_id)
     return capture.reject(p, proposal_id=body.proposal_id)

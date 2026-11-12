@@ -197,6 +197,9 @@ pub fn start(install: &Install) -> std::io::Result<()> {
         Kind::Dev { exe, args, cwd } => {
             let mut cmd = Command::new(exe);
             cmd.args(args).env("HERMES_DESKTOP_USER_DATA_DIR", &install.user_data_dirs[0]);
+            if let Ok(home) = std::env::var("CB_LAUNCHER_HERMES_HOME") {
+                cmd.env("HERMES_HOME", home); // local mode in a dev/test run: the isolated home
+            }
             if let Some(dir) = cwd {
                 cmd.current_dir(dir);
             }

@@ -8,8 +8,12 @@ Auth:
   /launcher/auth/invite, /launcher/auth/refresh   public (the credential is in the body)
   /launcher/introspect                            the backend's ingress (its own secret)
   everything else                                 a launcher access token (Bearer)
+
+Local mode (/launcher/local/*): the launcher writes the policy into the user's own Hermes, reports
+what it reads back, and only a good report gets a brain token (docs/LOCAL_MODE_DESIGN.md).
 """
 
+import json
 import logging
 import secrets
 import uuid
@@ -21,7 +25,7 @@ from pydantic import BaseModel, Field
 from .. import config
 from ..auth.principal import Principal, _bearer, _principal_for, _tenant_name
 from ..db import control_conn, tenant_conn
-from . import tokens
+from . import local_policy, tokens
 
 log = logging.getLogger("launcher")
 router = APIRouter(prefix="/launcher")
@@ -142,6 +146,12 @@ def revoke_device(device_id: str, p: Principal = Depends(launcher_principal)) ->
 # ── library + launch ────────────────────────────────────────────────────────
 
 
+def _launch_mode(tenant_id: str) -> str:
+    with control_conn() as control:
+        row = control.execute("SELECT launch_mode FROM tenants WHERE id = %s", (tenant_id,)).fetchone()
+    return row["launch_mode"] if row else "hosted"
+
+
 @router.get("/me")
 def me(p: Principal = Depends(launcher_principal)) -> dict:
     """Who is signed in and the brains they may use — by name only."""
@@ -151,7 +161,7 @@ def me(p: Principal = Depends(launcher_principal)) -> dict:
     ).fetchall()
     return {
         "user": {"id": p.user_id, "name": p.name, "email": p.email, "is_admin": _is_admin(p)},
-        "tenant": {"id": p.tenant_id, "name": p.tenant_name},
+        "tenant": {"id": p.tenant_id, "name": p.tenant_name, "launch_mode": _launch_mode(p.tenant_id)},
         "brains": [{"id": b["id"], "name": b["name"]} for b in brains],
     }
 
@@ -258,3 +268,63 @@ def introspect(body: Introspect, request: Request) -> dict:
     if user is None:
         return {"active": False}
     return {"active": True, "expires_at": row["expires_at"].isoformat()}
+
+
+# ── local mode (M1) ─────────────────────────────────────────────────────────
+
+
+def _require_local(p: Principal) -> None:
+    if _launch_mode(p.tenant_id) != "local":
+        raise HTTPException(404, "this company does not use local mode")
+
+
+@router.get("/local/policy")
+def local_policy_route(p: Principal = Depends(launcher_principal)) -> dict:
+    """The Hermes setup to apply on this PC. Contains no secret; the brain token comes later."""
+    _require_local(p)
+    return local_policy.policy(config.LOCAL_MCP_URL)
+
+
+class PostureReport(BaseModel):
+    hermes_version: str = Field(default="", max_length=64)
+    report: dict
+
+
+@router.post("/local/posture")
+def local_posture(body: PostureReport, p: Principal = Depends(launcher_principal)) -> dict:
+    """The launcher's reading of the local Hermes setup. Judged HERE; the latest verdict decides
+    whether this device's brain token is honoured (checked on every brain call)."""
+    _require_local(p)
+    if len(json.dumps(body.report)) > 16_384:
+        raise HTTPException(413, "report too large")
+    ok, reasons = local_policy.evaluate(body.report, config.LOCAL_MCP_URL)
+    with control_conn() as control:
+        control.execute(
+            "INSERT INTO launcher_posture (device_id, reported_at, hermes_version, report, ok, reasons)"
+            " VALUES (%s, now(), %s, %s, %s, %s)"
+            " ON CONFLICT (device_id) DO UPDATE SET reported_at = now(),"
+            " hermes_version = EXCLUDED.hermes_version, report = EXCLUDED.report,"
+            " ok = EXCLUDED.ok, reasons = EXCLUDED.reasons",
+            (_device_id(p), body.hermes_version, json.dumps(body.report), ok, reasons),
+        )
+    if not ok:
+        log.info("local posture refused for %s/%s: %s", p.tenant_id, p.user_id, "; ".join(reasons))
+    return {"ok": ok, "reasons": reasons}
+
+
+@router.post("/local/launch")
+def local_launch(p: Principal = Depends(launcher_principal)) -> dict:
+    """Mint this device's brain token, only after a fresh, good setup report."""
+    _require_local(p)
+    with control_conn() as control:
+        posture = control.execute(
+            "SELECT ok, reasons, extract(epoch FROM now() - reported_at) AS age"
+            " FROM launcher_posture WHERE device_id = %s",
+            (_device_id(p),),
+        ).fetchone()
+        if posture is None or posture["age"] > config.LOCAL_POSTURE_MAX_AGE_SECONDS:
+            raise HTTPException(409, "report the Hermes setup first")
+        if not posture["ok"]:
+            raise HTTPException(409, "Hermes setup refused: " + "; ".join(posture["reasons"]))
+        token, expires = tokens.mint_brain(control, _device_id(p))
+    return {"brain_token": token, "expires_at": expires.isoformat(), "mcp_url": config.LOCAL_MCP_URL}

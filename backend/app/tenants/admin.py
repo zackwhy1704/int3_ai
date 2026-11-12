@@ -111,6 +111,9 @@ def init() -> None:
             GRANT SELECT, INSERT ON launcher_devices, launcher_tokens TO {r};
             GRANT UPDATE (last_seen, revoked_at) ON launcher_devices TO {r};
             GRANT UPDATE (used_at, revoked_at) ON launcher_tokens TO {r};
+            GRANT SELECT, INSERT, UPDATE ON launcher_posture TO {r};
+            GRANT SELECT, INSERT ON brain_audit TO {r};
+            GRANT USAGE ON SEQUENCE brain_audit_id_seq TO {r};
             GRANT EXECUTE ON FUNCTION create_key_link(text, text, text, numeric, text) TO {r};
         """).format(r=sql.Identifier(config.CONTROL_ROLE))
         )

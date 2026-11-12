@@ -31,6 +31,10 @@ class Principal:
     csrf_token: str
     session_id: str
     conn: psycopg.Connection  # the tenant database, as the tenant's role
+    # How the caller authenticated: "session" (browser), "service" (sidecar token), "brain" (local
+    # mode). Set by the auth path that built the Principal; used for local-mode limits and audit.
+    via: str = "session"
+    device_id: str | None = None
 
     def resolve(self, brain_id: str | None) -> list[str]:
         """Scopes to search: all of the user's, or one brain they belong to.
@@ -176,7 +180,16 @@ def v1_principal(request: Request) -> Iterator[Principal]:
     on the browser routes. Dropping it only for the bearer path keeps the
     machine surface usable without weakening cookie-authenticated requests —
     otherwise /v1/ would be a CSRF-exempt hole for any logged-in browser."""
-    if _bearer(request) is not None:
+    bearer = _bearer(request)
+    if bearer is not None:
+        from ..launcher.tokens import BRAIN_PREFIX
+
+        if bearer.startswith(BRAIN_PREFIX):
+            # Local mode: the user's own Hermes, via the brain MCP endpoint (launcher/brain_auth.py).
+            from ..launcher.brain_auth import brain_principal
+
+            yield from brain_principal(request)
+            return
         yield from service_principal(request)
         return
     # Cookie-authenticated: enforce the same CSRF gate as the browser routes

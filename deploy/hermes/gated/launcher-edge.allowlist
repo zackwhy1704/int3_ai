@@ -14,5 +14,8 @@ GET  /launcher/devices          # account: this user's signed-in devices
 POST /launcher/devices/*        # account: /{id}/revoke (own devices only; 404 otherwise)
 GET  /launcher/me               # user, tenant, brain names
 GET  /launcher/compat           # Hermes desktop versions we accept
+GET  /launcher/local/policy     # local mode: the Hermes setup to apply (no secrets)
+POST /launcher/local/posture    # local mode: the launcher's reading of that setup
+POST /launcher/local/launch     # local mode: brain token, only after a good report
 POST /launcher/launch           # per-launch desktop token for the user's own backend
 POST /launcher/byok/link        # admin only: one-time key-entry link (opened in the browser)

@@ -5,6 +5,6 @@ WORKDIR /srv
 # closing the substituted-dependency supply-chain risk.
 COPY requirements.txt /srv/requirements.txt
 RUN pip install --no-cache-dir --require-hashes -r requirements.txt
-COPY server.py /srv/server.py
+COPY server.py local_server.py /srv/
 EXPOSE 9000
 CMD ["python", "server.py"]

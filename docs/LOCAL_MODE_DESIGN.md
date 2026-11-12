@@ -42,6 +42,75 @@ messages *in* (Teams, WhatsApp Business, LINE, SMS) come later, through our serv
 
 ---
 
+## 0. Owner decisions and M1 status (2026-11-13)
+
+**Decisions** (from the design review):
+1. Detect-and-refuse is accepted for the pilot; hosted mode is the high-security tier.
+2. **File writes stay on, confined** to `%USERPROFILE%\int3-workspace` via `HERMES_WRITE_SAFE_ROOT` in
+   Hermes's `.env`. The launcher refuses the folder if it resolves into OneDrive or another synced folder,
+   or if it is a link (see 3.1).
+3. **Passages-only for ALL models in local mode**, with `/v1/validate` citation checks. No server-side
+   model key in local mode; server-written answers stay a hosted-mode feature (brain tokens get 403 on
+   `/v1/brain_ask`).
+4. Memory: kept while the tenant is active; users view and delete theirs in int3; purged 30 days after
+   cancellation (configurable); deletions audited. (M2)
+5. Messaging day 1: Slack (Socket Mode) and Telegram (polling), owner-only allowlist. Signal dropped;
+   email later; Teams/WhatsApp via our day-2 relay plugin. (M4)
+6. Brain token about 24 h; revocation checked on every call; on expiry Hermes shows "reopen int3".
+7. The extra lockdown list is adopted, minus `file` (decision 2).
+
+**The two open checks, resolved at v0.23.1:**
+- **`hermes config set` writes lists and mappings.** Run on this PC against a scratch `HERMES_HOME`:
+  - `agent.disabled_toolsets '[terminal, ...]'` is stored as a YAML list and replaced wholesale;
+  - the `mcp_servers.int3_brain` mapping is stored with `${INT3_BRAIN_TOKEN}` kept literal;
+  - a wrong shape is refused (`hermes_cli/config.py:3135-3147,3165,3186-3205`);
+  - each call takes about 1.2 s.
+- **Providers deep link: `hermes://open/settings?tab=providers`.** Delivered to a running v0.23.1 Desktop
+  (dev scheme `hermes-dev://`), it opened Settings › Providers › Accounts (`apps/desktop/src/lib/hermes-open-target.ts:1-29`,
+  `apps/desktop/src/app/settings/index.tsx:123`). Windows protocol registration for the Store's `hermes://`
+  was not exercised (dev runs skip it).
+
+**Write confinement, verified at v0.23.1.**
+- `HERMES_WRITE_SAFE_ROOT` is read on every check (`agent/file_safety.py:223-229`) and enforced on
+  write, patch, delete and move (`tools/file_operations.py:1310,1349,1530,1630`).
+- Running Hermes's own guard on Windows: outside paths, `..` escapes, a sibling folder sharing the prefix,
+  a junction to outside and `HERMES_HOME\.env` are all **denied**; case and slash variants inside the root
+  are **allowed**.
+- **Reads are not confined** by this variable. The file tools can read other user files and send them to
+  the chosen model.
+
+**Revised effort:**
+
+| Milestone | Scope | Effort |
+|---|---|---|
+| M1 | Launcher config writer + SOUL + brain MCP entry; multi-user MCP endpoint (passages-only + validate); report + refusal; Providers link; per-user limits + audit | **Built** (about 6 days) |
+| M2 | Memory plugin (stdlib), memory API + schema, view/delete in int3, 30-day purge job, deletion audit | 7–9 days |
+| M3 | Ollama path: pin auxiliary/compression/vision to the local model, no fallback, refuse if cloud keys are present | 3–4 days |
+| M4 | Slack + Telegram setup in int3 (owner allowlist), Telegram webhook mode refused | 4–5 days |
+| Test | First partner session (Win11 Store) | 2–3 days |
+| | **Remaining pilot total** | **about 3–4 weeks** |
+
+**M1 as built** (on `spike/remote-thin-client`; the hosted pilot is untouched):
+
+| Piece | Where |
+|---|---|
+| Brain token kind `cb_bt_` (24 h), `tenants.launch_mode`, `launcher_posture`, `brain_audit` | `backend/app/control_schema.sql`, `backend/app/launcher/tokens.py` |
+| Policy + server-side verdict | `backend/app/launcher/local_policy.py` |
+| `/launcher/local/policy`, `/posture`, `/launch` (edge-allowlisted) | `backend/app/launcher/routes.py`, `deploy/hermes/gated/launcher-edge.allowlist` |
+| Brain-token auth on `/v1`: live revocation, posture, limits, route allowlist, audit | `backend/app/launcher/brain_auth.py`, `backend/app/auth/principal.py`, `backend/app/api/v1.py` |
+| Multi-user MCP endpoint (no own credential) | `deploy/hermes/brain-mcp/local_server.py`, compose profile `local-mode` |
+| Launcher local mode: apply, read back, report, token, start, file watcher, Choose AI model | `launcher/src-tauri/src/local.rs`, `main.rs`, `ui/` |
+
+**New findings from the M1 run:**
+- **Telemetry prompt:** Hermes shows its own "Share with Nous / No thanks" consent prompt even with
+  `telemetry.shared_metrics.enabled: false`. A "Share" click isn't in the posture report yet.
+- **Other AI sign-ins on the PC:** Hermes finds other AI tools' sign-ins (it showed this PC's Claude Code
+  account as "Connected · managed by its own CLI"). A user's personal subscription can become the model.
+  That's a model choice, not a brain leak, but partners should know.
+- **Extras in dev builds:** a source-built Hermes installs provider and MCP extras through its own package
+  manager on first use. The Store bundle ships them (`apps/desktop/BUILDING.md:34`), so this is a
+  dev-only gap.
+
 ## 1. Decision summary
 
 | Topic | Decision | Why |
@@ -114,7 +183,7 @@ memory:
   provider: int3                   # our plugin                (:1309)
 agent:
   disabled_toolsets: [terminal, code_execution, browser, web, search, x_search, computer_use,
-                      file, image_gen, video_gen, tts, connections, delegation, cronjob,
+                      image_gen, video_gen, tts, connections, delegation, cronjob,
                       desktop_ui, kanban]       # (:266); names from toolsets.py:72-153
 approvals:
   mode: manual                     # smart | manual | off (website/docs/user-guide/security.md:30-62)
@@ -140,7 +209,7 @@ skills:
   - I propose adding:
     - `x_search`, `computer_use`, `image_gen`, `video_gen`, `tts` and `connections`, which send data to
       third parties;
-    - `file`, so nothing writes into synced folders (`toolsets.py:118`; see leak table);
+    - (`file` stays on: writes confined by `HERMES_WRITE_SAFE_ROOT`, decision 2 in section 0);
     - `delegation` and `cronjob`, which spawn unattended agents;
     - `desktop_ui`, whose `drive_preview` and `read_terminal` let the agent drive Desktop's browser pane
       and read its terminal (`toolsets.py:135-141`);
@@ -351,7 +420,7 @@ than the others.
 | Skills / plugin installs | Install deep links need confirmation (`website/docs/reference/mcp-config-reference.md:441-455`); `skills.inline_shell: false`; posture includes the plugin list | A plugin runs in-process: full escape. Detect only |
 | Cron / automations | `cronjob` and `delegation` disabled; `approvals.cron_mode: deny` | Scheduled jobs created in the UI still run with the same tool limits |
 | Terminal, code, browser, web | `agent.disabled_toolsets` (subtracted last) | Detect only if the user edits config |
-| File writes into OneDrive / synced folders | `file` toolset disabled | The user can still copy and paste. Accepted |
+| File writes into OneDrive / synced folders | Writes confined to `%USERPROFILE%\int3-workspace`; the launcher refuses a synced or linked folder | Reads are not confined; the user can copy and paste. Accepted |
 | Clipboard / copy-paste / screenshots | None; the user's own action | Accepted, as with any app |
 | Desktop browser/terminal panes | `desktop_ui` disabled, so the agent can't drive them | The user can use them directly |
 | Local chat history | Stays on the PC. Accepted for the pilot | Hermes's transcript cache too |

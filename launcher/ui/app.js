@@ -42,7 +42,11 @@ function row(dl, term, value) {
   dl.append(text(document.createElement('dt'), term), text(document.createElement('dd'), value))
 }
 
+let launchMode = 'hosted'
+
 function renderMe(me) {
+  launchMode = (me.tenant && me.tenant.launch_mode) || 'hosted'
+  $('choose-model').hidden = launchMode !== 'local'
   text($('who-name'), me.user.name)
   text($('who-tenant'), me.tenant.name)
   text($('hero-tenant'), me.tenant.name)
@@ -97,13 +101,17 @@ async function launch(restart) {
   msg.textContent = 'Starting Hermes…'
   $('launch').disabled = true
   try {
-    const r = await call('launch', { restart })
+    const r = await call(launchMode === 'local' ? 'launch_local' : 'launch', { restart })
     if (r.needs_restart) {
       msg.hidden = true
       $('restart-dialog').showModal()
       return
     }
     const until = new Date(r.expires_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    if (r.mode === 'local') {
+      msg.textContent = `Hermes is starting on this PC, connected to your company brain until ${until}. The assistant can save files only in ${r.workspace}. To pick or change the AI model, use "Choose AI model".`
+      return
+    }
     msg.textContent = `Hermes is starting, connected as ${r.label}. ${r.backend_online ? 'Your backend is online.' : 'Your backend did not answer yet.'} This connection is valid until ${until}; launch again from here after that.`
   } catch (e) {
     msg.className = 'notice error'
@@ -174,6 +182,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   $('invite').onkeydown = ev => { if (ev.key === 'Enter') signIn() }
   $('launch').onclick = () => launch(false)
   $('get-hermes').onclick = () => call('open_hermes_download').then(refreshHermesLine, () => {})
+  $('choose-model').onclick = () => call('open_providers').catch(e => { $('launch-msg').hidden = false; $('launch-msg').className = 'notice error'; $('launch-msg').textContent = message(e) })
   $('restart-ok').onclick = () => { $('restart-dialog').close(); launch(true) }
   $('restart-cancel').onclick = () => $('restart-dialog').close()
   $('sign-out').onclick = signOut
