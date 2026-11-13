@@ -109,6 +109,19 @@ async fn byok_link(session: State<'_, Session>) -> Result<Value, Value> {
     Ok(json!({"opened": true, "expires_in_hours": link["expires_in_hours"], "replaces_existing_key": link["replaces_existing_key"]}))
 }
 
+/// Local mode M2: the user's own memories as kept by int3 (newest first).
+#[tauri::command]
+async fn memory_list(session: State<'_, Session>) -> Result<Value, Value> {
+    session.authed(Method::GET, "/launcher/local/memory?limit=200", None).await.map_err(err)
+}
+
+/// Delete one memory (`id`) or all of them (`all`). The server audits it (counts only).
+#[tauri::command]
+async fn memory_delete(session: State<'_, Session>, id: Option<i64>, all: bool) -> Result<Value, Value> {
+    let body = if all { json!({"all": true}) } else { json!({"id": id.ok_or_else(|| fail("no memory chosen"))?}) };
+    session.authed(Method::POST, "/launcher/local/memory/delete", Some(body)).await.map_err(err)
+}
+
 /// Open Nous's download page (a constant: the page cannot choose what is opened).
 #[tauri::command]
 fn open_hermes_download() -> Result<(), Value> {
@@ -294,7 +307,7 @@ async fn sign_out(session: State<'_, Session>) -> Result<Value, Value> {
 fn main() {
     tauri::Builder::default()
         .manage(Session::new(load_server()))
-        .invoke_handler(tauri::generate_handler![status, sign_in, me, account, revoke_device, byok_link, hermes_status, open_hermes_download, launch, launch_local, open_providers, sign_out])
+        .invoke_handler(tauri::generate_handler![status, sign_in, me, account, revoke_device, byok_link, hermes_status, open_hermes_download, launch, launch_local, open_providers, memory_list, memory_delete, sign_out])
         .run(tauri::generate_context!())
         .expect("error while running the int3 launcher");
 }

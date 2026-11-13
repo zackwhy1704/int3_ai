@@ -33,6 +33,7 @@
       <div class="brand"><span class="logo" aria-hidden="true"></span>int3</div>
       <nav>
         <button class="nav active" data-tab="library">Library</button>
+        <button class="nav" data-tab="memory" id="nav-memory" hidden>Memory</button>
         <button class="nav" data-tab="account">Account</button>
       </nav>
       <div class="whoami">
@@ -59,6 +60,19 @@
         </header>
         <p id="launch-msg" class="notice" role="status" hidden></p>
         <ul id="brains" class="brains"></ul>
+      </section>
+
+      <section id="tab-memory" class="tab" hidden>
+        <h1>Memory</h1>
+        <p class="muted">What you asked the assistant to remember. It is kept by your company's int3 service, not on
+          this PC, and only you can see it. Deleting removes it for good. If your company stops using int3, it is
+          deleted 30 days later.</p>
+        <p id="memory-msg" class="notice" role="status" hidden></p>
+        <ul id="memories" class="devices"></ul>
+        <div class="actions">
+          <button id="memory-refresh" class="secondary">Refresh</button>
+          <button id="memory-clear" class="danger" hidden>Delete all</button>
+        </div>
       </section>
 
       <section id="tab-account" class="tab" hidden>
@@ -90,6 +104,14 @@
       </section>
     </main>
   </div>
+
+  <dialog id="clear-dialog">
+    <p>Delete everything the assistant remembers for you? This cannot be undone.</p>
+    <div class="actions">
+      <button value="cancel" class="secondary" id="clear-cancel">Cancel</button>
+      <button value="ok" class="danger" id="clear-ok">Delete all</button>
+    </div>
+  </dialog>
 
   <dialog id="restart-dialog">
     <p>Hermes is open. It has to restart to pick up your connection.</p>

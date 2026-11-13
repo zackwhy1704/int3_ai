@@ -1,0 +1,4 @@
+name: int3
+version: 0.1.0
+kind: exclusive
+description: "int3 memory: what you ask the assistant to remember is kept by your company's int3 service (view or delete it in int3 > Memory)."

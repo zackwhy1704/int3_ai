@@ -190,7 +190,7 @@ def resolve_brain(control, brain_token: str) -> dict | None:
         " FROM launcher_tokens t"
         " JOIN launcher_devices d ON d.id = t.device_id"
         " JOIN identities i ON i.tenant_id = d.tenant_id AND i.user_id = d.user_id"
-        " JOIN tenants tn ON tn.id = d.tenant_id AND tn.launch_mode = 'local'"
+        " JOIN tenants tn ON tn.id = d.tenant_id AND tn.launch_mode = 'local' AND tn.cancelled_at IS NULL"
         " LEFT JOIN launcher_posture p ON p.device_id = d.id"
         " WHERE t.token_hash = %s AND t.kind = 'brain' AND t.revoked_at IS NULL"
         " AND t.expires_at > now() AND d.revoked_at IS NULL",

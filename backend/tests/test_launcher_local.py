@@ -51,6 +51,11 @@ def good_report() -> dict:
         "plugins": [],
         "write_safe_root": r"C:\Users\priya\int3-workspace",
         "workspace_synced": False,
+        "telemetry_enabled": False,
+        "inline_shell": False,
+        "adopt_external_logins": False,
+        "model_provider": "anthropic",
+        "credential_sources": ["api_key"],
     }
 
 
@@ -114,6 +119,16 @@ def test_policy_carries_the_lockdown_and_no_secret(client, local_tenant):
     ({"write_safe_root": ""}, "not confined"),
     ({"workspace_synced": True}, "synced folder"),
     ({"workspace_synced": None}, "synced folder"),
+    ({"write_safe_root": r"C:\Users\priya\OneDrive - Acme\int3-workspace"}, "synced folder"),
+    ({"write_safe_root": r"D:\Dropbox\int3-workspace"}, "synced folder"),
+    ({"telemetry_enabled": True}, "usage data with Nous"),
+    ({"telemetry_enabled": None}, "usage data with Nous"),
+    ({"inline_shell": True}, "skills may run commands"),
+    ({"adopt_external_logins": True}, "personal Claude Code or ChatGPT login"),
+    ({"credential_sources": ["personal_login"]}, "personal Claude Code or ChatGPT login"),
+    ({"credential_sources": ["custom_endpoint"]}, "model server elsewhere"),
+    ({"credential_sources": ["something-new"]}, "unknown credential"),
+    ({"credential_sources": None}, "credentials not reported"),
 ])
 def test_every_weakening_is_a_reason(change, reason):
     ok, reasons = local_policy.evaluate({**good_report(), **change}, config.LOCAL_MCP_URL)
@@ -123,6 +138,8 @@ def test_every_weakening_is_a_reason(change, reason):
 
 def test_good_report_passes_and_empty_report_fails():
     assert local_policy.evaluate(good_report(), config.LOCAL_MCP_URL) == (True, [])
+    # no model chosen yet is fine: there is nothing to refuse
+    assert local_policy.evaluate({**good_report(), "credential_sources": []}, config.LOCAL_MCP_URL)[0]
     ok, reasons = local_policy.evaluate({}, config.LOCAL_MCP_URL)
     assert not ok and len(reasons) >= 6
 
@@ -229,3 +246,29 @@ def test_token_kinds_do_not_stand_in_for_each_other(client, local_tenant):
     # a minted-but-garbled brain token is refused
     assert client.post("/v1/search", json={"query": "holidays"},
                        headers=_bearer(token[:-2] + "xx")).status_code == 401
+
+
+def test_a_tenant_can_allow_personal_logins():
+    allowed = list(local_policy.DEFAULT_ALLOWED_SOURCES) + ["personal_login"]
+    report = {**good_report(), "adopt_external_logins": True, "credential_sources": ["personal_login"]}
+    assert local_policy.evaluate(report, config.LOCAL_MCP_URL, allowed) == (True, [])
+    assert local_policy.policy(config.LOCAL_MCP_URL, allowed)["config"]["auth.adopt_external_logins"] is True
+
+
+def test_default_policy_pre_answers_telemetry_and_refuses_personal_logins(client, local_tenant):
+    access = _sign_in(client, "priya")["access_token"]
+    body = client.get("/launcher/local/policy", headers=_bearer(access)).json()
+    cfg = body["config"]
+    assert cfg["telemetry.shared_metrics.enabled"] is False and cfg["telemetry.shared_metrics.send"] is False
+    assert cfg["telemetry.shared_metrics.offer_version"] == local_policy.SHARED_METRICS_OFFER_VERSION
+    assert cfg["auth.adopt_external_logins"] is False and cfg["skills.inline_shell"] is False
+    assert body["allowed_credential_sources"] == ["api_key", "local_endpoint", "hermes_oauth"]
+
+
+def test_a_disallowed_model_credential_stops_the_brain_with_a_clear_message(client, local_tenant):
+    token, session = _brain_token(client)
+    _report(client, session["access_token"], {**good_report(), "credential_sources": ["personal_login"]})
+    r = client.post("/v1/search", json={"query": "holidays"}, headers=_bearer(token))
+    assert r.status_code == 403
+    assert "personal Claude Code or ChatGPT login" in r.json()["detail"]
+    assert "Choose AI model" in r.json()["detail"]

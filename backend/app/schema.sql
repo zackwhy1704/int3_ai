@@ -208,3 +208,15 @@ BEGIN
         resulting_claim_id = v_claim_id WHERE id = p_proposal_id;
     RETURN QUERY SELECT v_claim_id, v_doc_id, v_existing_id, v_title, v_statement;
 END $$;
+
+-- Local mode M2: an employee's assistant memory (explicit "remember this" items), kept here instead of
+-- on their PC. Per user; hard-deleted on request or by the retention purge (app/launcher/memory.py).
+CREATE TABLE IF NOT EXISTS user_memories (
+    id             bigserial PRIMARY KEY,
+    user_id        text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    content        text NOT NULL,
+    embedding      vector(384) NOT NULL,
+    source_session text,
+    created_at     timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS user_memories_user ON user_memories(user_id, created_at);

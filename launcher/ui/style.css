@@ -92,3 +92,4 @@ dd { margin: 0; overflow-wrap: anywhere; }
 
 dialog { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--text); padding: 18px; max-width: 380px; }
 dialog::backdrop { background: rgba(0, 0, 0, .4); }
+#memories li > span:first-child { flex: 1; overflow-wrap: anywhere; }

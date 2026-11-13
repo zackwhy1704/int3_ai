@@ -62,6 +62,10 @@ LOCAL_POSTURE_MAX_AGE_SECONDS = 600
 # Per-user brain limits in local mode (successful calls).
 BRAIN_RATE_PER_MINUTE = int(os.environ.get("BRAIN_RATE_PER_MINUTE", "30"))
 BRAIN_RATE_PER_DAY = int(os.environ.get("BRAIN_RATE_PER_DAY", "500"))
+# Local mode M2: where the int3 memory plugin reaches the memory API (the launcher edge, public URL),
+# and how long a cancelled tenant's memories are kept before the purge.
+LOCAL_MEMORY_URL = os.environ.get("LOCAL_MEMORY_URL", "http://127.0.0.1:8100")
+MEMORY_RETENTION_DAYS = int(os.environ.get("MEMORY_RETENTION_DAYS", "30"))
 # The brain MCP endpoint the launcher writes into the local Hermes config.
 LOCAL_MCP_URL = os.environ.get("LOCAL_MCP_URL", "http://127.0.0.1:8200/mcp")
 # Public base URL of the key-intake service; the BYOK link the launcher opens is <base>/key/<token>.

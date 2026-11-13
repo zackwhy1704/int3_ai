@@ -99,6 +99,10 @@ services:
       KEY_INTAKE_BASE_URL: ${KEY_INTAKE_BASE_URL:-http://127.0.0.1:8099}
       # Local mode: the brain MCP endpoint the launcher writes into users' own Hermes config.
       LOCAL_MCP_URL: ${LOCAL_MCP_URL:-http://127.0.0.1:8200/mcp}
+      # Local mode M2: where the int3 memory plugin in users' Hermes reaches /launcher/local/memory/*
+      # (the launcher edge's public URL), and how long a cancelled tenant's memories are kept.
+      LOCAL_MEMORY_URL: ${LOCAL_MEMORY_URL:-http://127.0.0.1:8100}
+      MEMORY_RETENTION_DAYS: ${MEMORY_RETENTION_DAYS:-30}
     networks:
       ext: {}
       brain-net:

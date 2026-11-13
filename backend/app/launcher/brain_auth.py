@@ -24,17 +24,22 @@ from . import tokens
 
 log = logging.getLogger("launcher.brain")
 
-# The routes the brain MCP endpoint calls. Anything else with a brain token is refused.
+# The routes the brain MCP endpoint calls (/v1) and the int3 memory plugin calls (/launcher/local/memory,
+# via the launcher edge). Anything else with a brain token is refused.
 _ALLOWED = (
     ("POST", "/v1/search"), ("POST", "/v1/validate"), ("POST", "/v1/proposal_preview"),
     ("POST", "/v1/propose_claim"), ("GET", "/v1/proposals"), ("GET", "/v1/proposal/"),
     ("POST", "/v1/approve_proposal"), ("POST", "/v1/reject_proposal"),
+    ("POST", "/launcher/local/memory/save"), ("POST", "/launcher/local/memory/recall"),
+    ("POST", "/launcher/local/memory/forget"),
 )
 _TOOL = {
     "/v1/search": "search_brain", "/v1/validate": "validate_citations",
     "/v1/proposal_preview": "proposal_preview", "/v1/propose_claim": "propose_claim",
     "/v1/proposals": "list_proposals", "/v1/proposal/": "get_proposal",
     "/v1/approve_proposal": "approve_proposal", "/v1/reject_proposal": "reject_proposal",
+    "/launcher/local/memory/save": "memory_save", "/launcher/local/memory/recall": "memory_recall",
+    "/launcher/local/memory/forget": "memory_forget",
 }
 EXPIRED = HTTPException(401, "Your int3 access has expired or was signed out. Reopen int3 to continue.")
 

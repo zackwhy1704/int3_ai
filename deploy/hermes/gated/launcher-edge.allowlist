@@ -17,5 +17,7 @@ GET  /launcher/compat           # Hermes desktop versions we accept
 GET  /launcher/local/policy     # local mode: the Hermes setup to apply (no secrets)
 POST /launcher/local/posture    # local mode: the launcher's reading of that setup
 POST /launcher/local/launch     # local mode: brain token, only after a good report
+GET  /launcher/local/memory     # local mode: the user's own memories (int3 app, launcher token)
+POST /launcher/local/memory/*   # local mode: save|recall|forget (Hermes plugin, brain token); delete (int3 app)
 POST /launcher/launch           # per-launch desktop token for the user's own backend
 POST /launcher/byok/link        # admin only: one-time key-entry link (opened in the browser)

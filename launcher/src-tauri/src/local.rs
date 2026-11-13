@@ -21,6 +21,15 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 pub const TOKEN_KEY: &str = "INT3_BRAIN_TOKEN";
 pub const SAFE_ROOT_KEY: &str = "HERMES_WRITE_SAFE_ROOT";
+/// Local mode M2: where the int3 memory plugin reaches the memory API (from the server's policy).
+pub const MEMORY_URL_KEY: &str = "INT3_MEMORY_URL";
+/// The int3 memory plugin (launcher/hermes-plugin/int3), shipped inside the launcher and installed
+/// into $HERMES_HOME/plugins/int3/ on every launch. The report says whether the files still match.
+pub const PLUGIN_NAME: &str = "int3";
+pub const PLUGIN_FILES: [(&str, &str); 2] = [
+    ("__init__.py", include_str!("../../hermes-plugin/int3/__init__.py")),
+    ("plugin.yaml", include_str!("../../hermes-plugin/int3/plugin.yaml")),
+];
 
 /// HERMES_HOME as Store Desktop resolves it: %LOCALAPPDATA%\hermes (apps/desktop/electron/data-paths.mjs
 /// :26-33 @v0.23.1; the MSIX writes it unvirtualized, electron-builder.config.cjs:276-278).
@@ -181,8 +190,59 @@ fn get<'a>(v: &'a Value, path: &[&str]) -> Option<&'a Value> {
 
 /// The report the server judges (app/launcher/local_policy.py::evaluate): read back from config.yaml,
 /// .env and the plugins folder, never from what we meant to write.
+/// How the active model's credential got onto this PC, as labels only (never a secret). The vocabulary
+/// matches the server's (app/launcher/local_policy.py::CREDENTIAL_SOURCES). Sources read: the model's
+/// base_url, the NAMES of keys in Hermes's .env, the `source` labels of Hermes's auth.json credential
+/// pool (agent/credential_pool.py @v0.23.1), and whether a Claude Code / Codex CLI login file EXISTS
+/// while Hermes may adopt it (auth.adopt_external_logins, agent/credential_sources.py:25-50).
+pub fn credential_sources(cfg: &Value, env_text: &str, auth: &Value, adopt_external: bool,
+                          external_login: &dyn Fn(&str) -> bool) -> Vec<String> {
+    let provider = get(cfg, &["model", "provider"]).and_then(Value::as_str).unwrap_or("").to_string();
+    if provider.is_empty() {
+        return vec![];
+    }
+    let mut out = std::collections::BTreeSet::new();
+    if let Some(url) = get(cfg, &["model", "base_url"]).and_then(Value::as_str).filter(|u| !u.trim().is_empty()) {
+        let host = url::Url::parse(url).ok().and_then(|u| u.host_str().map(str::to_lowercase)).unwrap_or_default();
+        let local = matches!(host.as_str(), "127.0.0.1" | "localhost" | "[::1]" | "::1");
+        out.insert(if local { "local_endpoint" } else { "custom_endpoint" });
+    }
+    let key_var = format!("{}_API_KEY", provider.to_uppercase().replace('-', "_"));
+    if env_get(env_text, &key_var).is_some_and(|v| !v.is_empty()) {
+        out.insert("api_key");
+    }
+    if env_get(env_text, "CLAUDE_CODE_OAUTH_TOKEN").is_some_and(|v| !v.is_empty()) && provider == "anthropic" {
+        out.insert("personal_login");
+    }
+    if get(auth, &["providers", &provider]).is_some() {
+        out.insert("hermes_oauth");
+    }
+    for entry in get(auth, &["credential_pool", &provider]).and_then(Value::as_array).into_iter().flatten() {
+        let src = entry.get("source").and_then(Value::as_str).unwrap_or("");
+        out.insert(match src {
+            s if s.starts_with("env:") => "api_key",
+            "manual" => "api_key",
+            "hermes_pkce" | "device_code" | "loopback_pkce" | "oauth" | "hermes-auth-store" => "hermes_oauth",
+            "claude_code" | "claude-code" | "codex_cli" | "codex-cli" | "codex" => "personal_login",
+            _ => "unknown",
+        });
+    }
+    if adopt_external && external_login(&provider) {
+        out.insert("personal_login");
+    }
+    out.into_iter().map(str::to_string).collect()
+}
+
+#[cfg(test)]
 pub fn build_report(config_yaml: &str, env_text: &str, plugins: Vec<String>, mcp_name: &str,
                     workspace_synced: bool) -> Value {
+    build_report_full(config_yaml, env_text, "", plugins, mcp_name, workspace_synced, &|_| false, Some(true))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn build_report_full(config_yaml: &str, env_text: &str, auth_json: &str, plugins: Vec<String>,
+                         mcp_name: &str, workspace_synced: bool, external_login: &dyn Fn(&str) -> bool,
+                         plugin_intact: Option<bool>) -> Value {
     let cfg: Value = serde_yaml::from_str::<serde_yaml::Value>(config_yaml)
         .ok()
         .and_then(|y| serde_json::to_value(y).ok())
@@ -190,6 +250,9 @@ pub fn build_report(config_yaml: &str, env_text: &str, plugins: Vec<String>, mcp
     let list = |p: &[&str]| -> Value {
         get(&cfg, p).and_then(Value::as_array).map(|a| Value::Array(a.clone())).unwrap_or(Value::Null)
     };
+    // Missing key = Hermes's default (true): adopting is on unless switched off.
+    let adopt = get(&cfg, &["auth", "adopt_external_logins"]).and_then(Value::as_bool).unwrap_or(true);
+    let auth: Value = serde_json::from_str(auth_json).unwrap_or(Value::Null);
     let servers: Vec<Value> = get(&cfg, &["mcp_servers"])
         .and_then(Value::as_object)
         .map(|m| m.keys().map(|k| Value::String(k.clone())).collect())
@@ -205,7 +268,25 @@ pub fn build_report(config_yaml: &str, env_text: &str, plugins: Vec<String>, mcp
         "plugins": plugins,
         "write_safe_root": env_get(env_text, SAFE_ROOT_KEY).unwrap_or_default(),
         "workspace_synced": workspace_synced,
+        "telemetry_enabled": get(&cfg, &["telemetry", "shared_metrics", "enabled"]).cloned().unwrap_or(Value::Null),
+        "inline_shell": get(&cfg, &["skills", "inline_shell"]).cloned().unwrap_or(Value::Null),
+        "adopt_external_logins": adopt,
+        "model_provider": get(&cfg, &["model", "provider"]).cloned().unwrap_or(Value::Null),
+        "credential_sources": credential_sources(&cfg, env_text, &auth, adopt, external_login),
+        "memory_provider": get(&cfg, &["memory", "provider"]).cloned().unwrap_or(Value::Null),
+        "memory_url": env_get(env_text, MEMORY_URL_KEY).unwrap_or_default(),
+        "memory_plugin_intact": plugin_intact,
     })
+}
+
+/// Does the PC hold a login Hermes could adopt for this provider? Existence only; never read.
+pub fn external_login_present(provider: &str) -> bool {
+    let home = PathBuf::from(std::env::var("USERPROFILE").unwrap_or_default());
+    match provider {
+        "anthropic" => home.join(".claude").join(".credentials.json").exists(),
+        "openai-codex" => home.join(".codex").join("auth.json").exists(),
+        _ => false,
+    }
 }
 
 pub fn installed_plugins(home: &Path) -> Vec<String> {
@@ -219,6 +300,24 @@ pub fn installed_plugins(home: &Path) -> Vec<String> {
         .unwrap_or_default();
     names.sort();
     names
+}
+
+/// Install (overwrite) the int3 memory plugin's files. Done BEFORE `memory.provider: int3` is set.
+pub fn install_plugin(home: &Path) -> Result<(), String> {
+    let dir = home.join("plugins").join(PLUGIN_NAME);
+    for (name, body) in PLUGIN_FILES {
+        write_atomic(&dir.join(name), body).map_err(|e| format!("cannot install the int3 memory plugin: {e}"))?;
+    }
+    Ok(())
+}
+
+/// Do the plugin's files on disk still match what this launcher ships? None if it is not installed.
+pub fn plugin_intact(home: &Path) -> Option<bool> {
+    let dir = home.join("plugins").join(PLUGIN_NAME);
+    if !dir.is_dir() {
+        return None;
+    }
+    Some(PLUGIN_FILES.iter().all(|(name, body)| read_text(&dir.join(name)) == *body))
 }
 
 pub fn read_text(path: &Path) -> String {
@@ -239,6 +338,7 @@ pub fn write_atomic(path: &Path, contents: &str) -> std::io::Result<()> {
 pub fn apply(policy: &Value) -> Result<(PathBuf, bool), String> {
     let home = hermes_home();
     let config: &Map<String, Value> = policy["config"].as_object().ok_or("bad policy from the server")?;
+    install_plugin(&home)?;
     for (key, value) in config {
         config_set(key, value)?;
     }
@@ -253,19 +353,25 @@ pub fn apply(policy: &Value) -> Result<(PathBuf, bool), String> {
     write_atomic(&soul_path, &merged).map_err(|e| format!("cannot update SOUL.md: {e}"))?;
     let (ws, synced) = prepare_workspace(&workspace(policy["workspace_dirname"].as_str().unwrap_or("int3-workspace")))?;
     let env_path = home.join(".env");
-    let env = env_with(&read_text(&env_path), SAFE_ROOT_KEY, Some(&ws.to_string_lossy()));
+    let mut env = env_with(&read_text(&env_path), SAFE_ROOT_KEY, Some(&ws.to_string_lossy()));
+    if let Some(url) = policy["memory_url"].as_str().filter(|u| !u.is_empty()) {
+        env = env_with(&env, MEMORY_URL_KEY, Some(url));
+    }
     write_atomic(&env_path, &env).map_err(|e| format!("cannot update Hermes's .env: {e}"))?;
     Ok((ws, synced))
 }
 
 pub fn report(policy_mcp_name: &str, workspace_synced: bool) -> Value {
     let home = hermes_home();
-    build_report(
+    build_report_full(
         &read_text(&home.join("config.yaml")),
         &read_text(&home.join(".env")),
+        &read_text(&home.join("auth.json")),
         installed_plugins(&home),
         policy_mcp_name,
         workspace_synced,
+        &external_login_present,
+        plugin_intact(&home),
     )
 }
 
@@ -282,7 +388,9 @@ pub fn set_token(token: Option<&str>) -> Result<(), String> {
 /// Newest modification time of what the report reads: config.yaml, .env and the plugins folder.
 pub fn watched_stamp() -> Option<std::time::SystemTime> {
     let home = hermes_home();
-    [home.join("config.yaml"), home.join(".env"), home.join("plugins")]
+    let plugin = home.join("plugins").join(PLUGIN_NAME);
+    [home.join("config.yaml"), home.join(".env"), home.join("auth.json"), home.join("plugins"),
+     plugin.join("__init__.py"), plugin.join("plugin.yaml")]
         .iter()
         .filter_map(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok())
         .max()
@@ -312,6 +420,49 @@ mod tests {
         assert_eq!(r["mcp_url"], "https://b.example/mcp");
         assert_eq!(r["write_safe_root"], "C:\\Users\\p\\int3-workspace");
         assert_eq!(r["workspace_synced"], false);
+    }
+
+    #[test]
+    fn credential_sources_are_labels_never_secrets() {
+        let cfg: Value = json!({"model": {"provider": "anthropic"}});
+        let env = "ANTHROPIC_API_KEY=sk-secret-value\n";
+        let none = |_: &str| false;
+        assert_eq!(credential_sources(&cfg, env, &Value::Null, false, &none), vec!["api_key"]);
+        let auth = json!({"credential_pool": {"anthropic": [{"source": "claude_code", "access_token": "x"}]}});
+        assert_eq!(credential_sources(&cfg, "", &auth, false, &none), vec!["personal_login"]);
+        let yes = |p: &str| p == "anthropic";
+        assert_eq!(credential_sources(&cfg, "", &Value::Null, true, &yes), vec!["personal_login"]);
+        assert!(credential_sources(&cfg, "", &Value::Null, false, &yes).is_empty()); // adoption off
+        let codex = json!({"model": {"provider": "openai-codex"}});
+        let auth2 = json!({"providers": {"openai-codex": {"tokens": {}}}});
+        assert_eq!(credential_sources(&codex, "", &auth2, false, &none), vec!["hermes_oauth"]);
+        let ollama = json!({"model": {"provider": "custom", "base_url": "http://127.0.0.1:11434/v1"}});
+        assert_eq!(credential_sources(&ollama, "", &Value::Null, false, &none), vec!["local_endpoint"]);
+        let remote = json!({"model": {"provider": "custom", "base_url": "https://llm.example.com/v1"}});
+        assert_eq!(credential_sources(&remote, "", &Value::Null, false, &none), vec!["custom_endpoint"]);
+        assert!(credential_sources(&json!({}), env, &Value::Null, true, &yes).is_empty()); // no model yet
+        let r = build_report_full("model:\n  provider: anthropic\n", env, "", vec![], "int3_brain", false, &none, None);
+        assert!(!r.to_string().contains("sk-secret-value"));
+        assert_eq!(r["adopt_external_logins"], true); // missing key = Hermes default
+    }
+
+    #[test]
+    fn the_memory_plugin_is_installed_and_checked() {
+        let home = std::env::temp_dir().join(format!("int3-plugin-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        assert_eq!(plugin_intact(&home), None);
+        install_plugin(&home).unwrap();
+        assert_eq!(plugin_intact(&home), Some(true));
+        assert_eq!(installed_plugins(&home), vec!["int3".to_string()]);
+        std::fs::write(home.join("plugins/int3/__init__.py"), "import os  # changed").unwrap();
+        assert_eq!(plugin_intact(&home), Some(false));
+        install_plugin(&home).unwrap(); // the next launch puts it back
+        assert_eq!(plugin_intact(&home), Some(true));
+        let r = build_report_full("memory:\n  provider: int3\n", "INT3_MEMORY_URL=https://m.example\n", "", vec![],
+                                  "int3_brain", false, &|_| false, plugin_intact(&home));
+        assert_eq!((r["memory_provider"].as_str(), r["memory_url"].as_str()), (Some("int3"), Some("https://m.example")));
+        assert_eq!(r["memory_plugin_intact"], true);
+        let _ = std::fs::remove_dir_all(&home);
     }
 
     #[test]

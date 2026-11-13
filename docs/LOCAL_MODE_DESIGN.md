@@ -31,6 +31,11 @@ ever answers within the person's own permissions. Every question is rate-limited
 who use a model on their own PC get a fully private path: the brain sends back the relevant passages
 only, and their own model writes the answer, so company text never goes to a cloud AI.
 
+**Files on the PC.** The assistant can only *save* files in one folder, the int3 workspace. It can
+*read* any file the person can, and whatever it opens goes to the AI model they chose, as with any AI
+assistant. A model running on their own PC keeps those files on the PC. (Partner wording:
+`docs/PARTNER_GUIDE_LOCAL.md`.)
+
 **What we can't promise.** The PC belongs to the person. Someone determined can switch those abilities
 back on. We can make that hard to do by accident, notice when it happens, and stop the brain answering
 on a weakened setup, but we can't make it impossible. If that isn't acceptable for a customer, the
@@ -53,7 +58,7 @@ messages *in* (Teams, WhatsApp Business, LINE, SMS) come later, through our serv
    model key in local mode; server-written answers stay a hosted-mode feature (brain tokens get 403 on
    `/v1/brain_ask`).
 4. Memory: kept while the tenant is active; users view and delete theirs in int3; purged 30 days after
-   cancellation (configurable); deletions audited. (M2)
+   cancellation (configurable); deletions audited. (M2, built: see "M2 as built" below)
 5. Messaging day 1: Slack (Socket Mode) and Telegram (polling), owner-only allowlist. Signal dropped;
    email later; Teams/WhatsApp via our day-2 relay plugin. (M4)
 6. Brain token about 24 h; revocation checked on every call; on expiry Hermes shows "reopen int3".
@@ -84,7 +89,7 @@ messages *in* (Teams, WhatsApp Business, LINE, SMS) come later, through our serv
 | Milestone | Scope | Effort |
 |---|---|---|
 | M1 | Launcher config writer + SOUL + brain MCP entry; multi-user MCP endpoint (passages-only + validate); report + refusal; Providers link; per-user limits + audit | **Built** (about 6 days) |
-| M2 | Memory plugin (stdlib), memory API + schema, view/delete in int3, 30-day purge job, deletion audit | 7–9 days |
+| M2 | Memory plugin (stdlib), memory API + schema, view/delete in int3, 30-day purge job, deletion audit | **Built**, awaiting review |
 | M3 | Ollama path: pin auxiliary/compression/vision to the local model, no fallback, refuse if cloud keys are present | 3–4 days |
 | M4 | Slack + Telegram setup in int3 (owner allowlist), Telegram webhook mode refused | 4–5 days |
 | Test | First partner session (Win11 Store) | 2–3 days |
@@ -103,13 +108,53 @@ messages *in* (Teams, WhatsApp Business, LINE, SMS) come later, through our serv
 
 **New findings from the M1 run:**
 - **Telemetry prompt:** Hermes shows its own "Share with Nous / No thanks" consent prompt even with
-  `telemetry.shared_metrics.enabled: false`. A "Share" click isn't in the posture report yet.
+  `telemetry.shared_metrics.enabled: false`. **Fixed after M1:** the prompt counts as answered when
+  `enabled`/`send` are set together with `offer_version` equal to the current offer
+  (`hermes_cli/observability/shared_metrics_consent.py:53-90`, offer 2 at v0.23.1). The policy writes all
+  three, and Desktop no longer shows the prompt. Usage sharing being on (`enabled` not false) is now a
+  refusal reason.
 - **Other AI sign-ins on the PC:** Hermes finds other AI tools' sign-ins (it showed this PC's Claude Code
   account as "Connected · managed by its own CLI"). A user's personal subscription can become the model.
   That's a model choice, not a brain leak, but partners should know.
 - **Extras in dev builds:** a source-built Hermes installs provider and MCP extras through its own package
   manager on first use. The Store bundle ships them (`apps/desktop/BUILDING.md:34`), so this is a
   dev-only gap.
+
+**Fixes after the M1 review** (all in the server verdict, so an old launcher can't skip them):
+- the workspace path is refused if any folder in it is a known sync folder (OneDrive, Dropbox, Google
+  Drive, iCloud Drive, Box), not only when the launcher detects OneDrive;
+- `skills.inline_shell` must be false. It is the only way a skill can run code: inline shell in
+  `agent/skill_preprocessing.py:47-95`, gated at `:154`. Files under a skill's `scripts/` are only read
+  (`tools/skills_tool.py:4`), and the `terminal`/`code_execution` toolsets stay disabled;
+- **model credentials:** the launcher reports the active provider and how its credential got there, as
+  labels only (`api_key`, `local_endpoint`, `hermes_oauth`, `personal_login`, `custom_endpoint`). It reads
+  the key NAMES in `.env`, the `source` labels in `auth.json`'s credential pool, and whether a Claude Code
+  or Codex CLI login file exists while Hermes may adopt it (`auth.adopt_external_logins`,
+  `agent/credential_sources.py:25-50`, default true at `hermes_cli/config_defaults.py:1739`). The
+  per-tenant `tenants.allowed_credential_sources` defaults to `{api_key, local_endpoint, hermes_oauth}`.
+  The policy sets `auth.adopt_external_logins` false unless `personal_login` is allowed. A disallowed
+  source stops the brain with "this company doesn't allow the AI model to use … Choose another model".
+
+**M2 as built** (hosted memory):
+
+| Piece | Where |
+|---|---|
+| `user_memories` per tenant DB (TENANT_VERSION 4), runtime role SELECT/INSERT/DELETE | `backend/app/schema.sql`, `backend/app/tenants/admin.py`, `backend/app/migrations.py` |
+| `tenants.cancelled_at`, `memory_audit` (counts only, never content; CONTROL_VERSION 3) | `backend/app/control_schema.sql` |
+| save / recall / forget (brain token, same live gate and limits as the brain); list / delete one / delete all (launcher token) | `backend/app/launcher/memory.py`, `routes.py` (`/launcher/local/memory*`, edge-allowlisted) |
+| Cancel + retention purge: `cancel-tenant` revokes every device at once, and brain tokens of a cancelled tenant are refused; `purge-memories` deletes memories `MEMORY_RETENTION_DAYS` (default 30) after cancellation and audits it | `backend/app/launcher/admin.py` |
+| Hermes plugin `int3` (stdlib + Hermes's `MemoryProvider`): tools `int3_remember` / `int3_recall` / `int3_forget`, recall before each turn (3 s cap), no transcript upload, writes only from the primary chat | `launcher/hermes-plugin/int3/` |
+| Launcher ships the plugin inside the binary and installs it before setting `memory.provider: int3`; writes `INT3_MEMORY_URL`; reports provider, URL and whether the files still match | `launcher/src-tauri/src/local.rs` |
+| Verdict: the provider must be `int3`, the plugin intact, the URL ours; `int3` is the only plugin allowed | `backend/app/launcher/local_policy.py` |
+| int3 app › Memory: list, delete one, delete all (confirm) | `launcher/ui/` |
+
+Memory design choices to review:
+- **Explicit memories only.** Saved only when the model calls `int3_remember`, which its instructions
+  limit to "the user asked you to remember". `sync_turn` is a no-op, so conversations are never uploaded.
+- **Recall counts toward the brain limits** (30/min, 500/day): the plugin makes one recall per turn.
+- **After cancellation**, users can no longer open the Memory tab: devices are revoked at once. The
+  retention window only delays the purge. An operator can still delete earlier on request.
+- Limits: 2,000 characters per memory, 500 memories per user.
 
 ## 1. Decision summary
 

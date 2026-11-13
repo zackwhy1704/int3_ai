@@ -4,6 +4,8 @@ container), never from the API process.
     python -m app.launcher.admin invite --tenant brindlewood --user priya [--ttl-hours 72]
     python -m app.launcher.admin revoke-user --tenant brindlewood --user priya
     python -m app.launcher.admin record-build --platform windows --package-version <observed> --release v0.22.6
+    python -m app.launcher.admin cancel-tenant --tenant brindlewood
+    python -m app.launcher.admin purge-memories [--days 30]
 
 `invite` prints a single-use invite LINK (<server>/invite#<code>) to deliver out of band (e.g.
 WhatsApp). `revoke-user` ends
@@ -11,6 +13,10 @@ every launcher device of that user (offboarding, lost laptop when they cannot do
 `record-build` records an OBSERVED official Hermes Desktop package version (the launcher shows it;
 MSIX versions cannot be derived from the tag) against a release in hermes_compat, so the launcher
 reports that build with the release's state instead of "untested".
+`cancel-tenant` ends the company's access at once (every launcher device revoked; brain tokens of a
+cancelled tenant are refused) and starts the memory retention clock. `purge-memories` deletes the
+memories of every tenant cancelled more than MEMORY_RETENTION_DAYS (default 30) ago and audits it;
+run it daily (e.g. a systemd timer on the VM). Both print counts only, never content.
 """
 
 import argparse
@@ -20,7 +26,7 @@ from urllib.parse import urlsplit
 
 from .. import config
 from ..tenants.admin import admin_conn
-from . import tokens
+from . import memory, tokens
 
 
 def _require_secure(url: str) -> str:
@@ -51,7 +57,18 @@ def main() -> None:
     rb.add_argument("--platform", required=True, choices=["windows", "macos"])
     rb.add_argument("--package-version", required=True)
     rb.add_argument("--release", required=True)
+    ct = sub.add_parser("cancel-tenant")
+    ct.add_argument("--tenant", required=True)
+    pm = sub.add_parser("purge-memories")
+    pm.add_argument("--days", type=int, default=None)
     a = ap.parse_args()
+
+    if a.cmd == "purge-memories":
+        done = memory.purge_cancelled(a.days)
+        for tenant_id, n in done:
+            print(f"purged {n} memor{'y' if n == 1 else 'ies'} of cancelled tenant {tenant_id}")
+        print(f"{len(done)} cancelled tenant(s) past retention")
+        return
 
     with admin_conn(config.CONTROL_DB) as control:
         if a.cmd == "invite":
@@ -78,6 +95,20 @@ def main() -> None:
             )
             print(f"recorded {a.platform} Hermes Desktop {a.package_version} = {a.release}"
                   f" (launcher will report: {known['state']})")
+        elif a.cmd == "cancel-tenant":
+            row = control.execute(
+                "UPDATE tenants SET cancelled_at = coalesce(cancelled_at, now()) WHERE id = %s"
+                " RETURNING cancelled_at", (a.tenant,)).fetchone()
+            if row is None:
+                raise SystemExit(f"no tenant {a.tenant}")
+            devices = control.execute(
+                "SELECT id FROM launcher_devices WHERE tenant_id = %s AND revoked_at IS NULL", (a.tenant,)
+            ).fetchall()
+            for d in devices:
+                tokens.revoke_device(control, d["id"])
+            print(f"tenant {a.tenant} cancelled at {row['cancelled_at'].isoformat()}; revoked"
+                  f" {len(devices)} launcher device(s); memories purge after"
+                  f" {config.MEMORY_RETENTION_DAYS} days")
         else:
             devices = control.execute(
                 "SELECT id FROM launcher_devices WHERE tenant_id = %s AND user_id = %s"

@@ -11,8 +11,9 @@ function show(view) {
 
 function tab(name) {
   for (const b of document.querySelectorAll('.nav')) b.classList.toggle('active', b.dataset.tab === name)
-  for (const t of ['library', 'account']) $(`tab-${t}`).hidden = t !== name
+  for (const t of ['library', 'memory', 'account']) $(`tab-${t}`).hidden = t !== name
   if (name === 'account') loadAccount()
+  if (name === 'memory') loadMemory()
 }
 
 function message(e) {
@@ -47,6 +48,7 @@ let launchMode = 'hosted'
 function renderMe(me) {
   launchMode = (me.tenant && me.tenant.launch_mode) || 'hosted'
   $('choose-model').hidden = launchMode !== 'local'
+  $('nav-memory').hidden = launchMode !== 'local'
   text($('who-name'), me.user.name)
   text($('who-tenant'), me.tenant.name)
   text($('hero-tenant'), me.tenant.name)
@@ -155,6 +157,53 @@ async function loadAccount() {
   }
 }
 
+// Local mode M2: the user's memories as kept by int3. Content is shown as text only (textContent).
+async function loadMemory() {
+  const list = $('memories')
+  const msg = $('memory-msg')
+  list.replaceChildren()
+  msg.hidden = true
+  try {
+    const r = await call('memory_list')
+    $('memory-clear').hidden = r.total === 0
+    if (r.total === 0) {
+      msg.hidden = false
+      msg.className = 'notice'
+      msg.textContent = 'Nothing saved yet. Ask the assistant to "remember" something and it will show up here.'
+      return
+    }
+    for (const m of r.memories) {
+      const li = document.createElement('li')
+      const body = text(document.createElement('span'), m.content)
+      const when = text(document.createElement('span'), new Date(m.created_at).toLocaleString())
+      when.className = 'muted small'
+      const b = text(document.createElement('button'), 'Delete')
+      b.className = 'secondary small'
+      b.onclick = async () => {
+        b.disabled = true
+        try { await call('memory_delete', { id: m.id, all: false }) } catch (e) { b.disabled = false; return memoryError(e) }
+        loadMemory()
+      }
+      li.append(body, when, b)
+      list.append(li)
+    }
+    if (r.total > r.memories.length) {
+      msg.hidden = false
+      msg.className = 'notice'
+      msg.textContent = `Showing the newest ${r.memories.length} of ${r.total}.`
+    }
+  } catch (e) {
+    memoryError(e)
+  }
+}
+
+function memoryError(e) {
+  const msg = $('memory-msg')
+  msg.hidden = false
+  msg.className = 'notice error'
+  msg.textContent = message(e)
+}
+
 async function signOut() {
   await call('sign_out').catch(() => {})
   $('invite').value = ''
@@ -185,6 +234,14 @@ window.addEventListener('DOMContentLoaded', async () => {
   $('choose-model').onclick = () => call('open_providers').catch(e => { $('launch-msg').hidden = false; $('launch-msg').className = 'notice error'; $('launch-msg').textContent = message(e) })
   $('restart-ok').onclick = () => { $('restart-dialog').close(); launch(true) }
   $('restart-cancel').onclick = () => $('restart-dialog').close()
+  $('memory-refresh').onclick = loadMemory
+  $('memory-clear').onclick = () => $('clear-dialog').showModal()
+  $('clear-cancel').onclick = () => $('clear-dialog').close()
+  $('clear-ok').onclick = async () => {
+    $('clear-dialog').close()
+    try { await call('memory_delete', { id: null, all: true }) } catch (e) { return memoryError(e) }
+    loadMemory()
+  }
   $('sign-out').onclick = signOut
   $('switch-user').onclick = signOut
   $('byok').onclick = async () => {

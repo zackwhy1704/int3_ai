@@ -113,6 +113,8 @@ def init() -> None:
             GRANT UPDATE (used_at, revoked_at) ON launcher_tokens TO {r};
             GRANT SELECT, INSERT, UPDATE ON launcher_posture TO {r};
             GRANT SELECT, INSERT ON brain_audit TO {r};
+            GRANT SELECT, INSERT ON memory_audit TO {r};
+            GRANT USAGE ON SEQUENCE memory_audit_id_seq TO {r};
             GRANT USAGE ON SEQUENCE brain_audit_id_seq TO {r};
             GRANT EXECUTE ON FUNCTION create_key_link(text, text, text, numeric, text) TO {r};
         """).format(r=sql.Identifier(config.CONTROL_ROLE))
@@ -204,6 +206,8 @@ def _grant_tenant_base(tconn, db: str) -> None:
         GRANT SELECT ON users, scopes, memberships, documents, chunks, claims TO {r};
         GRANT SELECT, INSERT, UPDATE ON answer_cache TO {r};
         GRANT SELECT, INSERT, UPDATE ON proposals TO {r};
+        GRANT SELECT, INSERT, DELETE ON user_memories TO {r};
+        GRANT USAGE ON SEQUENCE user_memories_id_seq TO {r};
     """).format(r=sql.Identifier(db))
     )
 

@@ -337,3 +337,23 @@ CREATE TABLE IF NOT EXISTS brain_audit (
     outcome       text NOT NULL CHECK (outcome IN ('ok', 'empty', 'refused', 'rate_limited', 'error'))
 );
 CREATE INDEX IF NOT EXISTS brain_audit_user_day ON brain_audit(tenant_id, user_id, at);
+
+-- Which kinds of AI-model credential a local-mode tenant accepts on users' PCs (local_policy.py).
+-- Default: the user's own API key, a model on their own machine, or a sign-in done in Hermes's own
+-- Providers screen. NOT a personal Claude Code / ChatGPT CLI login reused from the PC.
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS allowed_credential_sources text[] NOT NULL
+    DEFAULT '{api_key,local_endpoint,hermes_oauth}';
+
+-- Local mode M2: a cancelled tenant loses brain + memory access at once (devices revoked); its memories
+-- are purged MEMORY_RETENTION_DAYS later. Every memory deletion is recorded here (counts, never content).
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS cancelled_at timestamptz;
+CREATE TABLE IF NOT EXISTS memory_audit (
+    id         bigserial PRIMARY KEY,
+    at         timestamptz NOT NULL DEFAULT now(),
+    tenant_id  text NOT NULL,
+    user_id    text,
+    device_id  uuid,
+    action     text NOT NULL CHECK (action IN ('delete_one', 'delete_all', 'purge')),
+    count      int NOT NULL,
+    actor      text NOT NULL CHECK (actor IN ('user', 'assistant', 'retention', 'operator'))
+);

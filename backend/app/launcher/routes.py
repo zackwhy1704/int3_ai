@@ -25,7 +25,8 @@ from pydantic import BaseModel, Field
 from .. import config
 from ..auth.principal import Principal, _bearer, _principal_for, _tenant_name
 from ..db import control_conn, tenant_conn
-from . import local_policy, tokens
+from . import local_policy, memory, tokens
+from .brain_auth import brain_principal, record_for
 
 log = logging.getLogger("launcher")
 router = APIRouter(prefix="/launcher")
@@ -273,16 +274,23 @@ def introspect(body: Introspect, request: Request) -> dict:
 # ── local mode (M1) ─────────────────────────────────────────────────────────
 
 
-def _require_local(p: Principal) -> None:
-    if _launch_mode(p.tenant_id) != "local":
+def _require_local(p: Principal) -> list[str]:
+    """404 unless the tenant runs local mode; else its allowed model-credential sources."""
+    with control_conn() as control:
+        row = control.execute(
+            "SELECT launch_mode, allowed_credential_sources FROM tenants WHERE id = %s", (p.tenant_id,)
+        ).fetchone()
+    if row is None or row["launch_mode"] != "local":
         raise HTTPException(404, "this company does not use local mode")
+    return list(row["allowed_credential_sources"])
 
 
 @router.get("/local/policy")
 def local_policy_route(p: Principal = Depends(launcher_principal)) -> dict:
     """The Hermes setup to apply on this PC. Contains no secret; the brain token comes later."""
-    _require_local(p)
-    return local_policy.policy(config.LOCAL_MCP_URL)
+    allowed = _require_local(p)
+    return {**local_policy.policy(config.LOCAL_MCP_URL, allowed, config.LOCAL_MEMORY_URL),
+            "allowed_credential_sources": allowed}
 
 
 class PostureReport(BaseModel):
@@ -294,10 +302,10 @@ class PostureReport(BaseModel):
 def local_posture(body: PostureReport, p: Principal = Depends(launcher_principal)) -> dict:
     """The launcher's reading of the local Hermes setup. Judged HERE; the latest verdict decides
     whether this device's brain token is honoured (checked on every brain call)."""
-    _require_local(p)
+    allowed = _require_local(p)
     if len(json.dumps(body.report)) > 16_384:
         raise HTTPException(413, "report too large")
-    ok, reasons = local_policy.evaluate(body.report, config.LOCAL_MCP_URL)
+    ok, reasons = local_policy.evaluate(body.report, config.LOCAL_MCP_URL, allowed, config.LOCAL_MEMORY_URL)
     with control_conn() as control:
         control.execute(
             "INSERT INTO launcher_posture (device_id, reported_at, hermes_version, report, ok, reasons)"
@@ -328,3 +336,77 @@ def local_launch(p: Principal = Depends(launcher_principal)) -> dict:
             raise HTTPException(409, "Hermes setup refused: " + "; ".join(posture["reasons"]))
         token, expires = tokens.mint_brain(control, _device_id(p))
     return {"brain_token": token, "expires_at": expires.isoformat(), "mcp_url": config.LOCAL_MCP_URL}
+
+
+# ── local mode (M2): the employee's assistant memory, kept here ────────────────
+# The int3 memory plugin inside Hermes calls save/recall/forget with the BRAIN token (same gate as the
+# brain: live token, good setup report, limits). The int3 app lists and deletes with the launcher token.
+# The server decides whose memory it is from the token; no request names a user.
+
+
+class MemorySave(BaseModel):
+    content: str = Field(min_length=1, max_length=memory.MAX_CONTENT)
+    session: str | None = Field(default=None, max_length=200)
+
+
+class MemoryRecall(BaseModel):
+    query: str = Field(max_length=4000)
+    k: int = Field(default=memory.RECALL_K, ge=1, le=20)
+
+
+class MemoryForget(BaseModel):
+    id: int
+
+
+class MemoryDelete(BaseModel):
+    id: int | None = None
+    all: bool = False
+
+
+@router.post("/local/memory/save")
+def memory_save(body: MemorySave, p: Principal = Depends(brain_principal)) -> dict:
+    record_for(p, "memory_save")  # content is NOT copied into the audit
+    try:
+        return memory.save(p.conn, p.user_id, body.content, body.session)
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from None
+
+
+@router.post("/local/memory/recall")
+def memory_recall(body: MemoryRecall, p: Principal = Depends(brain_principal)) -> dict:
+    record_for(p, "memory_recall")
+    return {"memories": memory.recall(p.conn, p.user_id, body.query, body.k)}
+
+
+@router.post("/local/memory/forget")
+def memory_forget(body: MemoryForget, p: Principal = Depends(brain_principal)) -> dict:
+    n = memory.delete_one(p.conn, p.user_id, body.id)
+    record_for(p, "memory_forget", outcome="ok" if n else "empty")
+    if n:
+        memory.audit(p.tenant_id, p.user_id, "delete_one", n, "assistant", p.device_id)
+    return {"deleted": n}
+
+
+@router.get("/local/memory")
+def memory_list(limit: int = 100, offset: int = 0, p: Principal = Depends(launcher_principal)) -> dict:
+    """The user's own memories, newest first, for the int3 app's Memory tab."""
+    _require_local(p)
+    return memory.list_all(p.conn, p.user_id, limit, offset)
+
+
+@router.post("/local/memory/delete")
+def memory_delete(body: MemoryDelete, p: Principal = Depends(launcher_principal)) -> dict:
+    """Delete one memory (``id``) or all of them (``all: true``). Hard delete, audited (counts only)."""
+    _require_local(p)
+    if body.all == (body.id is not None):
+        raise HTTPException(422, "give either an id or all=true")
+    if body.all:
+        n = memory.delete_all(p.conn, p.user_id)
+        action = "delete_all"
+    else:
+        n = memory.delete_one(p.conn, p.user_id, body.id)
+        action = "delete_one"
+        if n == 0:
+            raise HTTPException(404, "memory not found")
+    memory.audit(p.tenant_id, p.user_id, action, n, "user", _device_id(p))
+    return {"deleted": n}
