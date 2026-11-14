@@ -118,13 +118,16 @@ def test_soul_block_routes_company_facts_to_propose_and_personal_ones_to_memory(
     """Live turn (b) at 10e1083: "Remember for operations that ..." went to int3_remember because
     nothing told the model otherwise. The launcher writes this block into the user's SOUL.md."""
     block = local_policy.SOUL_BLOCK
-    for needle in ('"Remember for <a team> / for the company', "statement about the business",
-                   "call `propose_claim`", "NEVER save these with `int3_remember`",
-                   '"Remember that I', "call `int3_remember`", "ask them",
-                   "before saving anything"):
+    for needle in ('"Remember for <a team> / for the company', "call `propose_claim` with that scope's id",
+                   "NEVER save company facts with `int3_remember`", '"Remember that I', "call\n  `int3_remember`",
+                   "WITHOUT saying who it is for", "ALWAYS ask before saving",
+                   "even when it\n  sounds like a fact about the business", "Save nothing until they answer"):
         assert needle in block, needle
-    # company before personal, so the narrower rule is read first
-    assert block.index("propose_claim") < block.index("call `int3_remember`")
+    # Live (b2-reply) at d608965: "Remember the Leeds dock closes ..." went straight to propose_claim
+    # because the old rule sent "any statement about the business" there. The ask-first rule comes
+    # first and that clause is gone.
+    assert block.index("ALWAYS ask") < block.index("call `propose_claim`") < block.index("`int3_remember`.")
+    assert "any statement about the business" not in block
     # the launcher appends "## Your int3 scopes" (launcher/src-tauri/src/local.rs scopes_section)
     assert 'scope ids listed under "Your int3 scopes"' in block and "never invent one" in block
     assert "Never state the status of a proposal you could not see" in block
@@ -288,6 +291,30 @@ def test_per_minute_limit(client, local_tenant, monkeypatch):
     brain_auth._minute.clear()
 
 
+def test_refused_and_not_found_calls_count_toward_the_per_minute_limit(client, local_tenant, monkeypatch):
+    """Probing is not free: refused routes, handler refusals (403), unknown scopes (404) and the 429s
+    themselves all use up the per-minute window. They stay out of the daily count (ok/empty only)."""
+    from app.launcher import brain_auth
+
+    monkeypatch.setattr(config, "BRAIN_RATE_PER_MINUTE", 3)
+    brain_auth._minute.clear()
+    try:
+        token, session = _brain_token(client)
+        h = _bearer(token)
+        codes = [
+            client.get("/v1/sources", headers=h).status_code,                               # route refused
+            client.get("/v1/proposals", params={"scope": "operations"}, headers=h).status_code,  # not the owner
+            client.get("/v1/proposals", params={"scope": "nope"}, headers=h).status_code,        # unknown scope
+            client.post("/v1/search", json={"query": "holidays"}, headers=h).status_code,        # window full
+            client.post("/v1/search", json={"query": "holidays"}, headers=h).status_code,        # still full
+        ]
+        assert codes == [403, 403, 404, 429, 429]
+        assert [a["outcome"] for a in _audit(session["device_id"])][-5:] == \
+            ["refused", "refused", "not_found", "rate_limited", "rate_limited"]
+    finally:
+        brain_auth._minute.clear()
+
+
 def test_token_kinds_do_not_stand_in_for_each_other(client, local_tenant):
     token, session = _brain_token(client)
     # a brain token is not a launcher access token
@@ -369,6 +396,22 @@ def test_unknown_scope_is_distinct_from_not_a_member_and_lists_own_scopes(client
     assert r.status_code == 403 and "only the scope owner" in r.json()["detail"]
 
 
+def test_preview_checks_and_names_the_scope_before_the_card(client, local_tenant):
+    """The card is yes/no in Hermes v0.23.1, so the scope cannot be chosen on it: the brain checks the
+    model's scope at preview time (before the user is asked) and names it for the card."""
+    token, _ = _brain_token(client)
+    body = {"subject": "Leeds dock", "attribute": "closing time", "value": "6pm"}
+    r = client.post("/v1/proposal_preview", json={**body, "scope": "operations"}, headers=_bearer(token))
+    assert r.status_code == 200 and r.json()["scope"] == "operations" and r.json()["scope_name"] == "Operations"
+    r = client.post("/v1/proposal_preview", json={**body, "scope": "company"}, headers=_bearer(token))
+    assert r.status_code == 404 and r.json()["detail"].startswith("unknown scope 'company'; your scopes are:")
+    r = client.post("/v1/proposal_preview", json={**body, "scope": "finance"}, headers=_bearer(token))
+    assert r.status_code == 403 and r.json()["detail"].startswith("not a member of scope 'finance'")
+    # without a scope (the hosted sidecar), unchanged
+    r = client.post("/v1/proposal_preview", json=body, headers=_bearer(token))
+    assert r.status_code == 200 and set(r.json()) == {"statement"}
+
+
 def test_search_text_names_subject_and_attribute_for_every_claim(client, local_tenant):
     from app.api.v1 import claim_text
     token, _ = _brain_token(client)
@@ -386,9 +429,18 @@ def test_search_text_names_subject_and_attribute_for_every_claim(client, local_t
     assert claim_text("X", "y", None, "z") == "X — y: z" and claim_text("X", "y", "  ", "z") == "X — y: z"
 
 
-def test_workflow_claim_search_text_names_subject_and_condition(client, local_tenant, monkeypatch):
+def _fresh_proposal_window(user: str) -> None:
+    """Isolate the per-user hourly proposal counter (capture.propose counts this user's proposals of
+    the last hour, and the test database keeps rows from earlier tests and earlier runs): move the
+    user's existing proposals out of the window. The limit itself stays on."""
+    with admin_conn("t_" + TENANT) as c:
+        c.execute("UPDATE proposals SET created_at = created_at - interval '2 hours'"
+                  " WHERE proposer_user_id = %s AND created_at > now() - interval '1 hour'", (user,))
+
+
+def test_workflow_claim_search_text_names_subject_and_condition(client, local_tenant):
     import uuid
-    monkeypatch.setattr(config, "PROPOSAL_RATE_PER_HOUR", 0)  # not a rate-limit test; earlier tests propose too
+    _fresh_proposal_window("priya")
     tag = uuid.uuid4().hex[:6]
     priya, _ = _brain_token(client)
     ada, _ = _brain_token(client, "ada")

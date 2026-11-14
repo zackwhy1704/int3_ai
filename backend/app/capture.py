@@ -52,11 +52,16 @@ def _statement(conn, subject, attribute, condition, value) -> str:
     ).fetchone()["s"]
 
 
-def preview(p, *, subject, attribute, value, condition=None) -> dict:
+def preview(p, *, subject, attribute, value, condition=None, scope=None) -> dict:
     """Exactly the text that propose would store/embed for these fields (condition
     normalised). Shown by the sidecar at propose-time so the human confirms the
-    real stored statement."""
-    return {"statement": _statement(p.conn, subject, attribute, _norm_condition(condition), value)}
+    real stored statement. With ``scope``: the same scope check propose makes (unknown
+    -> 404, not a member -> 403), BEFORE the user is asked, plus the scope's display name
+    for the confirmation card."""
+    out = {"statement": _statement(p.conn, subject, attribute, _norm_condition(condition), value)}
+    if scope is not None:
+        out["scope"], out["scope_name"] = scope, _require_member_scope(p, scope)
+    return out
 
 
 def _your_scopes(p) -> str:
@@ -70,6 +75,14 @@ def _require_known_scope(p, scope) -> None:
     model can retry with a real id. Distinct from 403 "not a member" (the id exists)."""
     if p.conn.execute("SELECT 1 FROM scopes WHERE id = %s", (scope,)).fetchone() is None:
         raise HTTPException(404, f"unknown scope {scope!r}; your scopes are: {_your_scopes(p)}")
+
+
+def _require_member_scope(p, scope) -> str:
+    """The scope's display name if the caller may propose into it; else 404 unknown / 403 not a member."""
+    _require_known_scope(p, scope)
+    if scope not in p.scopes:
+        raise HTTPException(403, f"not a member of scope {scope!r}; your scopes are: {_your_scopes(p)}")
+    return p.conn.execute("SELECT name FROM scopes WHERE id = %s", (scope,)).fetchone()["name"]
 
 
 def _owner_of(p, scope):
@@ -93,9 +106,7 @@ def _active_claim_for_key(p, scope, subject, attribute, condition):
 
 
 def propose(p, *, scope, subject, attribute, value, quote, condition=None, session_label=None) -> dict:
-    _require_known_scope(p, scope)
-    if scope not in p.scopes:
-        raise HTTPException(403, f"not a member of scope {scope!r}; your scopes are: {_your_scopes(p)}")
+    _require_member_scope(p, scope)
     limit = config.PROPOSAL_RATE_PER_HOUR
     if limit > 0:
         recent = p.conn.execute(

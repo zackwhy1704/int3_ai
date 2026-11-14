@@ -31,25 +31,35 @@ from mcp.types import ElicitResult  # noqa: E402
 URL = f"http://127.0.0.1:{MCP_PORT}/mcp"
 USERS = {"cb_bt_alice1": "alice", "cb_bt_alice2": "alice", "cb_bt_alice3": "alice", "cb_bt_bob": "bob"}
 CALLS: list[tuple[str, str]] = []  # (path, token) every request the fake brain saw
+BODIES: list[tuple[str, dict]] = []  # (path, JSON body) of every POST the fake brain saw
+SCOPE_NAMES = {"company-wide": "Company-wide", "operations": "Operations"}  # the callers' scopes
 
 
 async def fake_brain(scope, receive, send):
     if scope["type"] != "http":
         return
-    more = True
+    raw, more = b"", True
     while more:
-        more = (await receive()).get("more_body", False)
+        msg = await receive()
+        raw += msg.get("body", b"")
+        more = msg.get("more_body", False)
     auth = dict(scope["headers"]).get(b"authorization", b"").decode()
     token = auth.partition(" ")[2]
     path = scope["path"]
     CALLS.append((path, token))
+    req = json.loads(raw) if raw else {}
+    BODIES.append((path, req))
     status, out = 200, {}
     if token not in USERS:
         status, out = 401, {"detail": "expired"}
     elif path == "/v1/session":
         out = {"user_key": USERS[token]}
+    elif path == "/v1/proposal_preview" and req.get("scope") not in (None, *SCOPE_NAMES):
+        # like the brain (capture._require_member_scope): checked BEFORE any card
+        status, out = 404, {"detail": f"unknown scope {req['scope']!r}; your scopes are: company-wide, operations"}
     elif path == "/v1/proposal_preview":
-        out = {"statement": "Leeds dock - Friday close: 6pm"}
+        out = {"statement": "Leeds dock - Friday close: 6pm",
+               **({"scope": req["scope"], "scope_name": SCOPE_NAMES[req["scope"]]} if req.get("scope") else {})}
     elif path == "/v1/propose_claim":
         out = {"status": "pending", "proposal_id": "p1"}
     body = json.dumps(out).encode()
@@ -324,3 +334,49 @@ def test_sdk_internals_check_fails_loudly_when_they_change():
     for bad in (Missing, WrongType, SyncDiscard, Renamed, WrongValues):
         with pytest.raises(RuntimeError, match="mcp SDK changed"):
             local_server.check_sdk_internals(bad())
+
+
+def _propose_to(token, scope, on_card):
+    async def go():
+        async with streamablehttp_client(URL, headers={"Authorization": f"Bearer {token}"}) as (r, w, get_sid):
+            async def elicit(context, params):
+                return await on_card(params.message)
+            async with ClientSession(r, w, elicitation_callback=elicit) as s:
+                await s.initialize()
+                return await s.call_tool("propose_claim", {
+                    "scope": scope, "subject": "Leeds dock", "attribute": "closing time",
+                    "value": "6pm", "quote": "the Leeds dock closes at 6pm on Fridays"})
+    return asyncio.run(go())
+
+
+def test_card_names_the_scope_that_is_stored(server):
+    """Item 3b fallback: Hermes v0.23.1 cards are yes/no (no field can be chosen), so the card names
+    the scope, the brain checked it first, and exactly that scope is what propose_claim stores."""
+    shown: list[str] = []
+
+    async def accept(message):
+        shown.append(message)
+        return ElicitResult(action="accept", content={})
+    before = len(BODIES)
+    res = _propose_to("cb_bt_alice1", "operations", accept)
+    assert '"pending"' in _text(res)
+    sent = [(p, b) for p, b in BODIES[before:] if p.startswith("/v1/propos")]
+    assert [p for p, _ in sent] == ["/v1/proposal_preview", "/v1/propose_claim"]
+    assert sent[0][1]["scope"] == "operations"           # checked before the card
+    assert "Capture into the Operations scope (operations)" in shown[0]
+    assert "Wrong scope? Choose Reject" in shown[0]
+    assert sent[1][1]["scope"] == "operations"           # the stored scope is the one on the card
+
+
+def test_unknown_scope_is_refused_before_any_card(server):
+    cards: list[str] = []
+
+    async def accept(message):
+        cards.append(message)
+        return ElicitResult(action="accept", content={})
+    before = len(BODIES)
+    res = _propose_to("cb_bt_alice1", "company", accept)
+    assert "unknown scope 'company'" in _text(res) and "company-wide" in _text(res)
+    assert cards == []                                      # the user was never asked
+    assert [p for p, _ in BODIES[before:] if p.startswith("/v1/propos")] == ["/v1/proposal_preview"]  # and nothing was proposed
+

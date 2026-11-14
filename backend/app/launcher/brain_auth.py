@@ -92,18 +92,31 @@ def outcome_of(exc: BaseException) -> str:
     return "error"
 
 
-def _check_limits(tenant_id: str, user_id: str, kind: str = "brain") -> str | None:
-    per_minute, per_day = ((config.MEMORY_RATE_PER_MINUTE, config.MEMORY_RATE_PER_DAY) if kind == "memory"
-                           else (config.BRAIN_RATE_PER_MINUTE, config.BRAIN_RATE_PER_DAY))
+def _limits(kind: str) -> tuple[int, int]:
+    return ((config.MEMORY_RATE_PER_MINUTE, config.MEMORY_RATE_PER_DAY) if kind == "memory"
+            else (config.BRAIN_RATE_PER_MINUTE, config.BRAIN_RATE_PER_DAY))
+
+
+def _tick_minute(tenant_id: str, user_id: str, kind: str) -> str | None:
+    """Count this call in the user's per-minute window and say whether the window was already full.
+    EVERY call a live token makes is counted, whatever happens to it next (refused route, failed
+    setup check, refused or not-found in the handler, or this limit itself), so probing is not free:
+    a client that keeps calling while limited stays limited until it pauses."""
+    per_minute, _ = _limits(kind)
     now = time.monotonic()
-    key = (tenant_id, user_id, kind)
     with _minute_lock:
-        q = _minute.setdefault(key, deque())
+        q = _minute.setdefault((tenant_id, user_id, kind), deque())
         while q and now - q[0] > 60:
             q.popleft()
-        if len(q) >= per_minute:
-            return f"{per_minute} {kind} requests per minute"
-        q.append(now)
+        full = len(q) >= per_minute
+        if len(q) < 4 * per_minute:  # bounded: a hammering client cannot grow this without limit
+            q.append(now)
+    return f"{per_minute} {kind} requests per minute" if full else None
+
+
+def _check_daily(tenant_id: str, user_id: str, kind: str = "brain") -> str | None:
+    """The per-day limit counts only calls that returned something (ok / empty)."""
+    _, per_day = _limits(kind)
     with control_conn() as control:
         n = control.execute(
             "SELECT count(*) AS n FROM brain_audit WHERE tenant_id = %s AND user_id = %s"
@@ -124,16 +137,17 @@ def brain_principal(request: Request) -> Iterator[Principal]:
         raise EXPIRED
     tenant_id, user_id, device_id = row["tenant_id"], row["user_id"], row["device_id"]
     route = _route(request)
+    tool = _TOOL[route] if route is not None else request.url.path
+    kind = "memory" if tool.startswith("memory_") else "brain"
+    minute_full = _tick_minute(tenant_id, user_id, kind)  # before any refusal: refusals count too
     if route is None:
-        record(tenant_id, user_id, device_id, request.url.path, outcome="refused")
+        record(tenant_id, user_id, device_id, tool, outcome="refused")
         raise HTTPException(403, "not available in local mode")
-    tool = _TOOL[route]
     if not row["posture_ok"]:
         reasons = "; ".join(row["posture_reasons"])
         record(tenant_id, user_id, device_id, tool, outcome="refused")
         raise HTTPException(403, f"int3 can't verify this Hermes setup ({reasons}). Reopen int3 to fix it.")
-    kind = "memory" if tool.startswith("memory_") else "brain"
-    limit = _check_limits(tenant_id, user_id, kind)
+    limit = minute_full or _check_daily(tenant_id, user_id, kind)
     if limit is not None:
         record(tenant_id, user_id, device_id, tool, outcome="rate_limited")
         raise HTTPException(429, f"int3 {kind} limit reached ({limit}). Try again later.")

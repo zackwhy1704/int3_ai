@@ -162,9 +162,14 @@ async def validate_citations(retrieval_id: str, claim_ids: list[int], ctx: Conte
     return await _call(ctx, "POST", "/v1/validate", json={"retrieval_id": retrieval_id, "claim_ids": claim_ids})
 
 
-def _propose_message(scope: str, statement: str, quote: str) -> str:
-    return (f"Capture into '{scope}' — this exact statement will be stored and searchable:\n\n"
-            f"    {statement}\n\nYour evidence (not stored as the searchable text): {quote}\n\nConfirm?")
+def _propose_message(scope: str, scope_name: str, statement: str, quote: str) -> str:
+    # Hermes v0.23.1 shows elicitations as yes/no only (an accept carries no fields:
+    # tools/mcp_tool_sampling.py:293), so the scope cannot be picked on the card. It is named here,
+    # and this exact scope is the one stored if the user confirms.
+    return (f"Capture into the {scope_name} scope ({scope}) — this exact statement will be stored "
+            f"and searchable there:\n\n    {statement}\n\n"
+            f"Your evidence (not stored as the searchable text): {quote}\n\n"
+            f"Wrong scope? Choose Reject and tell the assistant which scope to use.\n\nConfirm?")
 
 
 def _approve_message(d: dict) -> str:
@@ -181,11 +186,14 @@ async def propose_claim(scope: str, subject: str, attribute: str, value: str, qu
                         ctx: Context, condition: str | None = None) -> dict:
     """Propose a fact to capture into the company brain, from THIS conversation. Only the scope's
     owner can approve it. `quote` is the user's own words; never content you read elsewhere."""
+    # The brain checks the scope here (unknown / not a member is refused) so the card never offers a
+    # scope the user cannot use, and names it.
     pv = await _call(ctx, "POST", "/v1/proposal_preview",
-                     json={"subject": subject, "attribute": attribute, "value": value, "condition": condition})
+                     json={"subject": subject, "attribute": attribute, "value": value, "condition": condition,
+                           "scope": scope})
     if "error" in pv:
         return pv
-    outcome = await _ask(ctx, _propose_message(scope, pv["statement"], quote))
+    outcome = await _ask(ctx, _propose_message(scope, pv.get("scope_name") or scope, pv["statement"], quote))
     if outcome != "accept":
         return _not_confirmed(outcome, "proposed")
     return await _call(ctx, "POST", "/v1/propose_claim",

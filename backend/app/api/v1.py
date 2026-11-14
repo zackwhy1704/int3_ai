@@ -562,6 +562,7 @@ class PreviewRequest(BaseModel):
     attribute: str
     value: str
     condition: str | None = None
+    scope: str | None = None  # local mode: checked and named for the confirmation card
 
 
 @router.post("/session")
@@ -579,9 +580,10 @@ def open_session(p: Principal = Depends(v1_principal)) -> dict:
 def proposal_preview(body: PreviewRequest, p: Principal = Depends(v1_principal)) -> dict:
     # The exact statement that would be stored/embedded — the sidecar shows this at
     # propose-time so the human confirms the real text (built by capture_statement).
-    record_for(p, "proposal_preview", query=f"{body.subject} / {body.attribute}")
+    record_for(p, "proposal_preview",
+               query=(f"{body.scope}: " if body.scope else "") + f"{body.subject} / {body.attribute}")
     return capture.preview(p, subject=body.subject, attribute=body.attribute,
-                           value=body.value, condition=body.condition)
+                           value=body.value, condition=body.condition, scope=body.scope)
 
 
 @router.post("/propose_claim")
