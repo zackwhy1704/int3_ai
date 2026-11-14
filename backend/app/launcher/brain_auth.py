@@ -76,9 +76,20 @@ def record(tenant_id: str, user_id: str, device_id, tool: str, *, query: str | N
 
 
 def record_for(p: Principal, tool: str, **kw) -> None:
-    """Audit a call made by principal ``p`` if it came in on a brain token (local mode)."""
+    """Describe the audit entry for a call made on a brain token (local mode). Nothing is written
+    here: brain_principal writes ONE row after the handler, with the real outcome (a handler that
+    raises after this call is logged refused / not_found / rate_limited / error, never ok). An
+    ``outcome`` given here (e.g. "empty") applies only if the handler returns normally."""
     if p.via == "brain":
-        record(p.tenant_id, p.user_id, p.device_id, tool, **kw)
+        p.audit = {"tool": tool, **kw}
+
+
+def outcome_of(exc: BaseException) -> str:
+    """The audit outcome for a handler that raised."""
+    if isinstance(exc, HTTPException):
+        return {401: "refused", 403: "refused", 404: "not_found", 429: "rate_limited"}.get(
+            exc.status_code, "error")
+    return "error"
 
 
 def _check_limits(tenant_id: str, user_id: str, kind: str = "brain") -> str | None:
@@ -134,6 +145,13 @@ def brain_principal(request: Request) -> Iterator[Principal]:
     p = next(gen)
     p.via, p.device_id = "brain", str(device_id)
     try:
-        yield p
+        try:
+            yield p
+        except BaseException as exc:  # the handler raised: log what really happened, then re-raise
+            entry = {"tool": tool, **(p.audit or {})}
+            entry["outcome"] = outcome_of(exc)
+            record(tenant_id, user_id, device_id, **entry)
+            raise
+        record(tenant_id, user_id, device_id, **{"tool": tool, **(p.audit or {})})
     finally:
         gen.close()

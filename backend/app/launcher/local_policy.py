@@ -59,7 +59,10 @@ If a brain tool says your int3 access expired or was refused, tell the user to r
   scope can approve it. NEVER save these with `int3_remember`.
 - "Remember that I …", the user's own preferences, or their personal notes: call `int3_remember`.
 - If it is unclear which one the user means, ask them ("for the company, or just for you?")
-  before saving anything."""
+  before saving anything.
+- Use only the scope ids listed under "Your int3 scopes" below; never invent one.
+- Never state the status of a proposal you could not see (for example after a refusal): say you
+  can't check it."""
 
 
 def policy(mcp_url: str, allowed_sources: tuple[str, ...] | list[str] = DEFAULT_ALLOWED_SOURCES,
@@ -91,7 +94,10 @@ def policy(mcp_url: str, allowed_sources: tuple[str, ...] | list[str] = DEFAULT_
             f"mcp_servers.{MCP_SERVER_NAME}": {
                 "url": mcp_url,
                 "headers": {"Authorization": "Bearer ${INT3_BRAIN_TOKEN}"},
-                "tools": {"include": list(MCP_TOOLS)},
+                # resources/prompts off: Hermes would otherwise add list_resources/read_resource/
+                # list_prompts/get_prompt for this server (v0.23.1 tools/mcp_tool_registration.py:
+                # 190-191, tools/mcp_tool_schema.py:332-335); the endpoint serves neither.
+                "tools": {"include": list(MCP_TOOLS), "resources": False, "prompts": False},
                 # Covers the user's time on a confirmation card: the endpoint's approval window plus
                 # two brain calls (local_server.py: 90 + 2 * 15 = 120) plus 15 s margin for network and
                 # scheduling, so the endpoint's clear "no answer, ask again" arrives before Hermes's
@@ -174,6 +180,8 @@ def evaluate(report: dict[str, Any], mcp_url: str,
         reasons.append("sharing usage data with Nous is on")
     if report.get("inline_shell") is not False:
         reasons.append("skills may run commands (skills.inline_shell)")
+    if report.get("mcp_resources") is not False or report.get("mcp_prompts") is not False:
+        reasons.append("the int3 brain entry has MCP resources or prompts switched back on")
     if report.get("tool_search") != "off":
         reasons.append("Hermes's tool lookup is switched back on (tools.tool_search)")
 

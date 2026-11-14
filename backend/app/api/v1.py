@@ -283,9 +283,7 @@ def search(
             seen_claims.add(claim_id)
             all_claim_ids.append(claim_id)
 
-            content = row["value"]
-            if row["condition"]:
-                content = f"[when: {row['condition']}] {content}"
+            content = claim_text(row["subject"], row["attribute"], row["condition"], row["value"])
 
             # Find previous value: the claim that was superseded BY this current claim.
             prev_row = p.conn.execute(
@@ -548,6 +546,15 @@ class ProposeClaimRequest(BaseModel):
     quote: str
     condition: str | None = None
     session_label: str | None = None  # display-only; never used for authorisation
+
+
+def claim_text(subject, attribute, condition, value) -> str:
+    """A claim as one self-contained line, e.g. "Leeds loading dock — closing time (From December):
+    Closes at 6pm on Fridays". Same shape as capture_statement (schema.sql), so a search result reads
+    like the statement the owner approved. Missing parts are left out, never printed as "None"."""
+    head = " — ".join(str(x).strip() for x in (subject, attribute) if x and str(x).strip())
+    cond = f" ({condition.strip()})" if condition and condition.strip() else ""
+    return f"{head}{cond}: {value}" if head or cond else str(value)
 
 
 class PreviewRequest(BaseModel):

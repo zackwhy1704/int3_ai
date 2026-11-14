@@ -205,10 +205,11 @@ async fn launch_local(app: tauri::AppHandle, session: State<'_, Session>, restar
         return Ok(json!({"needs_restart": true}));
     }
     let policy = session.authed(Method::GET, "/launcher/local/policy", None).await.map_err(err)?;
+    let me = session.authed(Method::GET, "/launcher/me", None).await.map_err(err)?;
     if running {
         hermes::stop(&install);
     }
-    let (workspace, synced) = local::apply(&policy).map_err(fail)?;
+    let (workspace, synced) = local::apply(&policy, &me["brains"]).map_err(fail)?;
     if synced {
         return Err(fail(format!(
             "{} is inside a synced folder (OneDrive or similar). int3 keeps the assistant's files out of synced folders.",

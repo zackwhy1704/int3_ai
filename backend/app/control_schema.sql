@@ -337,6 +337,10 @@ CREATE TABLE IF NOT EXISTS brain_audit (
     outcome       text NOT NULL CHECK (outcome IN ('ok', 'empty', 'refused', 'rate_limited', 'error'))
 );
 CREATE INDEX IF NOT EXISTS brain_audit_user_day ON brain_audit(tenant_id, user_id, at);
+-- not_found (control v4): a /v1 call that raised 404 (e.g. an unknown scope id). Re-applied on every init.
+ALTER TABLE brain_audit DROP CONSTRAINT IF EXISTS brain_audit_outcome_check;
+ALTER TABLE brain_audit ADD CONSTRAINT brain_audit_outcome_check
+    CHECK (outcome IN ('ok', 'empty', 'refused', 'not_found', 'rate_limited', 'error'));
 
 -- Which kinds of AI-model credential a local-mode tenant accepts on users' PCs (local_policy.py).
 -- Default: the user's own API key, a model on their own machine, or a sign-in done in Hermes's own

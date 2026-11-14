@@ -157,13 +157,13 @@ def _launch_mode(tenant_id: str) -> str:
 def me(p: Principal = Depends(launcher_principal)) -> dict:
     """Who is signed in and the brains they may use — by name only."""
     brains = p.conn.execute(
-        "SELECT id, name FROM scopes WHERE id = ANY(%s) ORDER BY kind = 'everyone' DESC, name",
+        "SELECT id, name, kind FROM scopes WHERE id = ANY(%s) ORDER BY kind = 'everyone' DESC, name",
         (p.scopes,),
     ).fetchall()
     return {
         "user": {"id": p.user_id, "name": p.name, "email": p.email, "is_admin": _is_admin(p)},
         "tenant": {"id": p.tenant_id, "name": p.tenant_name, "launch_mode": _launch_mode(p.tenant_id)},
-        "brains": [{"id": b["id"], "name": b["name"]} for b in brains],
+        "brains": [{"id": b["id"], "name": b["name"], "kind": b["kind"]} for b in brains],
     }
 
 

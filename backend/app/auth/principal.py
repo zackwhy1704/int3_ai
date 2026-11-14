@@ -35,6 +35,9 @@ class Principal:
     # mode). Set by the auth path that built the Principal; used for local-mode limits and audit.
     via: str = "session"
     device_id: str | None = None
+    # Local mode: the audit entry the handler describes (record_for); brain_principal writes it AFTER
+    # the handler, with the real outcome.
+    audit: dict | None = None
 
     def resolve(self, brain_id: str | None) -> list[str]:
         """Scopes to search: all of the user's, or one brain they belong to.

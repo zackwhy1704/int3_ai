@@ -115,7 +115,8 @@ def test_me_lists_memberships_by_name_only(client, user, brains, admin):
     assert me["user"]["id"] == user and me["user"]["is_admin"] is admin
     assert me["tenant"]["id"] == TENANT_OF[user]
     assert {b["id"] for b in me["brains"]} == brains
-    assert all(set(b) == {"id", "name"} for b in me["brains"])   # names only, no content
+    # names only, no content; kind ("everyone" | ...) lets the launcher name the company-wide scope
+    assert all(set(b) == {"id", "name", "kind"} for b in me["brains"])
 
 
 def test_no_or_garbage_bearer_is_401(client):

@@ -20,7 +20,8 @@ TENANT_VERSION = 5
 # v2: launcher tables (invites, devices, tokens, user_backends, hermes_compat). Applied by
 # admin.init(), which re-runs control_schema.sql idempotently.
 # v3: tenants.cancelled_at + memory_audit (local mode M2).
-CONTROL_VERSION = 3
+# v4: brain_audit.outcome allows 'not_found' (the audit row is written after the handler).
+CONTROL_VERSION = 4
 
 
 def ensure_table(conn) -> None:

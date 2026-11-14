@@ -111,7 +111,7 @@ environment: `LOCAL_MCP_URL=https://<mcp>.app.int3labs.app/mcp` and
 3. **Safety copies:**
    - `sudo systemctl start int3-backup` and confirm the new `gs://…/<stamp>/`;
    - a disk snapshot: `gcloud compute disks snapshot int3-pilot --snapshot-names pre-local-<date>`.
-4. **Update to the pinned SHA:** `update.sh <sha>`. That runs control `init` (CONTROL_VERSION 3) and
+4. **Update to the pinned SHA:** `update.sh <sha>`. That runs control `init` (CONTROL_VERSION 4) and
    restarts the shared stack. Per-user Hermes containers keep running.
 5. **Migrate tenants:** `app.tenants.admin migrate` (zack and marcuspilot v3 → v5). Additive:
    `user_memories` and `memory_audit` are new tables, `tenants.cancelled_at` and `allowed_credential_sources`

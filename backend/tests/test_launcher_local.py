@@ -54,6 +54,8 @@ def good_report() -> dict:
         "telemetry_enabled": False,
         "inline_shell": False,
         "tool_search": "off",
+        "mcp_resources": False,
+        "mcp_prompts": False,
         "adopt_external_logins": False,
         "model_provider": "anthropic",
         "credential_sources": ["api_key"],
@@ -106,6 +108,7 @@ def test_policy_carries_the_lockdown_and_no_secret(client, local_tenant):
     entry = cfg[f"mcp_servers.{local_policy.MCP_SERVER_NAME}"]
     assert entry["url"] == config.LOCAL_MCP_URL
     assert entry["headers"]["Authorization"] == "Bearer ${INT3_BRAIN_TOKEN}"
+    assert entry["tools"]["resources"] is False and entry["tools"]["prompts"] is False
     assert entry["timeout"] == 135  # MCP endpoint's 90 s approval window + 2 x 15 s brain calls + 15 s margin
     assert "cb_" not in r.text  # no token of any kind in the policy
     assert body["soul"]["block"] == local_policy.SOUL_BLOCK
@@ -122,6 +125,10 @@ def test_soul_block_routes_company_facts_to_propose_and_personal_ones_to_memory(
         assert needle in block, needle
     # company before personal, so the narrower rule is read first
     assert block.index("propose_claim") < block.index("call `int3_remember`")
+    # the launcher appends "## Your int3 scopes" (launcher/src-tauri/src/local.rs scopes_section)
+    assert 'scope ids listed under "Your int3 scopes"' in block and "never invent one" in block
+    assert "Never state the status of a proposal you could not see" in block
+    assert "say you\n  can't check it" in block
 
 
 @pytest.mark.parametrize("change, reason", [
@@ -143,6 +150,9 @@ def test_soul_block_routes_company_facts_to_propose_and_personal_ones_to_memory(
     ({"inline_shell": True}, "skills may run commands"),
     ({"tool_search": "auto"}, "tool lookup is switched back on"),
     ({"tool_search": None}, "tool lookup is switched back on"),
+    ({"mcp_resources": True}, "MCP resources or prompts switched back on"),
+    ({"mcp_prompts": True}, "MCP resources or prompts switched back on"),
+    ({"mcp_prompts": None}, "MCP resources or prompts switched back on"),
     ({"adopt_external_logins": True}, "personal Claude Code or ChatGPT login"),
     ({"credential_sources": ["personal_login"]}, "personal Claude Code or ChatGPT login"),
     ({"credential_sources": ["custom_endpoint"]}, "model server elsewhere"),
@@ -314,3 +324,112 @@ def test_a_disallowed_model_credential_stops_the_brain_with_a_clear_message(clie
     assert r.status_code == 403
     assert "personal Claude Code or ChatGPT login" in r.json()["detail"]
     assert "Choose AI model" in r.json()["detail"]
+
+
+
+# ── scopes, search text, audit outcome (local mode, brain tokens) ─────────────
+
+
+def _rows_since(device_id: str, after_id: int) -> list[dict]:
+    with control_conn() as c:
+        return c.execute(
+            "SELECT id, tool, outcome, query FROM brain_audit WHERE device_id = %s AND id > %s ORDER BY id",
+            (device_id, after_id)).fetchall()
+
+
+def _last_id() -> int:
+    with control_conn() as c:
+        return c.execute("SELECT coalesce(max(id), 0) AS n FROM brain_audit").fetchone()["n"]
+
+
+def test_me_lists_only_own_scopes_with_kind(client, local_tenant):
+    """The launcher writes these into the SOUL block (local.rs scopes_section)."""
+    access = _sign_in(client, "priya")["access_token"]
+    brains = client.get("/launcher/me", headers=_bearer(access)).json()["brains"]
+    assert brains == [{"id": "company-wide", "name": "Company-wide", "kind": "everyone"},
+                      {"id": "operations", "name": "Operations", "kind": brains[1]["kind"]}]
+    assert brains[1]["kind"] != "everyone"
+    assert "finance" not in str(brains) and "leadership" not in str(brains)
+
+
+def test_unknown_scope_is_distinct_from_not_a_member_and_lists_own_scopes(client, local_tenant):
+    token, _ = _brain_token(client)
+    body = {"subject": "Leeds dock", "attribute": "closing time", "value": "6pm", "quote": "q"}
+    mine = "your scopes are: company-wide (Company-wide), operations (Operations)"
+    r = client.post("/v1/propose_claim", json={**body, "scope": "company"}, headers=_bearer(token))
+    assert r.status_code == 404, r.text
+    assert r.json()["detail"] == f"unknown scope 'company'; {mine}"
+    r = client.post("/v1/propose_claim", json={**body, "scope": "finance"}, headers=_bearer(token))
+    assert r.status_code == 403, r.text
+    assert r.json()["detail"] == f"not a member of scope 'finance'; {mine}"
+    r = client.get("/v1/proposals", params={"scope": "company"}, headers=_bearer(token))
+    assert r.status_code == 404 and r.json()["detail"] == f"unknown scope 'company'; {mine}"
+    # a real scope priya belongs to but does not own: still the owner gate
+    r = client.get("/v1/proposals", params={"scope": "operations"}, headers=_bearer(token))
+    assert r.status_code == 403 and "only the scope owner" in r.json()["detail"]
+
+
+def test_search_text_names_subject_and_attribute_for_every_claim(client, local_tenant):
+    from app.api.v1 import claim_text
+    token, _ = _brain_token(client)
+    body = client.post("/v1/search", json={"query": "How many days of annual leave do staff get?"},
+                       headers=_bearer(token)).json()
+    assert body["results"]
+    with admin_conn("t_" + TENANT) as c:
+        for res in body["results"]:
+            cl = c.execute("SELECT subject, attribute, condition, value FROM claims WHERE id = %s",
+                           (res["claimId"],)).fetchone()
+            assert res["content"] == claim_text(cl["subject"], cl["attribute"], cl["condition"], cl["value"])
+            assert res["content"].startswith(f"{cl['subject']} — {cl['attribute']}")
+    assert claim_text("Leeds loading dock", "closing time", "From December", "Closes at 6pm on Fridays") \
+        == "Leeds loading dock — closing time (From December): Closes at 6pm on Fridays"
+    assert claim_text("X", "y", None, "z") == "X — y: z" and claim_text("X", "y", "  ", "z") == "X — y: z"
+
+
+def test_workflow_claim_search_text_names_subject_and_condition(client, local_tenant, monkeypatch):
+    import uuid
+    monkeypatch.setattr(config, "PROPOSAL_RATE_PER_HOUR", 0)  # not a rate-limit test; earlier tests propose too
+    tag = uuid.uuid4().hex[:6]
+    priya, _ = _brain_token(client)
+    ada, _ = _brain_token(client, "ada")
+    subj = f"Leeds loading dock {tag}"
+    r = client.post("/v1/propose_claim", headers=_bearer(priya), json={
+        "scope": "operations", "subject": subj, "attribute": "closing time", "value": "Closes at 6pm on Fridays",
+        "condition": "From December", "quote": f"The {subj} closes at 6pm on Fridays from December."})
+    assert r.status_code == 200, r.text
+    r = client.post("/v1/approve_proposal", headers=_bearer(ada), json={"proposal_id": r.json()["proposal_id"]})
+    assert r.status_code == 200, r.text
+    claim_id = r.json()["claim_id"]
+    res = client.post("/v1/search", json={"query": f"When does the {subj} close on Fridays?"},
+                      headers=_bearer(priya)).json()["results"]
+    hit = next(x for x in res if x["claimId"] == claim_id)
+    assert hit["content"] == f"{subj} — closing time (From December): Closes at 6pm on Fridays"
+    assert "workflow" in hit["sourceTitle"]
+
+
+def test_audit_records_the_real_outcome_after_the_handler(client, local_tenant):
+    """At 4c25c11 every /v1 call was logged before the handler ran, so priya's refused
+    list_proposals (403) appeared as ok. One row per call, with the outcome that happened."""
+    token, session = _brain_token(client)
+    dev, start = session["device_id"], _last_id()
+    r = client.get("/v1/proposals", params={"scope": "operations"}, headers=_bearer(token))
+    assert r.status_code == 403
+    r = client.post("/v1/propose_claim", headers=_bearer(token), json={
+        "scope": "company", "subject": "s", "attribute": "a", "value": "v", "quote": "q"})
+    assert r.status_code == 404
+    r = client.post("/v1/search", json={"query": "How many days of annual leave do staff get?"},
+                    headers=_bearer(token))
+    assert r.status_code == 200
+    rows = _rows_since(dev, start)
+    assert [(x["tool"], x["outcome"]) for x in rows] == [
+        ("list_proposals", "refused"), ("propose_claim", "not_found"), ("search_brain", "ok")]
+    assert rows[0]["query"] == "operations"  # what was asked is kept on a refused row too
+
+
+def test_audit_outcome_mapping():
+    from fastapi import HTTPException
+
+    from app.launcher.brain_auth import outcome_of
+    assert [outcome_of(HTTPException(c)) for c in (401, 403, 404, 429, 409, 422, 500)] == \
+        ["refused", "refused", "not_found", "rate_limited", "error", "error", "error"]
+    assert outcome_of(RuntimeError("boom")) == "error"

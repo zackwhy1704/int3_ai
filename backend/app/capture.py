@@ -59,6 +59,19 @@ def preview(p, *, subject, attribute, value, condition=None) -> dict:
     return {"statement": _statement(p.conn, subject, attribute, _norm_condition(condition), value)}
 
 
+def _your_scopes(p) -> str:
+    rows = p.conn.execute("SELECT id, name FROM scopes WHERE id = ANY(%s) ORDER BY name",
+                          (p.scopes,)).fetchall()
+    return ", ".join(f"{r['id']} ({r['name']})" for r in rows) or "none"
+
+
+def _require_known_scope(p, scope) -> None:
+    """404 for a scope id that does not exist (a guessed id), with the caller's own scopes, so a
+    model can retry with a real id. Distinct from 403 "not a member" (the id exists)."""
+    if p.conn.execute("SELECT 1 FROM scopes WHERE id = %s", (scope,)).fetchone() is None:
+        raise HTTPException(404, f"unknown scope {scope!r}; your scopes are: {_your_scopes(p)}")
+
+
 def _owner_of(p, scope):
     row = p.conn.execute("SELECT owner_user_id FROM scopes WHERE id = %s", (scope,)).fetchone()
     return row["owner_user_id"] if row else None
@@ -80,8 +93,9 @@ def _active_claim_for_key(p, scope, subject, attribute, condition):
 
 
 def propose(p, *, scope, subject, attribute, value, quote, condition=None, session_label=None) -> dict:
+    _require_known_scope(p, scope)
     if scope not in p.scopes:
-        raise HTTPException(403, f"not a member of scope {scope!r}")
+        raise HTTPException(403, f"not a member of scope {scope!r}; your scopes are: {_your_scopes(p)}")
     limit = config.PROPOSAL_RATE_PER_HOUR
     if limit > 0:
         recent = p.conn.execute(
@@ -131,6 +145,7 @@ def _require_owner(p, scope):
 
 
 def list_proposals(p, *, scope) -> list[dict]:
+    _require_known_scope(p, scope)
     _require_owner(p, scope)
     out = []
     for r in p.conn.execute(
