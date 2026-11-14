@@ -220,3 +220,6 @@ CREATE TABLE IF NOT EXISTS user_memories (
     created_at     timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS user_memories_user ON user_memories(user_id, created_at);
+-- v5: a preference (how the user wants the assistant to work) is given every turn; a fact only when relevant.
+ALTER TABLE user_memories ADD COLUMN IF NOT EXISTS kind text NOT NULL DEFAULT 'fact'
+    CHECK (kind IN ('fact', 'preference'));

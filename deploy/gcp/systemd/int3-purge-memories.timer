@@ -1,0 +1,9 @@
+[Unit]
+Description=int3 memory retention, daily 03:00 Singapore time (after the backup)
+
+[Timer]
+OnCalendar=*-*-* 19:00:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target

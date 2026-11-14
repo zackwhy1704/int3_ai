@@ -10,6 +10,6 @@ git fetch -q origin "$INT3_REF"
 git checkout -q --detach FETCH_HEAD
 install -m 0644 deploy/gcp/systemd/*.service deploy/gcp/systemd/*.timer /etc/systemd/system/
 systemctl daemon-reload
-systemctl enable --now int3-backup.timer int3-restore-test.timer int3-backup-metrics.timer
+systemctl enable --now int3-backup.timer int3-restore-test.timer int3-backup-metrics.timer int3-purge-memories.timer
 echo "[update] $before -> $(git rev-parse --short HEAD)"
 systemctl restart int3-stack.service

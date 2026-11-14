@@ -190,3 +190,40 @@ def test_cancelled_tenant_stops_now_and_purges_after_retention(client, local_ten
     assert _count() == 0
     last = _memory_audit()[-1]
     assert (last["action"], last["count"], last["actor"]) == ("purge", 1, "retention")
+
+
+def test_preferences_come_every_turn_and_unrelated_turns_get_no_facts(client, local_tenant):
+    brain, session = _brain_token(client, "priya")
+    pref = client.post("/launcher/local/memory/save", json={"content": "I prefer short answers.", "kind": "preference"},
+                       headers=_bearer(brain)).json()
+    fact = _save(client, brain, "The forklift certification renewal is due in March.")
+    assert client.post("/launcher/local/memory/save", json={"content": "x", "kind": "secret"},
+                       headers=_bearer(brain)).status_code == 422
+    r = client.post("/launcher/local/memory/recall", json={"query": "What is the capital of Australia?"},
+                    headers=_bearer(brain)).json()
+    assert [m["id"] for m in r["preferences"]] == [pref["id"]]  # a preference applies to every turn
+    assert r["memories"] == []                                  # an unrelated fact is not injected
+    r = client.post("/launcher/local/memory/recall", json={"query": "When does the forklift licence need renewing?"},
+                    headers=_bearer(brain)).json()
+    assert [m["id"] for m in r["memories"]] == [fact["id"]]
+    listed = client.get("/launcher/local/memory", headers=_bearer(session["access_token"])).json()["memories"]
+    assert {m["kind"] for m in listed} == {"preference", "fact"}
+
+
+def test_memory_has_its_own_quota(client, local_tenant, monkeypatch):
+    brain, _ = _brain_token(client, "priya")
+    with control_conn() as c:  # earlier tests already used some of priya's memory quota today
+        used = c.execute("SELECT count(*) AS n FROM brain_audit WHERE user_id = 'priya' AND tool LIKE 'memory%%'"
+                         " AND outcome IN ('ok', 'empty') AND at > date_trunc('day', now())").fetchone()["n"]
+    monkeypatch.setattr(config, "MEMORY_RATE_PER_DAY", used + 2)
+    for _ in range(2):
+        assert client.post("/launcher/local/memory/recall", json={"query": "x"}, headers=_bearer(brain)).status_code == 200
+    r = client.post("/launcher/local/memory/recall", json={"query": "x"}, headers=_bearer(brain))
+    assert r.status_code == 429 and "memory" in r.json()["detail"]
+    # the brain is unaffected by memory use...
+    assert client.post("/v1/search", json={"query": "holidays"}, headers=_bearer(brain)).status_code == 200
+    # ...and memory is unaffected when the brain's own daily limit is used up
+    monkeypatch.setattr(config, "MEMORY_RATE_PER_DAY", used + 100)
+    monkeypatch.setattr(config, "BRAIN_RATE_PER_DAY", 0)
+    assert client.post("/v1/search", json={"query": "holidays"}, headers=_bearer(brain)).status_code == 429
+    assert client.post("/launcher/local/memory/recall", json={"query": "x"}, headers=_bearer(brain)).status_code == 200

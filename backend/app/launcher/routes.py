@@ -347,11 +347,12 @@ def local_launch(p: Principal = Depends(launcher_principal)) -> dict:
 class MemorySave(BaseModel):
     content: str = Field(min_length=1, max_length=memory.MAX_CONTENT)
     session: str | None = Field(default=None, max_length=200)
+    kind: str = Field(default="fact", pattern="^(fact|preference)$")
 
 
 class MemoryRecall(BaseModel):
     query: str = Field(max_length=4000)
-    k: int = Field(default=memory.RECALL_K, ge=1, le=20)
+    k: int = Field(default=memory.RECALL_K, ge=1, le=memory.RECALL_K)
 
 
 class MemoryForget(BaseModel):
@@ -367,7 +368,7 @@ class MemoryDelete(BaseModel):
 def memory_save(body: MemorySave, p: Principal = Depends(brain_principal)) -> dict:
     record_for(p, "memory_save")  # content is NOT copied into the audit
     try:
-        return memory.save(p.conn, p.user_id, body.content, body.session)
+        return memory.save(p.conn, p.user_id, body.content, body.session, body.kind)
     except ValueError as e:
         raise HTTPException(422, str(e)) from None
 
@@ -375,7 +376,8 @@ def memory_save(body: MemorySave, p: Principal = Depends(brain_principal)) -> di
 @router.post("/local/memory/recall")
 def memory_recall(body: MemoryRecall, p: Principal = Depends(brain_principal)) -> dict:
     record_for(p, "memory_recall")
-    return {"memories": memory.recall(p.conn, p.user_id, body.query, body.k)}
+    return {"preferences": memory.preferences(p.conn, p.user_id),
+            "memories": memory.recall(p.conn, p.user_id, body.query, body.k)}
 
 
 @router.post("/local/memory/forget")

@@ -174,7 +174,7 @@ async function loadMemory() {
     }
     for (const m of r.memories) {
       const li = document.createElement('li')
-      const body = text(document.createElement('span'), m.content)
+      const body = text(document.createElement('span'), (m.kind === 'preference' ? 'Preference: ' : '') + m.content)
       const when = text(document.createElement('span'), new Date(m.created_at).toLocaleString())
       when.className = 'muted small'
       const b = text(document.createElement('button'), 'Delete')

@@ -7,8 +7,9 @@ Memory).
 
 Explicit memories only: nothing is stored unless the assistant calls ``int3_remember`` (the
 instructions below say: only when the user asks). Whole conversations are never uploaded:
-``sync_turn`` does nothing. Before each turn, the few memories closest to the user's message are
-recalled and given to the assistant as background.
+``sync_turn`` does nothing. A memory is a ``preference`` (how the user wants the assistant to work,
+given on every turn) or a ``fact`` (recalled before a turn only when the server judges it relevant to
+the user's message, at most 3).
 
 Credentials: the brain token the launcher writes into this profile's .env (INT3_BRAIN_TOKEN) and the
 server URL next to it (INT3_MEMORY_URL). The .env is re-read on every call so a token the launcher
@@ -49,8 +50,16 @@ _SCHEMAS = [
         ),
         "parameters": {
             "type": "object",
-            "properties": {"content": {"type": "string", "description": "The fact, one sentence."}},
-            "required": ["content"],
+            "properties": {
+                "content": {"type": "string", "description": "One standalone sentence."},
+                "kind": {
+                    "type": "string", "enum": ["preference", "fact"],
+                    "description": ("preference: how the user wants you to work (answer length, tone, "
+                                    "format, what to call them); applied to every conversation. fact: "
+                                    "something about them or their work, recalled when relevant."),
+                },
+            },
+            "required": ["content", "kind"],
         },
     },
     {
@@ -191,7 +200,7 @@ class Int3MemoryProvider(MemoryProvider):
             if self._last_prefetch[0] == query:
                 return self._last_prefetch[1]
         try:
-            found = self._call("recall", {"query": query[:4000], "k": 5}, timeout=PREFETCH_TIMEOUT)
+            found = self._call("recall", {"query": query[:4000], "k": 3}, timeout=PREFETCH_TIMEOUT)
         except _Refused as e:
             logger.debug("int3 recall skipped: %s", e)
             return ""
@@ -200,6 +209,11 @@ class Int3MemoryProvider(MemoryProvider):
         if memories:
             lines = [f"- [memory {m['id']}] {m['content']}" for m in memories]
             block = "[int3 memory: things the user asked you to remember]\n" + "\n".join(lines)
+        prefs = found.get("preferences") or []
+        if prefs:
+            lines = [f"- [memory {m['id']}] {m['content']}" for m in prefs]
+            block = ("[int3 memory: the user's standing preferences; follow them]\n" + "\n".join(lines)
+                     + ("\n\n" + block if block else ""))
         with self._lock:
             self._last_prefetch = (query, block)
         return block
@@ -216,12 +230,16 @@ class Int3MemoryProvider(MemoryProvider):
             if tool_name == "int3_remember":
                 if not self._writes:
                     return json.dumps({"error": "memory can only be saved from the user's own chat"})
-                saved = self._call("save", {"content": str(args.get("content", "")),
+                kind = args.get("kind") if args.get("kind") in ("preference", "fact") else "fact"
+                saved = self._call("save", {"content": str(args.get("content", "")), "kind": kind,
                                             "session": self._session_id[:200] or None})
-                return json.dumps({"saved": True, "id": saved.get("id")})
+                with self._lock:
+                    self._last_prefetch = ("", "")
+                return json.dumps({"saved": True, "id": saved.get("id"), "kind": kind})
             if tool_name == "int3_recall":
-                found = self._call("recall", {"query": str(args.get("query", ""))[:4000], "k": 8})
-                return json.dumps({"memories": found.get("memories") or []})
+                found = self._call("recall", {"query": str(args.get("query", ""))[:4000], "k": 3})
+                return json.dumps({"preferences": found.get("preferences") or [],
+                                   "memories": found.get("memories") or []})
             if tool_name == "int3_forget":
                 if not self._writes:
                     return json.dumps({"error": "memory can only be changed from the user's own chat"})

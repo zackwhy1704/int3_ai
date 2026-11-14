@@ -62,6 +62,10 @@ LOCAL_POSTURE_MAX_AGE_SECONDS = 600
 # Per-user brain limits in local mode (successful calls).
 BRAIN_RATE_PER_MINUTE = int(os.environ.get("BRAIN_RATE_PER_MINUTE", "30"))
 BRAIN_RATE_PER_DAY = int(os.environ.get("BRAIN_RATE_PER_DAY", "500"))
+# Local mode M2: the memory plugin has its own quota (one recall per chat turn plus saves), so memory
+# never uses up the brain's.
+MEMORY_RATE_PER_MINUTE = int(os.environ.get("MEMORY_RATE_PER_MINUTE", "60"))
+MEMORY_RATE_PER_DAY = int(os.environ.get("MEMORY_RATE_PER_DAY", "2000"))
 # Local mode M2: where the int3 memory plugin reaches the memory API (the launcher edge, public URL),
 # and how long a cancelled tenant's memories are kept before the purge.
 LOCAL_MEMORY_URL = os.environ.get("LOCAL_MEMORY_URL", "http://127.0.0.1:8100")

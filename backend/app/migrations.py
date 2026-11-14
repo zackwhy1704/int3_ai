@@ -15,7 +15,8 @@ it only gets the schema_migrations bookkeeping.
 # v2: REVOKE EXECUTE on the capture functions FROM PUBLIC (default-deny execute).
 # v3: users.is_admin (launcher: admin-only usage + BYOK link).
 # v4: user_memories (local mode M2: hosted per-employee memory).
-TENANT_VERSION = 4
+# v5: user_memories.kind (fact | preference).
+TENANT_VERSION = 5
 # v2: launcher tables (invites, devices, tokens, user_backends, hermes_compat). Applied by
 # admin.init(), which re-runs control_schema.sql idempotently.
 # v3: tenants.cancelled_at + memory_audit (local mode M2).

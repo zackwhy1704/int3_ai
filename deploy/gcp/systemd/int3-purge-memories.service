@@ -1,0 +1,8 @@
+[Unit]
+Description=int3 memory retention: purge memories of tenants cancelled > MEMORY_RETENTION_DAYS ago
+Requires=docker.service
+After=docker.service int3-stack.service int3-backup.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /opt/int3/deploy/gcp/vm/purge-memories.sh

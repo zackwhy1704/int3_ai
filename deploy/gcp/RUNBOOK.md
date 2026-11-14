@@ -120,6 +120,12 @@ Published as a GitHub pre-release (the repo is public): tag `launcher-v0.1.1`, a
 `pg_dumpall`, a counts manifest, and a tar per user's Hermes volume. Objects are deleted after 30 days.
 The bucket is private and the VM can write and read but not delete.
 
+`int3-purge-memories.timer`, daily at 03:00 Singapore time (local mode only): deletes the assistant
+memories of tenants cancelled more than `MEMORY_RETENTION_DAYS` (default 30) ago and audits it with counts
+(`app.launcher.admin purge-memories`; `cancel-tenant --tenant T` starts the clock and signs everyone out). A
+purged memory stays in backups until they expire, so the worst case is 30 + 30 days. Run by hand: `sudo
+systemctl start int3-purge-memories; sudo journalctl -u int3-purge-memories`.
+
 `int3-restore-test.timer`, weekly: the newest dump goes into a throwaway Postgres with no network, and
 its counts must equal the manifest. Run by hand: `sudo systemctl start int3-restore-test; sudo journalctl
 -u int3-restore-test`.

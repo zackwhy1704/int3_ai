@@ -44,8 +44,9 @@ _TOOL = {
 EXPIRED = HTTPException(401, "Your int3 access has expired or was signed out. Reopen int3 to continue.")
 
 # Per-minute window, in process (one brain worker per deployment; a second worker would enforce its
-# own share). The per-day limit counts brain_audit, so it holds across restarts.
-_minute: dict[tuple[str, str], deque] = {}
+# own share). The per-day limit counts brain_audit, so it holds across restarts. The brain and the
+# memory plugin have separate quotas: memory tools are named memory_* in brain_audit.
+_minute: dict[tuple[str, str, str], deque] = {}
 _minute_lock = threading.Lock()
 
 
@@ -79,24 +80,27 @@ def record_for(p: Principal, tool: str, **kw) -> None:
         record(p.tenant_id, p.user_id, p.device_id, tool, **kw)
 
 
-def _check_limits(tenant_id: str, user_id: str) -> str | None:
+def _check_limits(tenant_id: str, user_id: str, kind: str = "brain") -> str | None:
+    per_minute, per_day = ((config.MEMORY_RATE_PER_MINUTE, config.MEMORY_RATE_PER_DAY) if kind == "memory"
+                           else (config.BRAIN_RATE_PER_MINUTE, config.BRAIN_RATE_PER_DAY))
     now = time.monotonic()
-    key = (tenant_id, user_id)
+    key = (tenant_id, user_id, kind)
     with _minute_lock:
         q = _minute.setdefault(key, deque())
         while q and now - q[0] > 60:
             q.popleft()
-        if len(q) >= config.BRAIN_RATE_PER_MINUTE:
-            return f"{config.BRAIN_RATE_PER_MINUTE} brain requests per minute"
+        if len(q) >= per_minute:
+            return f"{per_minute} {kind} requests per minute"
         q.append(now)
     with control_conn() as control:
         n = control.execute(
             "SELECT count(*) AS n FROM brain_audit WHERE tenant_id = %s AND user_id = %s"
-            " AND outcome IN ('ok', 'empty') AND at > date_trunc('day', now())",
-            (tenant_id, user_id),
+            " AND outcome IN ('ok', 'empty') AND at > date_trunc('day', now())"
+            " AND (tool LIKE 'memory\\_%%') = %s",
+            (tenant_id, user_id, kind == "memory"),
         ).fetchone()["n"]
-    if n >= config.BRAIN_RATE_PER_DAY:
-        return f"{config.BRAIN_RATE_PER_DAY} brain requests per day"
+    if n >= per_day:
+        return f"{per_day} {kind} requests per day"
     return None
 
 
@@ -116,10 +120,11 @@ def brain_principal(request: Request) -> Iterator[Principal]:
         reasons = "; ".join(row["posture_reasons"])
         record(tenant_id, user_id, device_id, tool, outcome="refused")
         raise HTTPException(403, f"int3 can't verify this Hermes setup ({reasons}). Reopen int3 to fix it.")
-    limit = _check_limits(tenant_id, user_id)
+    kind = "memory" if tool.startswith("memory_") else "brain"
+    limit = _check_limits(tenant_id, user_id, kind)
     if limit is not None:
         record(tenant_id, user_id, device_id, tool, outcome="rate_limited")
-        raise HTTPException(429, f"int3 brain limit reached ({limit}). Try again later.")
+        raise HTTPException(429, f"int3 {kind} limit reached ({limit}). Try again later.")
     tenant_name = _tenant_name(tenant_id)
     if tenant_name is None:
         raise EXPIRED
