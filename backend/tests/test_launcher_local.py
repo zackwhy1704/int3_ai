@@ -106,7 +106,7 @@ def test_policy_carries_the_lockdown_and_no_secret(client, local_tenant):
     entry = cfg[f"mcp_servers.{local_policy.MCP_SERVER_NAME}"]
     assert entry["url"] == config.LOCAL_MCP_URL
     assert entry["headers"]["Authorization"] == "Bearer ${INT3_BRAIN_TOKEN}"
-    assert entry["timeout"] == 120  # above the MCP endpoint's 90 s approval window + 2 x 15 s brain calls
+    assert entry["timeout"] == 135  # MCP endpoint's 90 s approval window + 2 x 15 s brain calls + 15 s margin
     assert "cb_" not in r.text  # no token of any kind in the policy
     assert body["soul"]["block"] == local_policy.SOUL_BLOCK
 

@@ -2,6 +2,10 @@
 # transitive pins + hashes via pip-compile --generate-hashes (see below), and
 # installed with pip --require-hashes so a tampered/substituted package fails
 # the build (the LiteLLM-style supply-chain lesson).
+# mcp is pinned EXACTLY (==1.30.0) in requirements.txt: local_server.py's SessionGate uses two private
+# internals of its StreamableHTTPSessionManager (_server_instances, _discard_session). Bumping mcp
+# requires re-running deploy/hermes/brain-mcp/test_local_server.py (test_sdk_internals_*); the server
+# also refuses to start if they changed (local_server.check_sdk_internals).
 mcp>=1.2,<2
 httpx>=0.27
 uvicorn>=0.30

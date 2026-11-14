@@ -46,9 +46,9 @@ REOPEN = "Your int3 access has expired or was signed out. Reopen int3 to continu
 # How long a confirmation card waits for the user. The card sits in the chat the user just typed into,
 # so they are present: 90 s is ample to read three lines and click, and a user who walked away gets a
 # clear "nothing was saved, ask again" instead of a hang. Hermes's own call timeout for this server
-# (local_policy: mcp_servers.int3_brain.timeout = 120) must stay above
-# APPROVAL_SECONDS + 2 * BRAIN_TIMEOUT_SECONDS (90 + 2*15 = 120), so this answer, not Hermes's generic
-# timeout, is what the user sees.
+# (local_policy: mcp_servers.int3_brain.timeout = 135) must stay above
+# APPROVAL_SECONDS + 2 * BRAIN_TIMEOUT_SECONDS (90 + 2*15 = 120; 135 leaves 15 s margin), so this
+# answer, not Hermes's generic timeout, is what the user sees.
 APPROVAL_SECONDS = float(os.environ.get("MCP_APPROVAL_SECONDS", "90"))
 BRAIN_TIMEOUT_SECONDS = float(os.environ.get("MCP_BRAIN_TIMEOUT_SECONDS", "15"))
 IDLE_SECONDS = float(os.environ.get("MCP_SESSION_IDLE_SECONDS", "1800"))
@@ -253,7 +253,7 @@ class SessionGate:
         self.lock = asyncio.Lock()
 
     def _live(self) -> dict:
-        return self.manager._server_instances  # mcp 1.30 (pinned in requirements.txt)
+        return self.manager._server_instances  # mcp 1.30 private internal; see check_sdk_internals
 
     def _prune(self) -> None:
         live = self._live()
@@ -261,10 +261,19 @@ class SessionGate:
             self.owner.pop(sid, None)
             self.last.pop(sid, None)
 
-    async def _make_room(self, user_key: str) -> None:
-        """Close this user's least recently used sessions until one more fits under the cap."""
+    async def _register(self, sid: str, token_hash: str, user_key: str) -> None:
+        """Record a new session's owner AND enforce the per-user cap in one critical section, so two
+        sessions opened at the same moment cannot both slip under the cap. The new session is kept;
+        the user's least recently used others are closed until the cap holds."""
+        async with self.lock:
+            self.owner[sid] = (token_hash, user_key)
+            self.last[sid] = time.monotonic()
+            await self._enforce_cap(user_key, keep=sid)
+
+    async def _enforce_cap(self, user_key: str, keep: str) -> None:
         self._prune()
-        mine = sorted((s for s, (_, u) in self.owner.items() if u == user_key), key=lambda s: self.last.get(s, 0))
+        mine = sorted((s for s, (_, u) in self.owner.items() if u == user_key and s != keep),
+                      key=lambda s: self.last.get(s, 0))
         while len(mine) >= SESSIONS_PER_USER:
             sid = mine.pop(0)
             transport = self._live().get(sid)
@@ -303,17 +312,13 @@ class SessionGate:
             status = who["error"] if who["error"] in (401, 403, 429) else 503
             return await _respond(send, status, who["message"])
         user_key = str(who["user_key"])
-        async with self.lock:
-            await self._make_room(user_key)
         th = _hash(token)
 
         async def send_and_register(message):
             if message["type"] == "http.response.start":
                 for k, v in message.get("headers") or []:
                     if k.lower() == b"mcp-session-id":
-                        new = v.decode("latin-1")
-                        self.owner[new] = (th, user_key)
-                        self.last[new] = time.monotonic()
+                        await self._register(v.decode("latin-1"), th, user_key)
             await send(message)
 
         await self.app(scope, receive, send_and_register)
@@ -332,8 +337,31 @@ class _Server(uvicorn.Server):
         super().handle_exit(sig, frame)
 
 
+def check_sdk_internals(manager) -> None:
+    """SessionGate relies on two PRIVATE parts of mcp's StreamableHTTPSessionManager (mcp==1.30.0,
+    requirements.txt). Fail at startup, loudly, if a different SDK changed them, rather than run
+    with sessions that are never capped or never closed."""
+    import inspect
+
+    from mcp.server.streamable_http import StreamableHTTPServerTransport
+
+    live = getattr(manager, "_server_instances", None)
+    if not isinstance(live, dict):
+        raise RuntimeError("mcp SDK changed: StreamableHTTPSessionManager._server_instances is "
+                           f"{type(live).__name__}, not dict. Re-check local_server.SessionGate.")
+    if any(not isinstance(t, StreamableHTTPServerTransport) for t in live.values()):
+        raise RuntimeError("mcp SDK changed: _server_instances values are not StreamableHTTPServerTransport")
+    discard = getattr(manager, "_discard_session", None)
+    if not inspect.iscoroutinefunction(discard):
+        raise RuntimeError("mcp SDK changed: StreamableHTTPSessionManager._discard_session is missing "
+                           "or not async. Re-check local_server.SessionGate.")
+    if list(inspect.signature(discard).parameters) != ["session_id", "transport"]:
+        raise RuntimeError("mcp SDK changed: _discard_session(session_id, transport) has a new signature")
+
+
 def build_app():
     app = mcp.streamable_http_app()
+    check_sdk_internals(mcp.session_manager)
     return SessionGate(app, mcp.session_manager)
 
 

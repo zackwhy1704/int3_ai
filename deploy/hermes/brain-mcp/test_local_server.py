@@ -244,3 +244,83 @@ def test_read_tools_are_marked_read_only(server):
     ro = asyncio.run(go())
     assert ro == {"search_brain": True, "validate_citations": True, "list_proposals": True,
                   "propose_claim": False, "approve_proposal": False, "reject_proposal": False}
+
+
+def _open_quietly(token, start: threading.Barrier) -> str | None:
+    """Open a session (initialize) after every thread reaches the barrier; None if refused."""
+    start.wait()
+    r = httpx.post(URL, headers=_h(token), json={
+        "jsonrpc": "2.0", "id": 1, "method": "initialize",
+        "params": {"protocolVersion": "2025-06-18", "capabilities": {},
+                   "clientInfo": {"name": "race", "version": "0"}}})
+    return r.headers.get("mcp-session-id") if r.status_code == 200 else None
+
+
+def test_per_user_cap_holds_when_sessions_open_at_the_same_moment(server):
+    """Fix 3: registration and the cap check share one critical section, so a burst of opens by one
+    user cannot leave more than MCP_SESSIONS_PER_USER (2 here) sessions alive."""
+    n = 8
+    start = threading.Barrier(n)
+    sids: list[str | None] = [None] * n
+
+    def run(i):
+        sids[i] = _open_quietly("cb_bt_alice1", start)
+    threads = [threading.Thread(target=run, args=(i,)) for i in range(n)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    opened = [s for s in sids if s]
+    assert len(opened) == n  # every open succeeds (older sessions are closed to make room) ...
+    alive = [s for s in opened if tools_list("cb_bt_alice1", s) == 200]
+    assert len(alive) <= 2, f"{len(alive)} of {n} simultaneous sessions survived; cap is 2"  # ... but the cap holds
+
+
+def test_sdk_internals_match_the_pinned_mcp(server):
+    """Fix 2: SessionGate uses mcp's PRIVATE _server_instances and _discard_session (mcp==1.30.0,
+    requirements.txt). If a bump changes them, this fails here, before deploy."""
+    import importlib.metadata
+    import inspect
+
+    from mcp.server.streamable_http import StreamableHTTPServerTransport
+
+    assert importlib.metadata.version("mcp") == "1.30.0", "mcp was bumped: re-check SessionGate, then this pin"
+    manager = local_server.mcp.session_manager
+    sid = open_raw("cb_bt_bob")
+    assert isinstance(manager._server_instances, dict)
+    assert isinstance(manager._server_instances[sid], StreamableHTTPServerTransport)
+    assert inspect.iscoroutinefunction(manager._discard_session)
+    assert list(inspect.signature(manager._discard_session).parameters) == ["session_id", "transport"]
+    local_server.check_sdk_internals(manager)  # the startup check passes on the real thing
+
+
+def test_sdk_internals_check_fails_loudly_when_they_change():
+    """Fix 2: the startup check refuses an SDK whose internals moved, instead of running uncapped."""
+    class Ok:
+        _server_instances: dict = {}
+
+        async def _discard_session(self, session_id, transport):
+            pass
+
+    local_server.check_sdk_internals(Ok())
+
+    class Missing:
+        pass
+
+    class WrongType(Ok):
+        _server_instances: list = []
+
+    class SyncDiscard(Ok):
+        def _discard_session(self, session_id, transport):
+            pass
+
+    class Renamed(Ok):
+        async def _discard_session(self, sid, transport, reason=None):
+            pass
+
+    class WrongValues(Ok):
+        _server_instances = {"x": object()}
+
+    for bad in (Missing, WrongType, SyncDiscard, Renamed, WrongValues):
+        with pytest.raises(RuntimeError, match="mcp SDK changed"):
+            local_server.check_sdk_internals(bad())

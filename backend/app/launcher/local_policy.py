@@ -92,10 +92,11 @@ def policy(mcp_url: str, allowed_sources: tuple[str, ...] | list[str] = DEFAULT_
                 "url": mcp_url,
                 "headers": {"Authorization": "Bearer ${INT3_BRAIN_TOKEN}"},
                 "tools": {"include": list(MCP_TOOLS)},
-                # Covers the user's time on a confirmation card: above the endpoint's approval window
-                # plus two brain calls (local_server.py: 90 + 2 * 15), so the endpoint's clear
-                # "no answer, ask again" arrives before Hermes's generic timeout.
-                "timeout": 120,
+                # Covers the user's time on a confirmation card: the endpoint's approval window plus
+                # two brain calls (local_server.py: 90 + 2 * 15 = 120) plus 15 s margin for network and
+                # scheduling, so the endpoint's clear "no answer, ask again" arrives before Hermes's
+                # generic timeout.
+                "timeout": 135,
             },
         },
         "workspace_dirname": WORKSPACE_DIRNAME,
