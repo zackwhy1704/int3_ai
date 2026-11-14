@@ -262,8 +262,13 @@ def _bring_tenant_current(tconn, db: str) -> None:
 def migrate() -> None:
     """Apply pending migrations to the control DB and every tenant DB. Idempotent."""
     with admin_conn(config.CONTROL_DB) as conn:
-        if migrations.current(conn) < migrations.CONTROL_VERSION:
+        at = migrations.current(conn)
+        if at < migrations.CONTROL_VERSION:
+            # Apply the control schema (idempotent, as init() does) BEFORE recording the version:
+            # recording alone would mark e.g. v4 without its brain_audit 'not_found' outcome.
+            conn.execute((APP_DIR / "control_schema.sql").read_text())
             migrations.record(conn, migrations.CONTROL_VERSION)
+            print(f"migrated control: v{at} -> v{migrations.CONTROL_VERSION}")
         tenant_ids = [r["id"] for r in conn.execute("SELECT id FROM tenants ORDER BY id")]
     for tid in tenant_ids:
         db = tenant_db_name(tid)

@@ -110,7 +110,7 @@ Published as a GitHub pre-release (the repo is public): tag `launcher-v0.1.1`, a
 | Stop / start | `bash deploy/gcp/ops.sh stop` / `start`. All containers return on start |
 | Stack log | `sudo journalctl -u int3-stack` |
 | Caddy log | `sudo docker logs int3-caddy` (no access log, by design) |
-| Update | `sudo bash /opt/int3/deploy/gcp/vm/update.sh` moves to the latest commit of `INT3_REF` and restarts the shared stack. The VM never updates itself. A change to the gated image reaches a user only when that user is re-provisioned. |
+| Update | `sudo bash /opt/int3/deploy/gcp/vm/update.sh <commit-sha>` moves to that one reviewed commit (it must be on `INT3_REF`; a branch name, a typo or a commit from elsewhere is refused before anything changes) and restarts the shared stack. The VM never updates itself. A change to the gated image reaches a user only when that user is re-provisioned. |
 | Revoke a person | `sudo docker exec … python -m app.launcher.admin revoke-user --tenant T --user U`; their tokens stop within about 30 s |
 | Record a Hermes build | `app.launcher.admin record-build --platform windows --package-version V --release v0.22.6` |
 

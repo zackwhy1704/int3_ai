@@ -6,6 +6,8 @@ container), never from the API process.
     python -m app.launcher.admin record-build --platform windows --package-version <observed> --release v0.22.6
     python -m app.launcher.admin cancel-tenant --tenant brindlewood
     python -m app.launcher.admin purge-memories [--days 30]
+    python -m app.launcher.admin set-launch-mode --tenant brindlewood --mode local|hosted
+    python -m app.launcher.admin set-credential-sources --tenant brindlewood api_key,local_endpoint,hermes_oauth
 
 `invite` prints a single-use invite LINK (<server>/invite#<code>) to deliver out of band (e.g.
 WhatsApp). `revoke-user` ends
@@ -17,6 +19,11 @@ reports that build with the release's state instead of "untested".
 cancelled tenant are refused) and starts the memory retention clock. `purge-memories` deletes the
 memories of every tenant cancelled more than MEMORY_RETENTION_DAYS (default 30) ago and audits it;
 run it daily (e.g. a systemd timer on the VM). Both print counts only, never content.
+`set-launch-mode` switches a company between hosted Hermes (a container per user on the VM) and local
+mode (Hermes on each user's PC, docs/LOCAL_MODE_DESIGN.md); switching to hosted ends local brain tokens
+at once (tokens.resolve_brain). `set-credential-sources` sets which kinds of AI model credential the
+company's local Hermes may use (local_policy.CREDENTIAL_SOURCES). Both refuse to run until the control
+database is at the current version (`python -m app.tenants.admin migrate`).
 """
 
 import argparse
@@ -24,9 +31,9 @@ import getpass
 import os
 from urllib.parse import urlsplit
 
-from .. import config
+from .. import config, migrations
 from ..tenants.admin import admin_conn
-from . import memory, tokens
+from . import local_policy, memory, tokens
 
 
 def _require_secure(url: str) -> str:
@@ -39,7 +46,34 @@ def _require_secure(url: str) -> str:
     raise SystemExit(f"refusing a non-https server URL: {url}")
 
 
-def main() -> None:
+def _require_control_current(control) -> None:
+    at = migrations.current(control)
+    if at < migrations.CONTROL_VERSION:
+        raise SystemExit(f"the control database is at v{at}; this code needs v{migrations.CONTROL_VERSION}."
+                         " Run `python -m app.tenants.admin migrate` first.")
+
+
+def _tenant(control, tenant_id: str) -> dict:
+    row = control.execute("SELECT id, launch_mode, cancelled_at, allowed_credential_sources FROM tenants"
+                          " WHERE id = %s", (tenant_id,)).fetchone()
+    if row is None:
+        raise SystemExit(f"no tenant {tenant_id}")
+    return row
+
+
+def _sources(text: str) -> list[str]:
+    """Comma-separated credential sources -> a validated list in the canonical order."""
+    given = [s.strip() for s in text.split(",") if s.strip()]
+    if not given:
+        raise SystemExit("give at least one credential source, e.g. api_key,local_endpoint,hermes_oauth")
+    unknown = sorted(set(given) - set(local_policy.CREDENTIAL_SOURCES))
+    if unknown:
+        raise SystemExit(f"unknown credential source(s): {', '.join(unknown)}."
+                         f" Known: {', '.join(local_policy.CREDENTIAL_SOURCES)}")
+    return [s for s in local_policy.CREDENTIAL_SOURCES if s in given]
+
+
+def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(prog="python -m app.launcher.admin")
     sub = ap.add_subparsers(dest="cmd", required=True)
     inv = sub.add_parser("invite")
@@ -61,7 +95,13 @@ def main() -> None:
     ct.add_argument("--tenant", required=True)
     pm = sub.add_parser("purge-memories")
     pm.add_argument("--days", type=int, default=None)
-    a = ap.parse_args()
+    lm = sub.add_parser("set-launch-mode")
+    lm.add_argument("--tenant", required=True)
+    lm.add_argument("--mode", required=True, choices=["local", "hosted"])
+    cs = sub.add_parser("set-credential-sources")
+    cs.add_argument("--tenant", required=True)
+    cs.add_argument("sources", help="comma-separated: " + ",".join(local_policy.CREDENTIAL_SOURCES))
+    a = ap.parse_args(argv)
 
     if a.cmd == "purge-memories":
         done = memory.purge_cancelled(a.days)
@@ -95,6 +135,30 @@ def main() -> None:
             )
             print(f"recorded {a.platform} Hermes Desktop {a.package_version} = {a.release}"
                   f" (launcher will report: {known['state']})")
+        elif a.cmd == "set-launch-mode":
+            _require_control_current(control)
+            t = _tenant(control, a.tenant)
+            if a.mode == "local" and t["cancelled_at"] is not None:
+                raise SystemExit(f"tenant {a.tenant} is cancelled; it cannot be switched to local mode")
+            control.execute("UPDATE tenants SET launch_mode = %s WHERE id = %s", (a.mode, a.tenant))
+            backends = control.execute("SELECT count(*) AS n FROM user_backends WHERE tenant_id = %s",
+                                       (a.tenant,)).fetchone()["n"]
+            print(f"tenant {a.tenant}: launch mode {t['launch_mode']} -> {a.mode}")
+            if a.mode == "local" and backends:
+                print(f"  note: {backends} hosted per-user backend(s) still exist; local mode does not use"
+                      " them (remove them separately if the company will not switch back)")
+            if a.mode == "hosted" and t["launch_mode"] == "local":
+                print("  local-mode brain tokens of this tenant stop working at once")
+        elif a.cmd == "set-credential-sources":
+            _require_control_current(control)
+            t = _tenant(control, a.tenant)
+            new = _sources(a.sources)
+            control.execute("UPDATE tenants SET allowed_credential_sources = %s WHERE id = %s", (new, a.tenant))
+            print(f"tenant {a.tenant}: credential sources {','.join(t['allowed_credential_sources'])}"
+                  f" -> {','.join(new)}")
+            if "personal_login" in new:
+                print("  note: personal_login lets Hermes use an employee's own Claude Code / ChatGPT login")
+            print("  takes effect at each user's next launch (the launcher reports, the server checks)")
         elif a.cmd == "cancel-tenant":
             row = control.execute(
                 "UPDATE tenants SET cancelled_at = coalesce(cancelled_at, now()) WHERE id = %s"
