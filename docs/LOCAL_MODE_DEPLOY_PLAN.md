@@ -55,6 +55,27 @@ environment: `LOCAL_MCP_URL=https://<mcp>.app.int3labs.app/mcp` and
 - Every local route also returns 404 to a hosted tenant (`_require_local`).
 - A brain token works only for a `launch_mode='local'`, non-cancelled tenant (`tokens.resolve_brain`).
 
+**The brain MCP endpoint keeps sessions, so it is exactly one process.**
+- Why: a confirmation card's answer arrives as a separate HTTP request and must reach the session that
+  asked. The endpoint is therefore stateful Streamable HTTP, and sessions live in that one process's
+  memory (`deploy/hermes/brain-mcp/local_server.py`).
+- Pinned: no uvicorn workers, and `deploy: replicas: 1` in compose. Do not raise either.
+- Scaling out later needs one of two things: the front proxy routes every request with a given
+  `Mcp-Session-Id` to the same instance (sticky sessions), or sessions move to a shared store. Until
+  then, more instances break confirmation cards.
+- Caddy must pass `Mcp-Session-Id` through and must not buffer `text/event-stream`. Its default
+  `reverse_proxy` does both.
+- Limits:
+  - an idle session closes after 30 minutes;
+  - one user holds at most 5 open sessions, and the least recently used one is closed to make room;
+  - the whole endpoint holds at most 1000;
+  - a session opens only after the brain accepts the token (`POST /v1/session`, audited as
+    `mcp_session`).
+- A session id presented with any token other than the one that opened it answers 404, as if unknown.
+- Restart: on SIGTERM, a pending confirmation answers at once with "int3 restarted … Please ask again".
+  Hermes reopens its session on the next call. A hard kill (no SIGTERM) cannot answer; Hermes sees the
+  stream drop.
+
 ## 3. Headroom
 
 - **Memory.** Local-mode users have no per-user container on the VM: their Hermes runs on their PC.

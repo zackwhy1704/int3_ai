@@ -139,10 +139,19 @@ services:
   brain-mcp-local:
     profiles: ["local-mode"]
     image: ${MCP_IMAGE:-hermes-deploy-brain-mcp}
+    # EXACTLY ONE process: MCP sessions (and pending confirmation cards) live in this process's memory,
+    # so local_server.py runs no uvicorn workers and this service runs one replica. Scaling out needs
+    # sticky routing by Mcp-Session-Id or a shared session store (docs/LOCAL_MODE_DEPLOY_PLAN.md).
     command: ["python", "local_server.py"]
+    deploy:
+      replicas: 1
+    stop_grace_period: 10s  # SIGTERM answers pending cards "int3 restarted, please ask again" first
     environment:
       BRAIN_URL: http://brain:8000
       MCP_PORT: "8200"
+      MCP_SESSION_IDLE_SECONDS: "1800"
+      MCP_SESSIONS_PER_USER: "5"
+      MCP_APPROVAL_SECONDS: "90"
     ports:
       - "127.0.0.1:${LOCAL_MCP_PORT:-8200}:8200"
     networks: [ext]

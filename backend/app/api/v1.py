@@ -29,6 +29,7 @@ Deleted vs main:
 Citation format (frozen after Gate 3): [claim:N]
 """
 
+import hashlib
 import logging
 import uuid
 
@@ -554,6 +555,17 @@ class PreviewRequest(BaseModel):
     attribute: str
     value: str
     condition: str | None = None
+
+
+@router.post("/session")
+def open_session(p: Principal = Depends(v1_principal)) -> dict:
+    """Local mode: the brain MCP endpoint asks this before it opens an MCP session for a brain token,
+    so a dead or refused token never gets one (brain_principal checks it like any call). `user_key`
+    is an opaque per-user key for the endpoint's per-user session cap; it names no one."""
+    if p.via != "brain":
+        raise HTTPException(403, "brain tokens only")
+    record_for(p, "mcp_session")
+    return {"user_key": hashlib.sha256(f"{p.tenant_id}\0{p.user_id}".encode()).hexdigest()[:32]}
 
 
 @router.post("/proposal_preview")

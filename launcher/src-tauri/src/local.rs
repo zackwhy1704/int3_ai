@@ -239,6 +239,32 @@ pub fn build_report(config_yaml: &str, env_text: &str, plugins: Vec<String>, mcp
     build_report_full(config_yaml, env_text, "", plugins, mcp_name, workspace_synced, &|_| false, Some(true))
 }
 
+/// Hermes's tool lookup mode as Hermes reads it (tools/tool_search.py ToolSearchConfig.from_raw):
+/// missing = "auto"; a legacy bool false or "false"/"no"/"0" = "off"; true/"true"/"yes"/"1" = "on".
+/// An unreadable config (cfg is Null) reports null.
+fn tool_search_mode(cfg: &Value) -> Value {
+    if cfg.is_null() {
+        return Value::Null;
+    }
+    let raw = get(cfg, &["tools", "tool_search"]);
+    let enabled = match raw {
+        None => return json!("auto"),
+        Some(Value::Bool(b)) => return json!(if *b { "auto" } else { "off" }),
+        Some(Value::Object(_)) => get(cfg, &["tools", "tool_search", "enabled"]),
+        Some(_) => return json!("auto"),
+    };
+    let s = match enabled {
+        None => return json!("auto"),
+        Some(Value::Bool(b)) => return json!(if *b { "on" } else { "off" }),
+        Some(v) => v.as_str().map(|s| s.trim().to_lowercase()).unwrap_or_default(),
+    };
+    json!(match s.as_str() {
+        "false" | "0" | "no" | "off" => "off",
+        "true" | "1" | "yes" | "on" => "on",
+        _ => "auto",
+    })
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn build_report_full(config_yaml: &str, env_text: &str, auth_json: &str, plugins: Vec<String>,
                          mcp_name: &str, workspace_synced: bool, external_login: &dyn Fn(&str) -> bool,
@@ -270,6 +296,7 @@ pub fn build_report_full(config_yaml: &str, env_text: &str, auth_json: &str, plu
         "workspace_synced": workspace_synced,
         "telemetry_enabled": get(&cfg, &["telemetry", "shared_metrics", "enabled"]).cloned().unwrap_or(Value::Null),
         "inline_shell": get(&cfg, &["skills", "inline_shell"]).cloned().unwrap_or(Value::Null),
+        "tool_search": tool_search_mode(&cfg),
         "adopt_external_logins": adopt,
         "model_provider": get(&cfg, &["model", "provider"]).cloned().unwrap_or(Value::Null),
         "credential_sources": credential_sources(&cfg, env_text, &auth, adopt, external_login),
@@ -466,6 +493,19 @@ mod tests {
     }
 
     #[test]
+    fn tool_lookup_mode_is_reported_the_way_hermes_reads_it() {
+        let mode = |y: &str| build_report(y, "", vec![], "int3_brain", false)["tool_search"].clone();
+        assert_eq!(mode("model:\n  provider: anthropic\n"), "auto"); // missing = Hermes default
+        assert_eq!(mode("tools:\n  tool_search:\n    enabled: \"off\"\n"), "off"); // what `hermes config set` writes
+        assert_eq!(mode("tools:\n  tool_search:\n    enabled: false\n"), "off");
+        assert_eq!(mode("tools:\n  tool_search:\n    enabled: auto\n"), "auto");
+        assert_eq!(mode("tools:\n  tool_search:\n    enabled: \"ON\"\n"), "on");
+        assert_eq!(mode("tools:\n  tool_search: false\n"), "off"); // legacy bool
+        assert_eq!(mode("tools:\n  tool_search:\n    listing: off\n"), "auto"); // other keys only
+        assert!(mode("{not yaml").is_null());
+    }
+
+    #[test]
     fn unreadable_config_reports_nulls_not_defaults() {
         let r = build_report("{not yaml", "", vec!["x".into()], "int3_brain", false);
         assert!(r["disabled_toolsets"].is_null() && r["approvals_mode"].is_null());
@@ -493,6 +533,19 @@ mod tests {
         assert_eq!(second.matches("<b>").count(), 1);
         assert!(second.contains("v2") && !second.contains("v1") && second.starts_with("I am Hermes."));
         assert_eq!(soul_with("", "<b>", "<e>", "x"), "<b>\nx\n<e>\n");
+    }
+
+    #[test]
+    fn shipped_memory_plugin_keeps_company_facts_out_of_personal_memory() {
+        // The routing rule itself lives in the server's SOUL block (local_policy.SOUL_BLOCK, tested
+        // in backend/tests/test_launcher_local.py); the tool description must agree with it.
+        let init = PLUGIN_FILES.iter().find(|(n, _)| *n == "__init__.py").unwrap().1;
+        let schema = &init[init.find("\"name\": \"int3_remember\"").unwrap()..];
+        let schema = &schema[..schema.find("\"name\": \"int3_recall\"").unwrap()];
+        for needle in ["about the user personally", "NEVER use it for", "team or company facts",
+                       "propose_claim", "ask the user which one"] {
+            assert!(schema.contains(needle), "int3_remember description lost {needle:?}");
+        }
     }
 
     #[test]

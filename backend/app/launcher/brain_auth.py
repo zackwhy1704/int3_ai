@@ -29,7 +29,7 @@ log = logging.getLogger("launcher.brain")
 _ALLOWED = (
     ("POST", "/v1/search"), ("POST", "/v1/validate"), ("POST", "/v1/proposal_preview"),
     ("POST", "/v1/propose_claim"), ("GET", "/v1/proposals"), ("GET", "/v1/proposal/"),
-    ("POST", "/v1/approve_proposal"), ("POST", "/v1/reject_proposal"),
+    ("POST", "/v1/approve_proposal"), ("POST", "/v1/reject_proposal"), ("POST", "/v1/session"),
     ("POST", "/launcher/local/memory/save"), ("POST", "/launcher/local/memory/recall"),
     ("POST", "/launcher/local/memory/forget"),
 )
@@ -38,6 +38,7 @@ _TOOL = {
     "/v1/proposal_preview": "proposal_preview", "/v1/propose_claim": "propose_claim",
     "/v1/proposals": "list_proposals", "/v1/proposal/": "get_proposal",
     "/v1/approve_proposal": "approve_proposal", "/v1/reject_proposal": "reject_proposal",
+    "/v1/session": "mcp_session",
     "/launcher/local/memory/save": "memory_save", "/launcher/local/memory/recall": "memory_recall",
     "/launcher/local/memory/forget": "memory_forget",
 }

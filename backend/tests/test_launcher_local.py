@@ -53,6 +53,7 @@ def good_report() -> dict:
         "workspace_synced": False,
         "telemetry_enabled": False,
         "inline_shell": False,
+        "tool_search": "off",
         "adopt_external_logins": False,
         "model_provider": "anthropic",
         "credential_sources": ["api_key"],
@@ -101,10 +102,26 @@ def test_policy_carries_the_lockdown_and_no_secret(client, local_tenant):
     assert set(cfg["agent.disabled_toolsets"]) >= {"terminal", "code_execution", "browser", "web"}
     assert "memory" not in cfg["agent.disabled_toolsets"]  # would hide the memory provider's tools
     assert cfg["memory.memory_enabled"] is False and cfg["approvals.mode"] == "manual"
+    assert cfg["tools.tool_search.enabled"] == "off"
     entry = cfg[f"mcp_servers.{local_policy.MCP_SERVER_NAME}"]
     assert entry["url"] == config.LOCAL_MCP_URL
     assert entry["headers"]["Authorization"] == "Bearer ${INT3_BRAIN_TOKEN}"
+    assert entry["timeout"] == 120  # above the MCP endpoint's 90 s approval window + 2 x 15 s brain calls
     assert "cb_" not in r.text  # no token of any kind in the policy
+    assert body["soul"]["block"] == local_policy.SOUL_BLOCK
+
+
+def test_soul_block_routes_company_facts_to_propose_and_personal_ones_to_memory():
+    """Live turn (b) at 10e1083: "Remember for operations that ..." went to int3_remember because
+    nothing told the model otherwise. The launcher writes this block into the user's SOUL.md."""
+    block = local_policy.SOUL_BLOCK
+    for needle in ('"Remember for <a team> / for the company', "statement about the business",
+                   "call `propose_claim`", "NEVER save these with `int3_remember`",
+                   '"Remember that I', "call `int3_remember`", "ask them",
+                   "before saving anything"):
+        assert needle in block, needle
+    # company before personal, so the narrower rule is read first
+    assert block.index("propose_claim") < block.index("call `int3_remember`")
 
 
 @pytest.mark.parametrize("change, reason", [
@@ -124,6 +141,8 @@ def test_policy_carries_the_lockdown_and_no_secret(client, local_tenant):
     ({"telemetry_enabled": True}, "usage data with Nous"),
     ({"telemetry_enabled": None}, "usage data with Nous"),
     ({"inline_shell": True}, "skills may run commands"),
+    ({"tool_search": "auto"}, "tool lookup is switched back on"),
+    ({"tool_search": None}, "tool lookup is switched back on"),
     ({"adopt_external_logins": True}, "personal Claude Code or ChatGPT login"),
     ({"credential_sources": ["personal_login"]}, "personal Claude Code or ChatGPT login"),
     ({"credential_sources": ["custom_endpoint"]}, "model server elsewhere"),
@@ -197,6 +216,29 @@ def test_validate_checks_ids_against_this_users_retrieval(client, local_tenant):
     r = client.post("/v1/validate", json={"retrieval_id": body["retrieval_id"], "claim_ids": [real]},
                     headers=_bearer(other))
     assert r.json() == {"valid": [], "invalid": [real]}
+
+
+def test_mcp_session_open_names_the_user_opaquely_and_only_for_a_live_token(client, local_tenant):
+    """The brain MCP endpoint asks this before it opens a session (deploy/hermes/brain-mcp/local_server.py)."""
+    token, session = _brain_token(client)
+    r = client.post("/v1/session", headers=_bearer(token))
+    assert r.status_code == 200, r.text
+    key = r.json()["user_key"]
+    assert len(key) == 32 and "priya" not in key and TENANT not in key
+    assert _audit(session["device_id"])[-1]["tool"] == "mcp_session"
+    # the same user's next token (a relaunch on the same PC) gets the same key, and so does their
+    # second PC; another user gets a different one
+    r = client.post("/launcher/local/launch", headers=_bearer(session["access_token"]))
+    again = r.json()["brain_token"]
+    assert client.post("/v1/session", headers=_bearer(again)).json()["user_key"] == key
+    second_pc, _ = _brain_token(client)
+    assert client.post("/v1/session", headers=_bearer(second_pc)).json()["user_key"] == key
+    other, _ = _brain_token(client, "ada")
+    assert client.post("/v1/session", headers=_bearer(other)).json()["user_key"] != key
+    # the relaunch revoked the first token: it can no longer open a session
+    assert client.post("/v1/session", headers=_bearer(token)).status_code == 401
+    # a sign-in token is not a brain token
+    assert client.post("/v1/session", headers=_bearer(session["access_token"])).status_code in (401, 403)
 
 
 def test_revoking_the_device_stops_the_next_call(client, local_tenant):

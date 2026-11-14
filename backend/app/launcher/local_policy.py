@@ -51,7 +51,15 @@ int3 brain: call `search_brain`, answer ONLY from the passages it returns, and c
 as [claim:ID] using the ids shown. Before you send the answer, call `validate_citations` with the
 retrieval_id and the ids you cited, and drop anything it reports as invalid. If the brain returns
 no passages, say the company knowledge has no reliable source for it; do not guess.
-If a brain tool says your int3 access expired or was refused, tell the user to reopen int3."""
+If a brain tool says your int3 access expired or was refused, tell the user to reopen int3.
+
+## Saving: company knowledge or personal memory
+- "Remember for <a team> / for the company …", or any statement about the business (its sites,
+  prices, policies, processes, or people's roles): call `propose_claim`, so the owner of that
+  scope can approve it. NEVER save these with `int3_remember`.
+- "Remember that I …", the user's own preferences, or their personal notes: call `int3_remember`.
+- If it is unclear which one the user means, ask them ("for the company, or just for you?")
+  before saving anything."""
 
 
 def policy(mcp_url: str, allowed_sources: tuple[str, ...] | list[str] = DEFAULT_ALLOWED_SOURCES,
@@ -69,6 +77,11 @@ def policy(mcp_url: str, allowed_sources: tuple[str, ...] | list[str] = DEFAULT_
             "approvals.mode": "manual",
             "approvals.cron_mode": "deny",
             "approvals.unattended_mode": "deny",
+            # Tool lookup off: with ~15 toolsets disabled only a few tools are left, so listing them
+            # directly is cheaper than the tool_search bridge and the model can call search_brain
+            # first time. Measured on turn (a), 2 runs each at 10e1083+session fix: input 61.6k/61.3k
+            # -> 45.5k/45.4k tokens, 5 -> 3 API calls, 4 -> 2 tool calls, 1 -> 0 failed calls.
+            "tools.tool_search.enabled": "off",
             "telemetry.shared_metrics.enabled": False,
             "telemetry.shared_metrics.send": False,
             "telemetry.shared_metrics.offer_version": SHARED_METRICS_OFFER_VERSION,
@@ -79,7 +92,10 @@ def policy(mcp_url: str, allowed_sources: tuple[str, ...] | list[str] = DEFAULT_
                 "url": mcp_url,
                 "headers": {"Authorization": "Bearer ${INT3_BRAIN_TOKEN}"},
                 "tools": {"include": list(MCP_TOOLS)},
-                "timeout": 60,
+                # Covers the user's time on a confirmation card: above the endpoint's approval window
+                # plus two brain calls (local_server.py: 90 + 2 * 15), so the endpoint's clear
+                # "no answer, ask again" arrives before Hermes's generic timeout.
+                "timeout": 120,
             },
         },
         "workspace_dirname": WORKSPACE_DIRNAME,
@@ -157,6 +173,8 @@ def evaluate(report: dict[str, Any], mcp_url: str,
         reasons.append("sharing usage data with Nous is on")
     if report.get("inline_shell") is not False:
         reasons.append("skills may run commands (skills.inline_shell)")
+    if report.get("tool_search") != "off":
+        reasons.append("Hermes's tool lookup is switched back on (tools.tool_search)")
 
     if report.get("adopt_external_logins") is not False and "personal_login" not in allowed:
         reasons.append("Hermes may reuse a personal Claude Code or ChatGPT login on this PC")

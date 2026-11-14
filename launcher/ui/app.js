@@ -109,7 +109,9 @@ async function launch(restart) {
       $('restart-dialog').showModal()
       return
     }
-    const until = new Date(r.expires_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    const until = new Date(r.expires_at).toLocaleString([], {
+      weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
+    })
     if (r.mode === 'local') {
       msg.textContent = `Hermes is starting on this PC, connected to your company brain until ${until}. The assistant can save files only in ${r.workspace}. To pick or change the AI model, use "Choose AI model".`
       return

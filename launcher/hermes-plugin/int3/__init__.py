@@ -43,10 +43,15 @@ _SCHEMAS = [
     {
         "name": "int3_remember",
         "description": (
-            "Save one short fact about the user or their work to their int3 memory, so you can recall "
-            "it in later conversations. ONLY call this when the user explicitly asks you to remember "
-            "something (\"remember that...\", \"note for next time...\"). Write it as one standalone "
-            "sentence. Never save passwords, keys, or other people's personal data."
+            "Save one short note about the user personally (their preferences, or their own "
+            "personal notes) to their private int3 memory, so you can recall it in later "
+            "conversations. ONLY call this when the user explicitly asks you to remember something "
+            "about themselves (\"remember that I...\", \"note for next time...\"). NEVER use it for "
+            "team or company facts (\"remember for operations...\", or anything about the business: "
+            "its sites, prices, policies, processes, people's roles): those go to propose_claim so "
+            "the owner can approve them. If unclear, ask the user which one they mean first. Write "
+            "it as one standalone sentence. Never save passwords, keys, or other people's personal "
+            "data."
         ),
         "parameters": {
             "type": "object",
@@ -184,8 +189,10 @@ class Int3MemoryProvider(MemoryProvider):
     def system_prompt_block(self) -> str:
         return (
             "# int3 memory\n"
-            "The user's memory is kept by their company's int3 service, not on this PC. Save something "
-            "with int3_remember ONLY when the user explicitly asks you to remember it. Use int3_recall "
+            "The user's personal memory is kept by their company's int3 service, not on this PC. Save "
+            "something with int3_remember ONLY when the user explicitly asks you to remember something "
+            "about themselves; team or company facts go to propose_claim instead (ask if unclear). "
+            "Use int3_recall "
             "to look things up and int3_forget(id) when they ask you to forget something. The user can "
             "see and delete everything saved in int3 > Memory."
         )
