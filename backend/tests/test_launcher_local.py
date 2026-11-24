@@ -276,6 +276,51 @@ def test_a_weakened_report_stops_the_next_call(client, local_tenant):
     assert client.post("/v1/search", json={"query": "holidays"}, headers=_bearer(token)).status_code == 200
 
 
+def _device_revoked(device_id: str) -> bool:
+    with control_conn() as c:
+        return c.execute("SELECT revoked_at IS NOT NULL AS r FROM launcher_devices WHERE id = %s",
+                         (device_id,)).fetchone()["r"]
+
+
+def test_hermes_cloud_signs_the_device_out_and_deleting_the_entry_does_not_bring_it_back(client, local_tenant):
+    """Back up to Hermes Cloud, then delete the Cloud entry: the uploaded brain token must already be dead.
+    The first report that sees the entry revokes the device; a clean report afterwards changes nothing."""
+    token, session = _brain_token(client)
+    access = session["access_token"]
+    assert client.post("/v1/search", json={"query": "holidays"}, headers=_bearer(token)).status_code == 200
+
+    verdict = _report(client, access, {**good_report(), "hermes_cloud": True})
+    assert verdict["ok"] is False and verdict["signed_out"] is True
+    assert any("signed this device out" in r for r in verdict["reasons"])
+    assert local_policy.CLOUD_REASON not in verdict["reasons"]  # one instruction (new invite), not two
+    assert _device_revoked(session["device_id"])
+    assert client.post("/v1/search", json={"query": "holidays"}, headers=_bearer(token)).status_code == 401
+
+    # the entry is gone again: the launcher's next report is clean, but this device stays signed out
+    r = client.post("/launcher/local/posture", json={"hermes_version": "dev", "report": {**good_report(), "hermes_cloud": False}},
+                    headers=_bearer(access))
+    assert r.status_code == 401
+    assert client.post("/launcher/local/launch", headers=_bearer(access)).status_code == 401
+    assert client.post("/v1/search", json={"query": "holidays"}, headers=_bearer(token)).status_code == 401
+    # only a new sign-in brings the brain back
+    token2, _ = _brain_token(client)
+    assert client.post("/v1/search", json={"query": "holidays"}, headers=_bearer(token2)).status_code == 200
+
+
+def test_our_own_connection_entry_and_an_unreadable_registry_do_not_sign_out(client, local_tenant):
+    """hermes_cloud false (the launcher found only Hermes's local entry and int3's own `remote` one) keeps
+    the brain; null (connections.json unreadable) refuses but does not revoke anything."""
+    token, session = _brain_token(client)
+    access = session["access_token"]
+    assert _report(client, access, {**good_report(), "hermes_cloud": False}) == {"ok": True, "reasons": [], "signed_out": False}
+    assert client.post("/v1/search", json={"query": "holidays"}, headers=_bearer(token)).status_code == 200
+    verdict = _report(client, access, {**good_report(), "hermes_cloud": None})
+    assert verdict["ok"] is False and verdict["signed_out"] is False
+    assert not _device_revoked(session["device_id"])
+    assert _report(client, access, good_report())["ok"]
+    assert client.post("/v1/search", json={"query": "holidays"}, headers=_bearer(token)).status_code == 200
+
+
 def test_switching_the_tenant_back_to_hosted_kills_brain_tokens(client, local_tenant):
     token, _ = _brain_token(client)
     _set_mode("hosted")

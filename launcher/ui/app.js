@@ -34,6 +34,13 @@ async function call(cmd, args) {
   }
 }
 
+// The background check can sign this device out (local mode: Hermes connected to Hermes Cloud).
+window.__TAURI__.event.listen('int3-signed-out', ev => {
+  show('signin')
+  $('signin-error').textContent = String(ev.payload || 'You were signed out on this device.')
+  $('signin-error').hidden = false
+})
+
 function text(el, value) {
   el.textContent = value == null ? '' : String(value)
   return el

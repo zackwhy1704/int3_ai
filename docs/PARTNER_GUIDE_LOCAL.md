@@ -42,10 +42,10 @@ and tells you to choose another model.
 ## Don't use Hermes Cloud backup
 
 Don't use **Move to Hermes Cloud** in Hermes (Settings › Backup & Transfer). It copies your whole Hermes
-setup to Nous's cloud, including your int3 sign-in and your chats, which contain company answers. While
-Hermes is connected to a Hermes Cloud agent, int3 turns the company brain off and tells you why; remove
-that connection in Hermes, then click **Launch Hermes** in int3 again. A plain **Backup** file saved on
-this PC also contains your int3 sign-in, so don't share it.
+setup to Nous's cloud, including your int3 sign-in and your chats, which contain company answers. If int3
+sees Hermes connected to a Hermes Cloud agent, it **signs you out** on this PC straight away and tells you
+why. Remove that connection in Hermes, then ask your int3 admin for a new invite to sign in again. A plain
+**Backup** file saved on this PC also contains your int3 sign-in, so don't share it.
 
 ## Memory
 

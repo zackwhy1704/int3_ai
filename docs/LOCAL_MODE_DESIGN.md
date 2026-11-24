@@ -547,9 +547,20 @@ No policy key, toolset name or verdict input changed, so `local_policy.py` is un
   `kind: "cloud"` (`electron/connection-registry.ts:50`) at a `*.agents.nousresearch.com` host
   (`apps/shared/src/hermes-cloud.ts:8-21`). The launcher reports `hermes_cloud` (`local.rs`
   `hermes_cloud_in`, watched every 15 s) and `evaluate()` refuses the brain while it is true or unreadable.
-- **Residual:** a user who transfers and then deletes the Cloud connection passes posture again; the Cloud
-  copy then holds a brain token until it expires (about 24 h) or the device is revoked. Partners are told
-  not to use it (`docs/PARTNER_GUIDE_LOCAL.md`).
+  The check keys only on that entry's `kind` and URL host; int3's own entries are `kind: "remote"`
+  (`launcher/src-tauri/src/registry.rs:46`) and never match (`local.rs` test
+  `our_own_int3_entries_never_count_as_hermes_cloud`).
+- **Back up, then delete the entry:** the first report that sees a Cloud entry **signs the device out**
+  server-side (`routes.py` `local_posture`, `tokens.revoke_device`): every token it holds, the brain token
+  included, stops at once, and the launcher forgets the device and removes the token from `.env`.
+  Deleting the entry afterwards changes nothing; only a new invite signs the person in again
+  (`test_hermes_cloud_signs_the_device_out_and_deleting_the_entry_does_not_bring_it_back`). An unreadable
+  `connections.json` only refuses. Partners are told not to use it (`docs/PARTNER_GUIDE_LOCAL.md`).
+- **Residual:** a transfer made while the launcher is not running is seen at the next launch, and the
+  token uploaded with it works until then (at most its 24 h life).
+- **"Other" on the card** (live, v0.23.3): free text is not an answer the card can use; Hermes returns
+  `decline` with no content (`tools/mcp_elicitation_form.py:319-328`), so nothing is proposed and the
+  typed text does not reach the assistant. Only typing exactly yes/y/true/1/on accepts.
 
 ### 3.8 Server changes
 

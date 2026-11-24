@@ -306,6 +306,12 @@ def local_posture(body: PostureReport, p: Principal = Depends(launcher_principal
     if len(json.dumps(body.report)) > 16_384:
         raise HTTPException(413, "report too large")
     ok, reasons = local_policy.evaluate(body.report, config.LOCAL_MCP_URL, allowed, config.LOCAL_MEMORY_URL)
+    # A Hermes Cloud agent in Hermes's connections.json means this PC's Hermes home (brain token in .env)
+    # may already be uploaded (local_policy.evaluate). Refusing only while the entry is there would let
+    # "back up, then delete the entry" keep a working token, so the device is signed out at once: every
+    # token it holds, the brain token included, stops working, and only a new sign-in brings it back.
+    # Only a positive detection does this; an unreadable registry (None) is a plain refusal.
+    signed_out = local_policy.hermes_cloud_detected(body.report)
     with control_conn() as control:
         control.execute(
             "INSERT INTO launcher_posture (device_id, reported_at, hermes_version, report, ok, reasons)"
@@ -315,9 +321,14 @@ def local_posture(body: PostureReport, p: Principal = Depends(launcher_principal
             " ok = EXCLUDED.ok, reasons = EXCLUDED.reasons",
             (_device_id(p), body.hermes_version, json.dumps(body.report), ok, reasons),
         )
-    if not ok:
+        if signed_out:
+            tokens.revoke_device(control, _device_id(p))
+    if signed_out:
+        reasons = [r for r in reasons if r != local_policy.CLOUD_REASON] + [local_policy.CLOUD_SIGNED_OUT]
+        log.warning("local posture: Hermes Cloud connected for %s/%s; device signed out", p.tenant_id, p.user_id)
+    elif not ok:
         log.info("local posture refused for %s/%s: %s", p.tenant_id, p.user_id, "; ".join(reasons))
-    return {"ok": ok, "reasons": reasons}
+    return {"ok": ok, "reasons": reasons, "signed_out": signed_out}
 
 
 @router.post("/local/launch")

@@ -105,8 +105,9 @@ While the launcher runs, it re-reports within about 15 s of any change to `confi
 - Windows only. Unsigned installer: a SmartScreen click-through where Smart App Control is Off or in
   Evaluation, and **blocked with no override where it is On** (seen on the Windows 11 dev PC: an unsigned
   binary fails with "An Application Control policy has blocked this file"). No auto-update.
-- Local mode refuses the brain while Hermes's `connections.json` holds a Hermes Cloud agent (v0.23.3
-  Settings › Backup & Transfer uploads `.env` and chats; docs/LOCAL_MODE_DESIGN.md §3.7).
+- Local mode signs the device out as soon as Hermes's `connections.json` holds a Hermes Cloud agent (v0.23.3
+  Settings › Backup & Transfer uploads `.env` and chats; docs/LOCAL_MODE_DESIGN.md §3.7). A new invite is
+  needed to sign in again.
 - Packaged Hermes is detected via MSIX only (Store / out-of-store App Installer), which needs
   Windows 11 22H2. Hermes on Windows 10 exists only as Nous's source install (`install.ps1`),
   which the launcher does not detect.

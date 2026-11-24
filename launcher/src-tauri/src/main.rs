@@ -219,6 +219,10 @@ async fn launch_local(app: tauri::AppHandle, session: State<'_, Session>, restar
     }
     let mcp_name = policy["mcp_server_name"].as_str().unwrap_or("int3_brain").to_string();
     let verdict = report_posture(&session, &mcp_name, synced).await?;
+    if verdict["signed_out"] == true {
+        forget_device(&session).await;
+        return Err(fail(format!("int3 couldn't set up Hermes safely: {}", join_reasons(&verdict))));
+    }
     if verdict["ok"] != true {
         local::set_token(None).map_err(fail)?;
         return Err(fail(format!("int3 couldn't set up Hermes safely: {}", join_reasons(&verdict))));
@@ -233,6 +237,15 @@ async fn launch_local(app: tauri::AppHandle, session: State<'_, Session>, restar
         "workspace": workspace.to_string_lossy(),
         "expires_at": grant["expires_at"],
     }))
+}
+
+/// The server signed this device out (it saw a Hermes Cloud agent in Hermes's connections.json, so
+/// this PC's Hermes home may be uploaded): forget it here as Sign out does. The brain token leaves
+/// .env; signing in again needs a new invite.
+async fn forget_device(session: &Session) {
+    session.sign_out().await;
+    let _ = local::set_token(None);
+    let _ = save_server(None);
 }
 
 async fn report_posture(session: &Session, mcp_name: &str, synced: bool) -> Result<Value, Value> {
@@ -264,7 +277,14 @@ fn start_watch(app: tauri::AppHandle, mcp_name: String) {
             if now != last {
                 last = now;
                 let synced = local::prepare_workspace(&local::workspace("int3-workspace")).map(|(_, s)| s).unwrap_or(true);
-                let _ = report_posture(&session, &mcp_name, synced).await;
+                if let Ok(verdict) = report_posture(&session, &mcp_name, synced).await {
+                    if verdict["signed_out"] == true {
+                        forget_device(&session).await;
+                        use tauri::Emitter;
+                        let _ = app.emit("int3-signed-out", join_reasons(&verdict)); // the page shows why, now
+                        break;
+                    }
+                }
             }
         }
         RUNNING.store(false, Ordering::SeqCst);

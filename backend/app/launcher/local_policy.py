@@ -116,6 +116,22 @@ def policy(mcp_url: str, allowed_sources: tuple[str, ...] | list[str] = DEFAULT_
     }
 
 
+CLOUD_REASON = ("Hermes is connected to Hermes Cloud. Moving an agent there copies your int3 access and chats "
+                "off this PC, so the int3 brain is off while it is connected. Remove the Hermes Cloud "
+                "connection in Hermes, then reopen int3")
+# What the posture route says instead of CLOUD_REASON when it signs the device out (only a new sign-in helps).
+CLOUD_SIGNED_OUT = ("Hermes is connected to Hermes Cloud, which can copy your int3 access and chats off this PC, "
+                    "so int3 signed this device out. Remove the Hermes Cloud connection in Hermes, then ask "
+                    "your int3 admin for a new invite to sign in again")
+
+
+def hermes_cloud_detected(report: dict[str, Any]) -> bool:
+    """The launcher positively saw a Hermes Cloud agent in Hermes's connections.json (launcher
+    local.rs hermes_cloud_in: an entry with `kind: "cloud"` or a *.agents.nousresearch.com host).
+    False for false, a missing field (older launcher) and null (unreadable): those only refuse."""
+    return report.get("hermes_cloud") is True
+
+
 def _in_sync_folder(path: str) -> bool:
     segments = [s.strip().lower() for s in path.replace("/", "\\").split("\\") if s.strip()]
     return any(seg == name or seg.startswith((name + " ", name + "-"))
@@ -194,9 +210,7 @@ def evaluate(report: dict[str, Any], mcp_url: str,
     # first saves that agent in Hermes's connections.json (backup-settings.tsx:186 before :188), which
     # the launcher reports. Tolerated only when absent, so an older launcher's report still passes.
     if "hermes_cloud" in report and report.get("hermes_cloud") is not False:
-        reasons.append("Hermes is connected to Hermes Cloud. Moving an agent there copies your int3 access "
-                       "and chats off this PC, so the int3 brain is off while it is connected. Remove the "
-                       "Hermes Cloud connection in Hermes, then reopen int3")
+        reasons.append(CLOUD_REASON)
 
     if report.get("adopt_external_logins") is not False and "personal_login" not in allowed:
         reasons.append("Hermes may reuse a personal Claude Code or ChatGPT login on this PC")
