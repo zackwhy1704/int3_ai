@@ -161,6 +161,8 @@ def test_soul_block_routes_company_facts_to_propose_and_personal_ones_to_memory(
     ({"credential_sources": ["custom_endpoint"]}, "model server elsewhere"),
     ({"credential_sources": ["something-new"]}, "unknown credential"),
     ({"credential_sources": None}, "credentials not reported"),
+    ({"hermes_cloud": True}, "connected to Hermes Cloud"),
+    ({"hermes_cloud": None}, "connected to Hermes Cloud"),  # the launcher could not read connections.json
 ])
 def test_every_weakening_is_a_reason(change, reason):
     ok, reasons = local_policy.evaluate({**good_report(), **change}, config.LOCAL_MCP_URL)
@@ -174,6 +176,8 @@ def test_good_report_passes_and_empty_report_fails():
     assert local_policy.evaluate({**good_report(), "credential_sources": []}, config.LOCAL_MCP_URL)[0]
     ok, reasons = local_policy.evaluate({}, config.LOCAL_MCP_URL)
     assert not ok and len(reasons) >= 6
+    # hermes_cloud: an older launcher sends no field (tolerated); a current one sends false
+    assert local_policy.evaluate({**good_report(), "hermes_cloud": False}, config.LOCAL_MCP_URL) == (True, [])
 
 
 def test_launch_needs_a_good_fresh_report(client, local_tenant):

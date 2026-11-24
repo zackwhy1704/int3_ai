@@ -494,6 +494,63 @@ than the others.
 - **Weekly CI-free check:** build the latest Hermes tag from source, run the plugin and config contract
   tests against it (as M1 did for `normalizeRegistry`), and record the result.
 
+**Drift v0.23.1 → v0.23.3** (`b65acf3fdc` → `caafe538`, 19 Nov 2026; cited `v0.23.1 path:line` / `v0.23.3 path:line`).
+Validated live on 2026-11-24, Windows 11, v0.23.3 Desktop from source with the launcher, turns (a)–(h) of the
+deploy-plan local checks plus the Hermes Cloud refusal. Dev-build only: the first Anthropic call installs the
+`anthropic` SDK and needs a Hermes restart (the Store bundle ships it, `apps/desktop/BUILDING.md`).
+No policy key, toolset name or verdict input changed, so `local_policy.py` is unchanged. Compat rows:
+`backend/app/control_schema.sql` (both `untested`; registry version 2 at `apps/desktop/electron/connection-registry.ts:43`).
+
+| What local mode relies on | Result | Evidence |
+|---|---|---|
+| Toolset names (`agent.disabled_toolsets`) | Same | `toolsets.py` byte-identical |
+| Subtraction applied last on Desktop | Same | `tui_gateway/agent_factory.py:446-462` / `:462-478` (moved +16) |
+| `memory_enabled`, `user_profile_enabled`, `nudge_interval`, `provider` | Same defaults | `hermes_cli/config_defaults.py:1296-1309` / `:1262-1275` |
+| `approvals.mode/cron_mode/unattended_mode`, `skills.inline_shell`, `auth.adopt_external_logins`, `fallback_providers` | Same defaults | `config_defaults.py:1657-1662,1452,1739,24` / `:1623-1628,1418,1705,25` |
+| `_config_version` | 53 → 54: only `prompt_caching.cache_ttl` | `hermes_cli/config_migrations.py:789` @v0.23.3 |
+| Memory provider plugin API | Same | `agent/memory_provider.py` byte-identical |
+| Plugin discovery from `$HERMES_HOME/plugins` | Same for `int3` (name must match `^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`) | `plugins/memory/__init__.py:148-160` @v0.23.3, `plugins/plugin_loader.py:93-98` |
+| Memory provider tools gated off | Now also by `all` / `*` in `disabled_toolsets` (we list neither) | `agent/memory_manager_tools.py:30` |
+| Memory manager skipped | Only in a hosted scope (`host_feature_enabled("builtin_memory")`), never on a local install | `agent/agent_init.py:1148` @v0.23.3, `tools/hosted_tool_policy.py` (new) |
+| `mcp_servers` `url`, `headers` with `${VAR}`, `timeout`, `tools.include` | Same; interpolation now runs before the suspicious-entry filter | `tools/mcp_tool_config.py:766` @v0.23.3 |
+| `tools.resources` / `tools.prompts` | Same | `tools/mcp_tool_registration.py:190-191` / `:193-194`; `tools/mcp_tool_schema.py:332` / `:336` |
+| Suspicious-MCP migration | Moved to `config_migrations.py`; checks only `command`/`args`/`env`, so a URL entry is never flagged | `hermes_cli/config.py:1252` / `config_migrations.py:816`, `hermes_cli/mcp_security.py:335-379` |
+| `mcp_servers.<n>.disabled: true` | Now also means off (it only switches our own brain off) | `tools/mcp_tool_common.py:151-157` @v0.23.3 |
+| `tools.tool_search` | Same parsing; two tools added to the default defer list (we set `off`) | `config_defaults.py:1970` / `:1936` |
+| `HERMES_WRITE_SAFE_ROOT` | Same reader; enforcement same or stricter (`~/.ssh/config` no longer skips the root check; drive spellings normalized) | `agent/file_safety.py:223-229,283-307` / `:330-336,388-413`; write/patch/delete/move at `tools/file_operations.py:1310,1349,1530,1630` / `:1324,1363,1544,1644` |
+| `HERMES_HOME` | Default `%LOCALAPPDATA%\hermes` same; now launch-only (ignored inside `.env`; the launcher sets it in the process env) | `hermes_constants.py:61` / `:74`, `LAUNCH_ONLY_ENV_KEYS` at `:906` @v0.23.3 |
+| Shared-metrics consent (`offer_version` 2) | Same | `hermes_cli/observability/shared_metrics_consent.py` byte-identical |
+| `hermes://open/settings?tab=providers` | Same | `apps/desktop/src/lib/hermes-open-target.ts`, `electron/deep-link-protocol.ts` byte-identical; `settings/index.tsx:76,201` / `:79,205` |
+| Claude Code / Codex login reuse | Same readers and source labels | `agent/credential_sources.py` byte-identical; `agent/credential_pool.py:2579` / `:2494` |
+| **Confirmation card (elicitation)** | **Changed.** With a clarify surface bound (Desktop), an empty-schema elicitation is a clarify card "int3_brain asks: …" with **Yes / No**; only Yes accepts. Without one, the yes/no approval as before. Forms Hermes cannot fill are now declined | `tools/mcp_tool_sampling.py:293-295` / `:265-295,351-372`, `tools/mcp_elicitation_form.py:319-343` (new) |
+| **Cloud backup (new)** | **New egress.** Settings › Backup moves this agent into a Hermes Cloud agent: `hermes backup`, then upload. The archive includes `.env` (so `INT3_BRAIN_TOKEN`) and `state.db` (chats, so brain answers). No config key turns it off on a local install | `apps/desktop/src/app/settings/backup-settings.tsx`, `src/lib/agent-transfer.ts:1-10,189-208`, `hermes-cloud-agents.ts:36`, `hermes_cli/backup.py:172-174` @v0.23.3 |
+
+**Cloud backup, decided (owner, 2026-11-24): detect, refuse, and tell partners.** From v0.23.3 source:
+- **(a) Manual only.** Settings › Backup & Transfer (`apps/desktop/src/app/settings/backup-settings.tsx:177-218`)
+  needs a Hermes Cloud sign-in (`:242-243`, an Electron portal session, `electron/main.ts:15004-15016`),
+  an agent picked and **Replace** clicked (`:267-279`). The ⌘K rows only open that tab
+  (`settings/backup-palette.ts:27-47`), as does the portal's `hermes://open/move-to-cloud` link (`:10-16`).
+  No scheduler, CLI command or Python path uploads to Cloud: the transfer endpoints
+  (`hermes_cli/web_routers/transfer.py:83,126,154`) are driven only by `src/lib/agent-transfer.ts:365-430`.
+  The pre-update `pre_update_backup` (`config_defaults.py:2306`) and the local Backup card write
+  archives on this PC only.
+- **(b) What is uploaded:** `hermes backup` of the whole Hermes home (`web_routers/ops.py:601-617`), streamed
+  in 8 MiB chunks to the Cloud agent and restored there (`agent-transfer.ts:252-332,365-430`). Included:
+  `config.yaml`, **`.env`** (so `INT3_BRAIN_TOKEN` and `INT3_MEMORY_URL`), `auth.json` (model sign-ins),
+  **`state.db`** (all chats, so brain answers), `vault.*`, `SOUL.md`, `plugins/` (our plugin's code), skills
+  and kept media (`hermes_cli/backup.py:114-115,170-174`). Excluded: caches, venvs, `node_modules`, browser
+  profiles, prior backups, secret caches (`backup.py:81-108,133-149`). Memory-provider data outside the home
+  only via `backup_paths()` (`backup.py:229-258`): ours declares none and our memories stay on our server.
+- **(c) Local marker: yes.** The Cloud sign-in itself sits in Chromium's cookie store (not readable), but
+  every transfer first saves the target agent in Hermes's `connections.json`
+  (`hermes-cloud-agents.ts:69-104`, called at `backup-settings.tsx:186` before the upload at `:188`), as
+  `kind: "cloud"` (`electron/connection-registry.ts:50`) at a `*.agents.nousresearch.com` host
+  (`apps/shared/src/hermes-cloud.ts:8-21`). The launcher reports `hermes_cloud` (`local.rs`
+  `hermes_cloud_in`, watched every 15 s) and `evaluate()` refuses the brain while it is true or unreadable.
+- **Residual:** a user who transfers and then deletes the Cloud connection passes posture again; the Cloud
+  copy then holds a brain token until it expires (about 24 h) or the device is revoked. Partners are told
+  not to use it (`docs/PARTNER_GUIDE_LOCAL.md`).
+
 ### 3.8 Server changes
 
 | Piece | Reused | New |

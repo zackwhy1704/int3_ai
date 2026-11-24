@@ -188,6 +188,16 @@ def evaluate(report: dict[str, Any], mcp_url: str,
     if report.get("tool_search") != "off":
         reasons.append("Hermes's tool lookup is switched back on (tools.tool_search)")
 
+    # Hermes v0.23.3 Settings > Backup & Transfer moves this agent into a Hermes Cloud agent: it uploads
+    # `hermes backup` of the whole Hermes home, .env (the brain token) and state.db (chats) included
+    # (hermes_cli/backup.py:172-174, apps/desktop/src/lib/agent-transfer.ts:365-391). Every transfer
+    # first saves that agent in Hermes's connections.json (backup-settings.tsx:186 before :188), which
+    # the launcher reports. Tolerated only when absent, so an older launcher's report still passes.
+    if "hermes_cloud" in report and report.get("hermes_cloud") is not False:
+        reasons.append("Hermes is connected to Hermes Cloud. Moving an agent there copies your int3 access "
+                       "and chats off this PC, so the int3 brain is off while it is connected. Remove the "
+                       "Hermes Cloud connection in Hermes, then reopen int3")
+
     if report.get("adopt_external_logins") is not False and "personal_login" not in allowed:
         reasons.append("Hermes may reuse a personal Claude Code or ChatGPT login on this PC")
     sources = report.get("credential_sources")

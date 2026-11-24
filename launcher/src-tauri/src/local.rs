@@ -41,6 +41,55 @@ pub fn hermes_home() -> PathBuf {
     PathBuf::from(std::env::var("LOCALAPPDATA").unwrap_or_default()).join("hermes")
 }
 
+/// Hermes Desktop's userData folders (where its connections.json lives), resolved once per launch from
+/// hermes::detect() so the 15 s watcher never re-runs the MSIX query.
+static REGISTRY_DIRS: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
+
+pub fn set_registry_dirs(dirs: Vec<PathBuf>) {
+    if let Ok(mut d) = REGISTRY_DIRS.lock() {
+        *d = dirs;
+    }
+}
+
+fn registry_dirs() -> Vec<PathBuf> {
+    REGISTRY_DIRS.lock().map(|d| d.clone()).unwrap_or_default()
+}
+
+/// Hermes Cloud agents' public hosts (apps/shared/src/hermes-cloud.ts:8 @v0.23.3).
+const HERMES_CLOUD_HOST_SUFFIXES: [&str; 2] = [".agents.nousresearch.com", ".agents.staging-nousresearch.com"];
+
+/// Is a Hermes Cloud agent saved in any of these connections.json texts? Hermes v0.23.3's Backup &
+/// Transfer saves the target agent there before it uploads this PC's Hermes home (`kind: "cloud"`,
+/// or a remote entry at a Cloud host, as Hermes itself counts one: connection-registry.ts:910).
+/// None (not false) when a file is unreadable JSON, so the server refuses instead of guessing.
+pub fn hermes_cloud_in(registries: &[Option<String>]) -> Option<bool> {
+    let mut found = false;
+    for text in registries.iter().flatten() {
+        let v: Value = serde_json::from_str(text).ok()?;
+        for c in v["connections"].as_array().map(Vec::as_slice).unwrap_or_default() {
+            let host = c["url"].as_str()
+                .and_then(|u| url::Url::parse(u).ok())
+                .and_then(|u| u.host_str().map(str::to_lowercase))
+                .unwrap_or_default();
+            if c["kind"].as_str() == Some("cloud") || HERMES_CLOUD_HOST_SUFFIXES.iter().any(|s| host.ends_with(s)) {
+                found = true;
+            }
+        }
+    }
+    Some(found)
+}
+
+/// hermes_cloud_in over this install's connections.json files; None if they cannot be read (or the
+/// folders were never resolved). A missing file is simply "no connections".
+pub fn hermes_cloud() -> Option<bool> {
+    let dirs = registry_dirs();
+    if dirs.is_empty() {
+        return None;
+    }
+    let texts: Option<Vec<Option<String>>> = dirs.iter().map(|d| crate::registry::read(d).ok()).collect();
+    hermes_cloud_in(&texts?)
+}
+
 /// The `hermes` CLI: CB_LAUNCHER_HERMES_CLI (dev), else the MSIX execution alias
 /// (website/docs/user-guide/windows-native.md:62), else whatever `hermes` is on PATH.
 pub fn hermes_cli() -> PathBuf {
@@ -236,7 +285,7 @@ pub fn credential_sources(cfg: &Value, env_text: &str, auth: &Value, adopt_exter
 #[cfg(test)]
 pub fn build_report(config_yaml: &str, env_text: &str, plugins: Vec<String>, mcp_name: &str,
                     workspace_synced: bool) -> Value {
-    build_report_full(config_yaml, env_text, "", plugins, mcp_name, workspace_synced, &|_| false, Some(true))
+    build_report_full(config_yaml, env_text, "", plugins, mcp_name, workspace_synced, &|_| false, Some(true), Some(false))
 }
 
 /// Hermes's tool lookup mode as Hermes reads it (tools/tool_search.py ToolSearchConfig.from_raw):
@@ -326,7 +375,7 @@ pub fn scopes_section(brains: &Value) -> String {
 #[allow(clippy::too_many_arguments)]
 pub fn build_report_full(config_yaml: &str, env_text: &str, auth_json: &str, plugins: Vec<String>,
                          mcp_name: &str, workspace_synced: bool, external_login: &dyn Fn(&str) -> bool,
-                         plugin_intact: Option<bool>) -> Value {
+                         plugin_intact: Option<bool>, hermes_cloud: Option<bool>) -> Value {
     let cfg: Value = serde_yaml::from_str::<serde_yaml::Value>(config_yaml)
         .ok()
         .and_then(|y| serde_json::to_value(y).ok())
@@ -363,6 +412,7 @@ pub fn build_report_full(config_yaml: &str, env_text: &str, auth_json: &str, plu
         "memory_provider": get(&cfg, &["memory", "provider"]).cloned().unwrap_or(Value::Null),
         "memory_url": env_get(env_text, MEMORY_URL_KEY).unwrap_or_default(),
         "memory_plugin_intact": plugin_intact,
+        "hermes_cloud": hermes_cloud,
     })
 }
 
@@ -461,6 +511,7 @@ pub fn report(policy_mcp_name: &str, workspace_synced: bool) -> Value {
         workspace_synced,
         &external_login_present,
         plugin_intact(&home),
+        hermes_cloud(),
     )
 }
 
@@ -478,8 +529,10 @@ pub fn set_token(token: Option<&str>) -> Result<(), String> {
 pub fn watched_stamp() -> Option<std::time::SystemTime> {
     let home = hermes_home();
     let plugin = home.join("plugins").join(PLUGIN_NAME);
-    [home.join("config.yaml"), home.join(".env"), home.join("auth.json"), home.join("plugins"),
-     plugin.join("__init__.py"), plugin.join("plugin.yaml")]
+    let mut paths = vec![home.join("config.yaml"), home.join(".env"), home.join("auth.json"), home.join("plugins"),
+                         plugin.join("__init__.py"), plugin.join("plugin.yaml")];
+    paths.extend(registry_dirs().iter().map(|d| d.join(crate::registry::FILE_NAME)));
+    paths
         .iter()
         .filter_map(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok())
         .max()
@@ -530,7 +583,7 @@ mod tests {
         let remote = json!({"model": {"provider": "custom", "base_url": "https://llm.example.com/v1"}});
         assert_eq!(credential_sources(&remote, "", &Value::Null, false, &none), vec!["custom_endpoint"]);
         assert!(credential_sources(&json!({}), env, &Value::Null, true, &yes).is_empty()); // no model yet
-        let r = build_report_full("model:\n  provider: anthropic\n", env, "", vec![], "int3_brain", false, &none, None);
+        let r = build_report_full("model:\n  provider: anthropic\n", env, "", vec![], "int3_brain", false, &none, None, Some(false));
         assert!(!r.to_string().contains("sk-secret-value"));
         assert_eq!(r["adopt_external_logins"], true); // missing key = Hermes default
     }
@@ -548,10 +601,34 @@ mod tests {
         install_plugin(&home).unwrap(); // the next launch puts it back
         assert_eq!(plugin_intact(&home), Some(true));
         let r = build_report_full("memory:\n  provider: int3\n", "INT3_MEMORY_URL=https://m.example\n", "", vec![],
-                                  "int3_brain", false, &|_| false, plugin_intact(&home));
+                                  "int3_brain", false, &|_| false, plugin_intact(&home), Some(false));
         assert_eq!((r["memory_provider"].as_str(), r["memory_url"].as_str()), (Some("int3"), Some("https://m.example")));
         assert_eq!(r["memory_plugin_intact"], true);
         let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn a_hermes_cloud_connection_is_reported() {
+        let reg = |conns: &str| Some(format!(r#"{{"version":2,"primary":"local","connections":[{conns}]}}"#));
+        let local = r#"{"id":"local","kind":"local","label":"This device"}"#;
+        let ours = r#"{"id":"cb-x","kind":"remote","label":"int3","url":"http://127.0.0.1:9433"}"#;
+        assert_eq!(hermes_cloud_in(&[reg(local), None]), Some(false)); // a missing file is no connections
+        assert_eq!(hermes_cloud_in(&[reg(&format!("{local},{ours}"))]), Some(false));
+        assert_eq!(hermes_cloud_in(&[]), Some(false));
+        // what Backup & Transfer saves before it uploads (hermes-cloud-agents.ts connectCloudAgent)
+        let cloud = r#"{"id":"c1","kind":"cloud","label":"My agent","url":"https://abc.agents.nousresearch.com","authMode":"oauth"}"#;
+        assert_eq!(hermes_cloud_in(&[reg(local), reg(cloud)]), Some(true)); // in either userData copy
+        // a remote entry at a Cloud host counts, as Hermes counts it (connection-registry.ts:910)
+        let remote = r#"{"id":"r1","kind":"remote","label":"X","url":"https://X.Agents.Staging-NousResearch.com/"}"#;
+        assert_eq!(hermes_cloud_in(&[reg(remote)]), Some(true));
+        // a look-alike host does not
+        let lookalike = r#"{"id":"r2","kind":"remote","label":"Y","url":"https://agents.nousresearch.com.evil.example"}"#;
+        assert_eq!(hermes_cloud_in(&[reg(lookalike)]), Some(false));
+        assert_eq!(hermes_cloud_in(&[Some("{not json".into())]), None); // unreadable: the server refuses
+        let r = build_report_full("", "", "", vec![], "int3_brain", false, &|_| false, None, Some(true));
+        assert_eq!(r["hermes_cloud"], true);
+        let r = build_report_full("", "", "", vec![], "int3_brain", false, &|_| false, None, None);
+        assert_eq!(r["hermes_cloud"], Value::Null);
     }
 
     #[test]

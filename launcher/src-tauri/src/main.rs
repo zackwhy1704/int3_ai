@@ -200,6 +200,7 @@ async fn launch(session: State<'_, Session>, restart: bool) -> Result<Value, Val
 #[tauri::command]
 async fn launch_local(app: tauri::AppHandle, session: State<'_, Session>, restart: bool) -> Result<Value, Value> {
     let install = hermes::detect().ok_or_else(|| fail(format!("Hermes Desktop is not installed. Get it from {HERMES_DOWNLOAD}")))?;
+    local::set_registry_dirs(install.user_data_dirs.clone()); // the report checks connections.json for Hermes Cloud
     let running = hermes::running(&install);
     if running && !restart {
         return Ok(json!({"needs_restart": true}));
