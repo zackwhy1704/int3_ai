@@ -39,6 +39,15 @@ and tells you to choose another model.
   opens a file, its contents go to the AI model you chose, as with any AI assistant. Only point it at
   files you'd be happy to send to that AI provider. A model running on this PC keeps them on this PC.
 
+## Saving company knowledge: the confirmation card
+
+When you ask the assistant to save something **for the company**, Hermes shows a card that names the
+scope it will go into (for example "Company-wide" or "Operations").
+
+- Right scope: choose **Yes**, then **Confirm and continue**. The scope's owner then approves it.
+- **Wrong scope: choose No**, then tell the assistant which scope to use. **Don't use "Other"**: anything
+  typed under Other is discarded, and nothing is saved.
+
 ## Don't use Hermes Cloud backup
 
 Don't use **Move to Hermes Cloud** in Hermes (Settings › Backup & Transfer). It copies your whole Hermes

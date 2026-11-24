@@ -54,7 +54,8 @@ A stopped VM still bills disk and IP, about $9/month.
 
 **1. Infrastructure** (your PC). Idempotent; requests no certificates; prints the static IP.
 ```bash
-INT3_SHA=<reviewed commit on INT3_REF> bash deploy/gcp/infra.sh
+INT3_SHA=<full 40-character SHA of the reviewed commit on INT3_REF> bash deploy/gcp/infra.sh
+# e.g. INT3_SHA=84ca02f673717b24057eea4537ac32b58036f82c bash deploy/gcp/infra.sh
 ```
 The VM then installs Docker, clones this repo at exactly that commit, generates its non-model secrets into Secret Manager
 (`int3-stack-env`), builds the pinned Hermes image, and starts the stack. Follow it with
@@ -116,31 +117,38 @@ Published as a GitHub pre-release (the repo is public): tag `launcher-v0.1.1`, a
 
 ### One time: pin the existing VM (it runs `2bc47f8`, with the OLD update.sh)
 
-The pilot VM is at `2bc47f8`, older than pinned updates. Its `/opt/int3/deploy/gcp/vm/update.sh` is the
-old one: it **ignores any argument** and deploys whatever the branch head is. **Do not run update.sh
-on it** until the steps below have put the new one on disk. This is done once, in the quiet window, as
-the first move to the reviewed SHA (deploy plan step 4). `<sha>` is that reviewed commit.
+The pilot VM is at `2bc47f882a5c99d3e07c1ed09ad24d6c5051e795`, older than pinned updates. Its
+`/opt/int3/deploy/gcp/vm/update.sh` is the old one: it **ignores any argument** and deploys whatever the
+branch head is. **Do not run update.sh on it** until the steps below have put the new one on disk. This is
+done once, in the quiet window, as the first move to the reviewed commit (deploy plan step 4).
+
+**Always write the full 40-character SHA** (never a short one): it names exactly one commit and is
+what `git rev-parse HEAD` prints back, so the before/after check is a plain string compare. The example
+below is the local-mode target reviewed on 2026-11-24.
 
 ```bash
 bash deploy/gcp/ops.sh ssh
 cd /opt/int3
-sudo git rev-parse --short HEAD                      # expect 2bc47f8; stop if not
-SHA=<sha>                                            # the reviewed commit, hex only
-[[ "$SHA" =~ ^[0-9a-f]{7,40}$ ]] || echo "STOP: not a commit SHA"
+sudo git rev-parse HEAD                              # expect 2bc47f882a5c99d3e07c1ed09ad24d6c5051e795; stop if not
+SHA=84ca02f673717b24057eea4537ac32b58036f82c         # the reviewed commit, full 40-character SHA
+[[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || echo "STOP: not a full 40-character SHA"
 sudo git fetch -q origin spike/remote-thin-client     # INT3_REF in config.env
-sudo git rev-parse -q --verify "$SHA^{commit}"        # must print the full SHA; stop if empty
+sudo git rev-parse -q --verify "$SHA^{commit}"        # must print $SHA itself; stop if empty
 sudo git merge-base --is-ancestor "$SHA" FETCH_HEAD && echo "on INT3_REF"   # must print it; stop if not
 sudo git checkout -q --detach "$SHA"                  # files only: nothing restarts yet
 sudo bash deploy/gcp/vm/update.sh "$SHA"              # the NEW update.sh: re-checks, installs units, restarts
+sudo git rev-parse HEAD                              # must print $SHA
 ```
 
-`update.sh` prints `[update] <sha> -> <sha>` (the checkout already moved). From then on every move is
-`update.sh <sha>`. **A rollback to `2bc47f8` brings the old update.sh back**: to move forward again
-after one, repeat this section rather than running update.sh.
+`update.sh` prints `[update] 84ca02f -> 84ca02f` (the checkout already moved). From then on every move
+is `update.sh <full 40-character SHA>`. **A rollback to `2bc47f882a5c99d3e07c1ed09ad24d6c5051e795`
+brings the old update.sh back**: to move forward again after one, repeat this section rather than
+running update.sh.
 
-A **new** VM never needs this: `infra.sh` sets `int3-sha` metadata (`INT3_SHA=<sha> bash
-deploy/gcp/infra.sh`, refused without it), and `vm/startup.sh` clones and checks out exactly that
-commit, refusing if it is missing or not on `INT3_REF` (`vm/test_startup.sh`).
+A **new** VM never needs this: `infra.sh` sets `int3-sha` metadata
+(`INT3_SHA=84ca02f673717b24057eea4537ac32b58036f82c bash deploy/gcp/infra.sh`, always the full
+40-character SHA; refused without one), and `vm/startup.sh` clones and checks out exactly that commit,
+refusing if it is missing or not on `INT3_REF` (`vm/test_startup.sh`).
 
 ## Backups
 
