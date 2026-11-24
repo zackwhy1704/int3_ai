@@ -608,6 +608,19 @@ mod tests {
     }
 
     #[test]
+    fn our_own_int3_entries_never_count_as_hermes_cloud() {
+        // Exactly what this launcher writes into Hermes's connections.json (registry.rs our_entry is
+        // `kind: "remote"`, merge_launch adds Hermes's `local` entry), at a loopback and a hosted URL.
+        for url in ["http://127.0.0.1:9433", "https://0123456789abcdef.app.int3labs.app"] {
+            let entry = crate::registry::our_entry("cb-brindlewood-priya", "int3 - priya@brindlewood", url, "cb_dt_x");
+            let written = crate::registry::merge_launch(None, entry).unwrap();
+            assert_eq!(hermes_cloud_in(&[Some(written.clone())]), Some(false), "{url}");
+            let signed_out = crate::registry::merge_signout(Some(&written)).unwrap();
+            assert_eq!(hermes_cloud_in(&[signed_out]), Some(false), "{url} after sign-out");
+        }
+    }
+
+    #[test]
     fn a_hermes_cloud_connection_is_reported() {
         let reg = |conns: &str| Some(format!(r#"{{"version":2,"primary":"local","connections":[{conns}]}}"#));
         let local = r#"{"id":"local","kind":"local","label":"This device"}"#;
