@@ -18,6 +18,9 @@ model.
    [hermes-agent.nousresearch.com/desktop](https://hermes-agent.nousresearch.com/desktop), which
    opens the Microsoft Store. You do not need to set Hermes up or sign in to anything in it.
 2. **Install int3.** Download `int3_<version>_x64-setup.exe` from the link we sent.
+   - First check **Windows Security › App & browser control › Smart App Control settings**. If it is
+     **On**, stop and tell us: Windows blocks the installer, with no "Run anyway" option, until we ship a
+     code-signed version. **Evaluation** or **Off**: carry on.
    - Windows will show **"Windows protected your PC"**. That is because this early version is not
      code-signed yet.
    - Click **More info**, check it says *int3_…_x64-setup.exe*, then click **Run anyway**.

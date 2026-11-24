@@ -4,6 +4,21 @@ In local mode the assistant runs **on your own PC**, inside the official Hermes 
 and your assistant's memory stay on int3's server. Open the **int3** app, sign in with your invite, and
 click **Launch Hermes**. int3 sets Hermes up for you each time.
 
+## Before you install: check Smart App Control
+
+1. Open **Windows Security** (press the Windows key and type `Windows Security`).
+2. Click **App & browser control**, then **Smart App Control settings**.
+3. What it says decides what happens next:
+   - **On**: stop here and tell us. Windows blocks the int3 installer, and gives you no "Run anyway"
+     option, until we ship a code-signed version. Please don't switch Smart App Control off just for
+     int3; Windows may not let you switch it back on.
+   - **Evaluation** or **Off**: carry on. Windows will probably show **"Windows protected your PC"**
+     when you open the int3 installer, because this early version isn't code-signed yet. Click
+     **More info**, check it says *int3_…_x64-setup.exe*, then click **Run anyway**.
+
+If a message says **Smart App Control blocked** int3 (now or later, for example after Windows switches
+Evaluation to On), there is no way past it. Tell us.
+
 ## Choosing the AI model
 
 Click **Choose AI model** in int3. It opens Hermes's Providers screen. Use one of these:
@@ -23,6 +38,14 @@ and tells you to choose another model.
 - **It can read files anywhere you can.** Reading is not limited to the workspace. When the assistant
   opens a file, its contents go to the AI model you chose, as with any AI assistant. Only point it at
   files you'd be happy to send to that AI provider. A model running on this PC keeps them on this PC.
+
+## Don't use Hermes Cloud backup
+
+Don't use **Move to Hermes Cloud** in Hermes (Settings › Backup & Transfer). It copies your whole Hermes
+setup to Nous's cloud, including your int3 sign-in and your chats, which contain company answers. While
+Hermes is connected to a Hermes Cloud agent, int3 turns the company brain off and tells you why; remove
+that connection in Hermes, then click **Launch Hermes** in int3 again. A plain **Backup** file saved on
+this PC also contains your int3 sign-in, so don't share it.
 
 ## Memory
 

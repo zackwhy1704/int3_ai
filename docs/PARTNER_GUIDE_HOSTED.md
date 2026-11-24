@@ -28,12 +28,20 @@ If you have Windows 10 or an older version, stop and tell us: Hermes won't insta
 
 1. Go to the [int3 download page](https://github.com/zackwhy1704/int3_ai/releases/tag/launcher-v0.1.1).
 2. Under **Assets**, click `int3_0.1.1_x64-setup.exe`.
-3. Open the downloaded file. Windows will probably show **"Windows protected your PC"**, because this
+3. **Before you open it, check Smart App Control:** open **Windows Security** › **App & browser
+   control** › **Smart App Control settings**.
+   - **On**: stop and tell us. Windows blocks the int3 installer, with no "Run anyway" option, until
+     we ship a code-signed version. Please don't switch Smart App Control off just for int3; Windows
+     may not let you switch it back on.
+   - **Evaluation** or **Off**: carry on to the next step.
+4. Open the downloaded file. Windows will probably show **"Windows protected your PC"**, because this
    early version isn't code-signed yet:
    - Click **More info**.
    - Check it says **int3_0.1.1_x64-setup.exe**.
    - Click **Run anyway**.
-4. It installs for your Windows account only. It shouldn't ask for an administrator password.
+
+   If instead a message says **Smart App Control blocked** it, there is no way past it: tell us.
+5. It installs for your Windows account only. It shouldn't ask for an administrator password.
 
 ## 4. Sign in and launch
 

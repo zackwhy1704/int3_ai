@@ -36,9 +36,11 @@ data-at-rest requirement (options: wipe on sign-out, ask Nous for a setting).
 
 ## Install (partners)
 
-See `docs/PARTNER_GUIDE.md`. Short version: download `int3_<version>_x64-setup.exe`, click
-**More info → Run anyway** on the SmartScreen prompt (unsigned), install the official Hermes
-Desktop (Windows 11 22H2+), paste your invite link, **Launch Hermes**.
+See `docs/PARTNER_GUIDE.md`. Short version: check **Windows Security › App & browser control ›
+Smart App Control**; if it is **On**, the unsigned installer is blocked outright (no "Run anyway") until
+we ship a signed build (`docs/CODE_SIGNING.md`). If it is Evaluation or Off: download
+`int3_<version>_x64-setup.exe`, click **More info → Run anyway** on the SmartScreen prompt (unsigned),
+install the official Hermes Desktop (Windows 11 22H2+), paste your invite link, **Launch Hermes**.
 
 ## Build and test (developers)
 
@@ -100,7 +102,11 @@ While the launcher runs, it re-reports within about 15 s of any change to `confi
 
 ## Known limits (alpha)
 
-- Windows only. Unsigned installer (SmartScreen click-through); no auto-update.
+- Windows only. Unsigned installer: a SmartScreen click-through where Smart App Control is Off or in
+  Evaluation, and **blocked with no override where it is On** (seen on the Windows 11 dev PC: an unsigned
+  binary fails with "An Application Control policy has blocked this file"). No auto-update.
+- Local mode refuses the brain while Hermes's `connections.json` holds a Hermes Cloud agent (v0.23.3
+  Settings › Backup & Transfer uploads `.env` and chats; docs/LOCAL_MODE_DESIGN.md §3.7).
 - Packaged Hermes is detected via MSIX only (Store / out-of-store App Installer), which needs
   Windows 11 22H2. Hermes on Windows 10 exists only as Nous's source install (`install.ps1`),
   which the launcher does not detect.
