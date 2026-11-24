@@ -83,6 +83,10 @@ def test_control_v4_is_applied_by_migrate_and_required_by_the_commands(capsys, r
             c.execute("ALTER TABLE brain_audit ADD CONSTRAINT brain_audit_outcome_check"
                       f" CHECK (outcome IN {V3_OUTCOMES}) NOT VALID")
             c.execute("DELETE FROM schema_migrations WHERE version > 3")
+            # A freshly built DB records only the version it was created at, so build the v1-v3 history
+            # here instead of assuming a long-lived dev DB has it.
+            for v in (1, 2, 3):
+                migrations.record(c, v)
         msg = _refused("set-launch-mode", "--tenant", TENANT, "--mode", "local")
         assert msg.startswith("the control database is at v3; this code needs v4.") and "migrate" in msg
         assert "control database is at v3" in _refused("set-credential-sources", "--tenant", TENANT, "api_key")
