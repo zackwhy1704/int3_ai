@@ -111,7 +111,8 @@ environment: `LOCAL_MCP_URL=https://<mcp>.app.int3labs.app/mcp` and
 3. **Safety copies:**
    - `sudo systemctl start int3-backup` and confirm the new `gs://…/<stamp>/`;
    - a disk snapshot: `gcloud compute disks snapshot int3-pilot --snapshot-names pre-local-<date>`.
-4. **Update to the pinned SHA:** `update.sh <sha>`. That runs control `init` (CONTROL_VERSION 4) and
+4. **Update to the pinned SHA:** the first time, follow RUNBOOK "One time: pin the existing VM" (the
+   VM's own update.sh at `2bc47f8` is the old, unpinned one); it ends with `update.sh <sha>`. That runs control `init` (CONTROL_VERSION 4) and
    restarts the shared stack. Per-user Hermes containers keep running.
 5. **Migrate tenants:** `app.tenants.admin migrate` (zack and marcuspilot v3 → v5). Additive:
    `user_memories` and `memory_audit` are new tables, `tenants.cancelled_at` and `allowed_credential_sources`
@@ -132,6 +133,7 @@ environment: `LOCAL_MCP_URL=https://<mcp>.app.int3labs.app/mcp` and
 
 - **Trigger:** any hosted check in step 7 fails, or brain errors appear in `docker logs int3-brain-1`.
 - **Code:** run `update.sh 2bc47f8`. It rebuilds the brain at the old code and restarts the shared stack.
+  That puts the old, unpinned update.sh back on disk: a later move forward repeats the RUNBOOK one-time pin.
   The old code ignores the added tables and columns: migrations only add, and old code does not check
   the schema version (`backend/app/migrations.py`).
 - **Hosts:** remove the two new routes and re-render Caddy. Local-mode launchers then fail closed:

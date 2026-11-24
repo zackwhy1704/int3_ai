@@ -54,9 +54,9 @@ A stopped VM still bills disk and IP, about $9/month.
 
 **1. Infrastructure** (your PC). Idempotent; requests no certificates; prints the static IP.
 ```bash
-bash deploy/gcp/infra.sh
+INT3_SHA=<reviewed commit on INT3_REF> bash deploy/gcp/infra.sh
 ```
-The VM then installs Docker, clones this repo, generates its non-model secrets into Secret Manager
+The VM then installs Docker, clones this repo at exactly that commit, generates its non-model secrets into Secret Manager
 (`int3-stack-env`), builds the pinned Hermes image, and starts the stack. Follow it with
 `bash deploy/gcp/ops.sh ssh -- sudo journalctl -u int3-stack -f`.
 
@@ -113,6 +113,34 @@ Published as a GitHub pre-release (the repo is public): tag `launcher-v0.1.1`, a
 | Update | `sudo bash /opt/int3/deploy/gcp/vm/update.sh <commit-sha>` moves to that one reviewed commit (it must be on `INT3_REF`; a branch name, a typo or a commit from elsewhere is refused before anything changes) and restarts the shared stack. The VM never updates itself. A change to the gated image reaches a user only when that user is re-provisioned. |
 | Revoke a person | `sudo docker exec … python -m app.launcher.admin revoke-user --tenant T --user U`; their tokens stop within about 30 s |
 | Record a Hermes build | `app.launcher.admin record-build --platform windows --package-version V --release v0.22.6` |
+
+### One time: pin the existing VM (it runs `2bc47f8`, with the OLD update.sh)
+
+The pilot VM is at `2bc47f8`, older than pinned updates. Its `/opt/int3/deploy/gcp/vm/update.sh` is the
+old one: it **ignores any argument** and deploys whatever the branch head is. **Do not run update.sh
+on it** until the steps below have put the new one on disk. This is done once, in the quiet window, as
+the first move to the reviewed SHA (deploy plan step 4). `<sha>` is that reviewed commit.
+
+```bash
+bash deploy/gcp/ops.sh ssh
+cd /opt/int3
+sudo git rev-parse --short HEAD                      # expect 2bc47f8; stop if not
+SHA=<sha>                                            # the reviewed commit, hex only
+[[ "$SHA" =~ ^[0-9a-f]{7,40}$ ]] || echo "STOP: not a commit SHA"
+sudo git fetch -q origin spike/remote-thin-client     # INT3_REF in config.env
+sudo git rev-parse -q --verify "$SHA^{commit}"        # must print the full SHA; stop if empty
+sudo git merge-base --is-ancestor "$SHA" FETCH_HEAD && echo "on INT3_REF"   # must print it; stop if not
+sudo git checkout -q --detach "$SHA"                  # files only: nothing restarts yet
+sudo bash deploy/gcp/vm/update.sh "$SHA"              # the NEW update.sh: re-checks, installs units, restarts
+```
+
+`update.sh` prints `[update] <sha> -> <sha>` (the checkout already moved). From then on every move is
+`update.sh <sha>`. **A rollback to `2bc47f8` brings the old update.sh back**: to move forward again
+after one, repeat this section rather than running update.sh.
+
+A **new** VM never needs this: `infra.sh` sets `int3-sha` metadata (`INT3_SHA=<sha> bash
+deploy/gcp/infra.sh`, refused without it), and `vm/startup.sh` clones and checks out exactly that
+commit, refusing if it is missing or not on `INT3_REF` (`vm/test_startup.sh`).
 
 ## Backups
 

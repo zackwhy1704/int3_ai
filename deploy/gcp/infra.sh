@@ -69,6 +69,11 @@ done
 
 echo "== VM: $INT3_VM ($INT3_MACHINE, ${INT3_DISK_GB} GB) =="
 if ! exists "${G[@]}" compute instances describe "$INT3_VM" --zone "$GCP_ZONE"; then
+  # The VM itself re-checks the commit is on INT3_REF at first boot (vm/startup.sh); this only stops
+  # creating a VM that would refuse to deploy.
+  [[ "$INT3_SHA" =~ ^[0-9a-f]{7,40}$ ]] || {
+    echo "refused: set INT3_SHA to the reviewed commit on $INT3_REF the new VM must run" \
+         "(INT3_SHA=<sha> bash deploy/gcp/infra.sh); no VM created" >&2; exit 1; }
   startup="$HERE/vm/startup.sh"
   "${G[@]}" compute instances create "$INT3_VM" --zone "$GCP_ZONE" \
     --machine-type "$INT3_MACHINE" \
@@ -78,7 +83,7 @@ if ! exists "${G[@]}" compute instances describe "$INT3_VM" --zone "$GCP_ZONE"; 
     --boot-disk-size "${INT3_DISK_GB}GB" --boot-disk-type pd-balanced \
     --shielded-secure-boot --shielded-vtpm --shielded-integrity-monitoring \
     --deletion-protection \
-    --metadata "enable-oslogin=TRUE,block-project-ssh-keys=TRUE,int3-repo=$INT3_REPO,int3-ref=$INT3_REF" \
+    --metadata "enable-oslogin=TRUE,block-project-ssh-keys=TRUE,int3-repo=$INT3_REPO,int3-ref=$INT3_REF,int3-sha=$INT3_SHA" \
     --metadata-from-file "startup-script=$(cygpath -w "$startup" 2>/dev/null || echo "$startup")" >/dev/null
 fi
 
