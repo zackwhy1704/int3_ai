@@ -163,13 +163,14 @@ async def validate_citations(retrieval_id: str, claim_ids: list[int], ctx: Conte
 
 
 def _propose_message(scope: str, scope_name: str, statement: str, quote: str) -> str:
-    # Hermes v0.23.1 shows elicitations as yes/no only (an accept carries no fields:
-    # tools/mcp_tool_sampling.py:293), so the scope cannot be picked on the card. It is named here,
-    # and this exact scope is the one stored if the user confirms.
-    return (f"Capture into the {scope_name} scope ({scope}) — this exact statement will be stored "
+    # Hermes shows this card as yes/no (v0.23.1 an approval card; v0.23.3 Desktop a clarify card with
+    # Yes / No / Other, tools/mcp_elicitation_form.py:319-328), so the scope cannot be picked on it. It
+    # is named here, and this exact scope is the one stored if the user confirms. The way out of a
+    # wrong scope comes first, worded with v0.23.3's own button ("No"; seen live 2026-11-24).
+    return (f"Wrong scope? Choose No and tell the assistant which scope to use.\n"
+            f"Capture into the {scope_name} scope ({scope}) — this exact statement will be stored "
             f"and searchable there:\n\n    {statement}\n\n"
-            f"Your evidence (not stored as the searchable text): {quote}\n\n"
-            f"Wrong scope? Choose Reject and tell the assistant which scope to use.\n\nConfirm?")
+            f"Your evidence (not stored as the searchable text): {quote}\n\nConfirm?")
 
 
 def _approve_message(d: dict) -> str:

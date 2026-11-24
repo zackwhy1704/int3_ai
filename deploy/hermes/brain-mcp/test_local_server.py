@@ -363,8 +363,11 @@ def test_card_names_the_scope_that_is_stored(server):
     sent = [(p, b) for p, b in BODIES[before:] if p.startswith("/v1/propos")]
     assert [p for p, _ in sent] == ["/v1/proposal_preview", "/v1/propose_claim"]
     assert sent[0][1]["scope"] == "operations"           # checked before the card
-    assert "Capture into the Operations scope (operations)" in shown[0]
-    assert "Wrong scope? Choose Reject" in shown[0]
+    lines = shown[0].splitlines()
+    # v0.23.3 Desktop's card offers Yes / No (live run 2026-11-24): name the button it really has
+    assert lines[0] == "Wrong scope? Choose No and tell the assistant which scope to use."
+    assert lines[1].startswith("Capture into the Operations scope (operations)")  # scope line second
+    assert shown[0].count("Wrong scope?") == 1
     assert sent[1][1]["scope"] == "operations"           # the stored scope is the one on the card
 
 
