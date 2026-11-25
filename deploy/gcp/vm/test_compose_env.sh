@@ -13,8 +13,9 @@ bad() { fail=$((fail+1)); echo "FAIL $1"; }
 
 . "$HERE/lib.sh"
 REPO_ROOT="$T/repo"; URLS_ENV="$T/local-urls.env"           # the copy, never /var/lib/int3
-mkdir -p "$REPO_ROOT/deploy/hermes" "$REPO_ROOT/deploy/gcp"
+mkdir -p "$REPO_ROOT/deploy/hermes/gated" "$REPO_ROOT/deploy/gcp"
 cp "$SRC/deploy/hermes/docker-compose.yml" "$REPO_ROOT/deploy/hermes/"
+cp "$SRC"/deploy/hermes/gated/*.allowlist "$REPO_ROOT/deploy/hermes/gated/"   # compose() hashes them
 cp "$SRC/deploy/gcp/compose.hosted.yml" "$REPO_ROOT/deploy/gcp/"
 # What load_secrets puts in the environment on the VM (dummies; compose config only interpolates them).
 export ADMIN_DB_PASSWORD=t APP_CONTROL_PASSWORD=t TENANT_DB_KEY=t GATEWAY_DB_PASSWORD=t TENANT_KEY_KEK=t

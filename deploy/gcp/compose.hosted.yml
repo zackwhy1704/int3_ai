@@ -22,10 +22,16 @@ services:
       # local edge (memory API). Required: no silent fallback to the base file's loopback defaults.
       LOCAL_MCP_URL: ${LOCAL_MCP_URL:?set by stack-up.sh; use lib.sh compose() (reads /var/lib/int3/local-urls.env)}
       LOCAL_MEMORY_URL: ${LOCAL_MEMORY_URL:?set by stack-up.sh; use lib.sh compose() (reads /var/lib/int3/local-urls.env)}
+  # The edges load their allowlist once at start; lib.sh compose() passes each file's sha256 so a changed
+  # allowlist changes this label and `compose up` recreates that edge (vm/test_edge_reload.sh).
   launcher-edge:
     <<: *restart
+    labels:
+      int3.allowlist.sha256: ${LAUNCHER_EDGE_ALLOWLIST_SHA256:?set by lib.sh compose()}
   launcher-edge-local:
     <<: *restart
+    labels:
+      int3.allowlist.sha256: ${LAUNCHER_EDGE_LOCAL_ALLOWLIST_SHA256:?set by lib.sh compose()}
   brain-mcp-local:
     <<: *restart
     # Exactly one process: MCP sessions and pending confirmation cards live in its memory (base file

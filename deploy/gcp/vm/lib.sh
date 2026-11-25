@@ -50,11 +50,18 @@ write_urls_env() {
 # runs both. $URLS_ENV, when present, supplies the public URLs; anything exported in the shell (stack-up.sh)
 # wins over it. Without the file and without exports, compose fails on the first missing URL with the
 # hint from compose.hosted.yml, so a first boot still cannot start with missing values.
+#
+# The two launcher edges read their allowlist once, at start, from a bind-mounted file, and compose does not
+# notice a changed file. So every call passes each allowlist's sha256 as a label (compose.hosted.yml): a
+# changed allowlist changes the label, and `compose up` recreates exactly that edge.
 compose() {
-  local envf=()
+  local envf=() g="$REPO_ROOT/deploy/hermes/gated"
   [ -r "$URLS_ENV" ] && envf=(--env-file "$URLS_ENV")
-  (cd "$REPO_ROOT" && docker compose "${envf[@]}" --profile key-intake --profile local-mode \
-    -f deploy/hermes/docker-compose.yml -f deploy/gcp/compose.hosted.yml "$@")
+  (cd "$REPO_ROOT" &&
+    LAUNCHER_EDGE_ALLOWLIST_SHA256="$(sha256sum < "$g/launcher-edge.allowlist" | cut -c1-64)" \
+    LAUNCHER_EDGE_LOCAL_ALLOWLIST_SHA256="$(sha256sum < "$g/launcher-edge-local.allowlist" | cut -c1-64)" \
+    docker compose "${envf[@]}" --profile key-intake --profile local-mode \
+      -f deploy/hermes/docker-compose.yml -f deploy/gcp/compose.hosted.yml "$@")
 }
 
 render_caddy() {
