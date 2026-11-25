@@ -31,14 +31,93 @@ pub const PLUGIN_FILES: [(&str, &str); 2] = [
     ("plugin.yaml", include_str!("../../hermes-plugin/int3/plugin.yaml")),
 ];
 
-/// HERMES_HOME as Store Desktop resolves it: %LOCALAPPDATA%\hermes (apps/desktop/electron/data-paths.mjs
-/// :26-33 @v0.23.1; the MSIX writes it unvirtualized, electron-builder.config.cjs:276-278).
-/// CB_LAUNCHER_HERMES_HOME isolates tests and dev runs.
+/// HERMES_HOME exactly as Store Desktop resolves it (resolve_desktop_home below), so the launcher configures,
+/// reads back and reports the home Hermes really uses. The MSIX writes it unvirtualized
+/// (electron-builder.config.cjs:276-278). CB_LAUNCHER_HERMES_HOME isolates tests and dev runs.
 pub fn hermes_home() -> PathBuf {
     if let Ok(h) = std::env::var("CB_LAUNCHER_HERMES_HOME") {
         return PathBuf::from(h);
     }
-    PathBuf::from(std::env::var("LOCALAPPDATA").unwrap_or_default()).join("hermes")
+    let var = |k: &str| std::env::var(k).ok();
+    let user_profile = PathBuf::from(var("USERPROFILE").unwrap_or_default());
+    resolve_desktop_home(&var, &user_profile, &|| user_registry_env("HERMES_HOME"), &|p: &Path| p.is_dir())
+}
+
+/// Hermes Desktop's own resolution (apps/desktop/electron/data-paths.mjs:41-66 @v0.23.3), in its order:
+/// 1. HERMES_HOME in the environment (a home inside `profiles/` means its parent);
+/// 2. HERMES_DESKTOP_USER_DATA_DIR → `<dir>\hermes-home` (fresh-install rehearsals);
+/// 3. only if HERMES_HOME is unset (an explicit empty value opts out): the user's registry HERMES_HOME
+///    (Explorer can miss a `setx`);
+/// 4. `%LOCALAPPDATA%\hermes` + HERMES_DATA_DIR_SUFFIX;
+/// 5. the legacy `~\.hermes`, when 4 does not exist, `~\.hermes` does, and there is no suffix. A PC that
+///    once had the Hermes CLI (or any `~\.hermes`) and no `%LOCALAPPDATA%\hermes` runs Store Hermes there.
+pub fn resolve_desktop_home(var: &dyn Fn(&str) -> Option<String>, user_profile: &Path,
+                            registry_home: &dyn Fn() -> Option<String>, dir_exists: &dyn Fn(&Path) -> bool) -> PathBuf {
+    fn root(p: &str) -> PathBuf {
+        let p = PathBuf::from(p);
+        match p.parent() {
+            Some(parent) if parent.file_name().is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case("profiles")) => {
+                parent.parent().map(Path::to_path_buf).unwrap_or(p)
+            }
+            _ => p,
+        }
+    }
+    let home_env = var("HERMES_HOME");
+    if let Some(h) = home_env.as_deref().filter(|h| !h.is_empty()) {
+        return root(h);
+    }
+    if let Some(d) = var("HERMES_DESKTOP_USER_DATA_DIR").filter(|d| !d.is_empty()) {
+        return PathBuf::from(d).join("hermes-home");
+    }
+    if home_env.is_none() {
+        if let Some(h) = registry_home().filter(|h| !h.trim().is_empty()) {
+            return root(h.trim());
+        }
+    }
+    let suffix = var("HERMES_DATA_DIR_SUFFIX").unwrap_or_default();
+    let base = var("LOCALAPPDATA").map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+        .map(PathBuf::from).unwrap_or_else(|| user_profile.join("AppData").join("Local"));
+    let default = base.join(format!("hermes{suffix}"));
+    if suffix.is_empty() {
+        let legacy = user_profile.join(".hermes");
+        if !dir_exists(&default) && dir_exists(&legacy) {
+            return legacy;
+        }
+    }
+    default
+}
+
+/// A user environment variable from HKCU\Environment (what `setx` writes), %VAR% references expanded.
+/// None if unset or unreadable. Windows only; elsewhere None.
+fn user_registry_env(name: &str) -> Option<String> {
+    #[cfg(windows)]
+    {
+        let out = Command::new("reg").args(["query", r"HKCU\Environment", "/v", name])
+            .creation_flags(CREATE_NO_WINDOW).output().ok()?;
+        let text = String::from_utf8_lossy(&out.stdout);
+        let line = text.lines().find(|l| l.trim_start().to_lowercase().starts_with(&name.to_lowercase()))?;
+        let value = line.split("REG_").nth(1)?.split_once(char::is_whitespace)?.1.trim().to_string();
+        let mut out = String::new();
+        let mut rest = value.as_str();
+        while let Some(start) = rest.find('%') {
+            out.push_str(&rest[..start]);
+            match rest[start + 1..].find('%') {
+                Some(end) => {
+                    let key = &rest[start + 1..start + 1 + end];
+                    out.push_str(&std::env::var(key).unwrap_or_else(|_| format!("%{key}%")));
+                    rest = &rest[start + end + 2..];
+                }
+                None => { out.push_str(&rest[start..]); rest = ""; }
+            }
+        }
+        out.push_str(rest);
+        Some(out)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = name;
+        None
+    }
 }
 
 /// Hermes Desktop's userData folders (where its connections.json lives), resolved once per launch from
@@ -605,6 +684,44 @@ mod tests {
         assert_eq!((r["memory_provider"].as_str(), r["memory_url"].as_str()), (Some("int3"), Some("https://m.example")));
         assert_eq!(r["memory_plugin_intact"], true);
         let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn hermes_home_resolves_exactly_as_desktop_does() {
+        // data-paths.mjs:41-66 @v0.23.3, case by case. Seen live on 2026-11-25: Store Hermes 2026.7855.419.0
+        // used ~\.hermes because %LOCALAPPDATA%\hermes did not exist and ~\.hermes did.
+        let profile = Path::new(r"C:\Users\p");
+        let env = |pairs: &'static [(&'static str, &'static str)]| move |k: &str| {
+            pairs.iter().find(|(n, _)| *n == k).map(|(_, v)| v.to_string())
+        };
+        let la = &[("LOCALAPPDATA", r"C:\Users\p\AppData\Local")][..];
+        let none = || None;
+        let nothing = |_: &Path| false;
+        let only = |p: &'static str| move |q: &Path| q == Path::new(p);
+        let both = |q: &Path| q == Path::new(r"C:\Users\p\.hermes") || q == Path::new(r"C:\Users\p\AppData\Local\hermes");
+        // fresh PC: the default, even though nothing exists yet
+        assert_eq!(resolve_desktop_home(&env(la), profile, &none, &nothing), Path::new(r"C:\Users\p\AppData\Local\hermes"));
+        // legacy ~\.hermes and no default: Hermes uses the legacy home
+        assert_eq!(resolve_desktop_home(&env(la), profile, &none, &only(r"C:\Users\p\.hermes")), Path::new(r"C:\Users\p\.hermes"));
+        // both exist: the default wins
+        assert_eq!(resolve_desktop_home(&env(la), profile, &none, &both), Path::new(r"C:\Users\p\AppData\Local\hermes"));
+        // HERMES_HOME wins over everything; a home inside profiles\ means its parent
+        let set = &[("HERMES_HOME", r"D:\h"), ("LOCALAPPDATA", r"C:\Users\p\AppData\Local")][..];
+        assert_eq!(resolve_desktop_home(&env(set), profile, &|| Some(r"E:\reg".into()), &both), Path::new(r"D:\h"));
+        let prof = &[("HERMES_HOME", r"D:\h\profiles\work")][..];
+        assert_eq!(resolve_desktop_home(&env(prof), profile, &none, &nothing), Path::new(r"D:\h"));
+        // the user registry value, only when HERMES_HOME is unset; an explicit empty HERMES_HOME opts out
+        assert_eq!(resolve_desktop_home(&env(la), profile, &|| Some(r"E:\reg".into()), &both), Path::new(r"E:\reg"));
+        let empty = &[("HERMES_HOME", ""), ("LOCALAPPDATA", r"C:\Users\p\AppData\Local")][..];
+        assert_eq!(resolve_desktop_home(&env(empty), profile, &|| Some(r"E:\reg".into()), &nothing), Path::new(r"C:\Users\p\AppData\Local\hermes"));
+        // a fresh-install rehearsal's userData dir
+        let ud = &[("HERMES_DESKTOP_USER_DATA_DIR", r"F:\ud")][..];
+        assert_eq!(resolve_desktop_home(&env(ud), profile, &none, &both), Path::new(r"F:\ud\hermes-home"));
+        // a suffix run never falls back to the legacy home
+        let sfx = &[("HERMES_DATA_DIR_SUFFIX", "-dev"), ("LOCALAPPDATA", r"C:\Users\p\AppData\Local")][..];
+        assert_eq!(resolve_desktop_home(&env(sfx), profile, &none, &only(r"C:\Users\p\.hermes")), Path::new(r"C:\Users\p\AppData\Local\hermes-dev"));
+        // no LOCALAPPDATA: derived from the profile
+        assert_eq!(resolve_desktop_home(&env(&[]), profile, &none, &nothing), Path::new(r"C:\Users\p\AppData\Local\hermes"));
     }
 
     #[test]

@@ -95,7 +95,7 @@ While the launcher runs, it re-reports within about 15 s of any change to `confi
 
 | Dev/test override | Default |
 |---|---|
-| `CB_LAUNCHER_HERMES_HOME` | `%LOCALAPPDATA%\hermes` |
+| `CB_LAUNCHER_HERMES_HOME` | where Hermes Desktop itself puts it (`local.rs` `resolve_desktop_home`): `HERMES_HOME`, else the user's registry `HERMES_HOME`, else `%LOCALAPPDATA%\hermes`, else a legacy `~\.hermes` if only that exists |
 | `CB_LAUNCHER_HERMES_CLI` | the MSIX alias `%LOCALAPPDATA%\Microsoft\WindowsApps\hermes.exe`, else `hermes` |
 | `CB_LAUNCHER_WORKSPACE` | `%USERPROFILE%\int3-workspace` |
 | `CB_LAUNCHER_HERMES_SCHEME` | `hermes` (dev Desktop registers `hermes-dev`) |
