@@ -101,7 +101,7 @@ messages *in* (Teams, WhatsApp Business, LINE, SMS) come later, through our serv
 |---|---|
 | Brain token kind `cb_bt_` (24 h), `tenants.launch_mode`, `launcher_posture`, `brain_audit` | `backend/app/control_schema.sql`, `backend/app/launcher/tokens.py` |
 | Policy + server-side verdict | `backend/app/launcher/local_policy.py` |
-| `/launcher/local/policy`, `/posture`, `/launch` (edge-allowlisted) | `backend/app/launcher/routes.py`, `deploy/hermes/gated/launcher-edge.allowlist` |
+| `/launcher/local/policy`, `/posture`, `/launch` (on the local edge only) | `backend/app/launcher/routes.py`, `deploy/hermes/gated/launcher-edge-local.allowlist` (the hosted `launcher-edge.allowlist` refuses them) |
 | Brain-token auth on `/v1`: live revocation, posture, limits, route allowlist, audit | `backend/app/launcher/brain_auth.py`, `backend/app/auth/principal.py`, `backend/app/api/v1.py` |
 | Multi-user MCP endpoint (no own credential) | `deploy/hermes/brain-mcp/local_server.py`, compose profile `local-mode` |
 | Launcher local mode: apply, read back, report, token, start, file watcher, Choose AI model | `launcher/src-tauri/src/local.rs`, `main.rs`, `ui/` |
@@ -141,7 +141,7 @@ messages *in* (Teams, WhatsApp Business, LINE, SMS) come later, through our serv
 |---|---|
 | `user_memories` per tenant DB (TENANT_VERSION 4), runtime role SELECT/INSERT/DELETE | `backend/app/schema.sql`, `backend/app/tenants/admin.py`, `backend/app/migrations.py` |
 | `tenants.cancelled_at`, `memory_audit` (counts only, never content; CONTROL_VERSION 3) | `backend/app/control_schema.sql` |
-| save / recall / forget (brain token, same live gate and limits as the brain); list / delete one / delete all (launcher token) | `backend/app/launcher/memory.py`, `routes.py` (`/launcher/local/memory*`, edge-allowlisted) |
+| save / recall / forget (brain token, same live gate and limits as the brain); list / delete one / delete all (launcher token) | `backend/app/launcher/memory.py`, `routes.py` (`/launcher/local/memory*`, local edge only) |
 | Cancel + retention purge: `cancel-tenant` revokes every device at once, and brain tokens of a cancelled tenant are refused; `purge-memories` deletes memories `MEMORY_RETENTION_DAYS` (default 30) after cancellation and audits it | `backend/app/launcher/admin.py` |
 | Hermes plugin `int3` (stdlib + Hermes's `MemoryProvider`): tools `int3_remember` / `int3_recall` / `int3_forget`, recall before each turn (3 s cap), no transcript upload, writes only from the primary chat | `launcher/hermes-plugin/int3/` |
 | Launcher ships the plugin inside the binary and installs it before setting `memory.provider: int3`; writes `INT3_MEMORY_URL`; reports provider, URL and whether the files still match | `launcher/src-tauri/src/local.rs` |

@@ -95,35 +95,47 @@ environment: `LOCAL_MCP_URL=https://<mcp>.app.int3labs.app/mcp` and
 
 ## 4. Steps (owner runs, or approves me running each)
 
-0. **Pin the VM** (code change, reviewed separately):
+Status as of 2026-11-25. "Built" names the commit that added it on `spike/remote-thin-client`; nothing
+from step 4 on has been run on the VM.
+
+0. **Pin the VM.** **Built** in `63fb8a3`; first-boot pin added in `1e12b94`:
    - `vm/update.sh` takes an explicit commit (`update.sh <sha>`) and refuses to run without one;
    - `config.env` keeps the branch only as the fetch source.
-1. **Build before touching the VM:**
+1. **Build before touching the VM.** `63fb8a3` was titled "steps 0 and 1" but built only the first item;
+   the rest is the B0 commit after `7d7b46f`:
    - admin commands `set-launch-mode --tenant T --mode local|hosted` and
-     `set-credential-sources --tenant T a,b,c` (today only tests can set them);
-   - the split allowlists (`launcher-edge.allowlist` hosted-only, `launcher-edge-local.allowlist`);
-   - `launcher-edge-local` + `brain-mcp-local` in `compose.hosted.yml`;
-   - `route_id local|mcp` in `stack-up.sh`.
+     `set-credential-sources --tenant T a,b,c`: **built** in `63fb8a3`;
+   - the split allowlists (`launcher-edge.allowlist` hosted-only, `launcher-edge-local.allowlist`):
+     **built** in B0 (`gated/test_route_proxy.py` proves each edge refuses the other's routes);
+   - `launcher-edge-local` + `brain-mcp-local` in `compose.hosted.yml`, the brain's `LOCAL_MCP_URL` /
+     `LOCAL_MEMORY_URL` required: **built** in B0;
+   - `route_id local|mcp` in `stack-up.sh`: **built** in B0 (`vm/test_routes.sh`: existing ids unchanged).
 
-   Full server suite plus a local-stack E2E. Push, scan, and record the SHA.
+   Full server suite plus a local-stack E2E on the hosted overlay: **done** for B0. Its SHA is the VM target.
 2. **Quiet window** (Singapore evening). Announce to marcuspilot only if they are active: hosted
-   sessions drop for about one minute.
-3. **Safety copies:**
-   - `sudo systemctl start int3-backup` and confirm the new `gs://…/<stamp>/`;
-   - a disk snapshot: `gcloud compute disks snapshot int3-pilot --snapshot-names pre-local-<date>`.
-4. **Update to the pinned SHA:** the first time, follow RUNBOOK "One time: pin the existing VM" (the
-   VM's own update.sh at `2bc47f8` is the old, unpinned one); it ends with `update.sh <sha>`. That runs control `init` (CONTROL_VERSION 4) and
-   restarts the shared stack. Per-user Hermes containers keep running.
-5. **Migrate tenants:** `app.tenants.admin migrate` (zack and marcuspilot v3 → v5). Additive:
-   `user_memories` and `memory_audit` are new tables, `tenants.cancelled_at` and `allowed_credential_sources`
-   are new columns with defaults.
-6. **TLS for the two new hosts:** add the routes and re-render Caddy with the existing `enable-tls.sh`
-   flow (production issuer).
+   sessions drop for about one to two minutes. **Checked 2026-11-24:** marcuspilot last seen 2026-11-08,
+   no activity in the 7 days before.
+3. **Safety copies.** **Done 2026-11-24** (redo if the deploy is more than about a day later):
+   - `sudo systemctl start int3-backup` → `gs://int3-513810-int3-backups/2026-11-24T1551Z/`;
+   - a disk snapshot → `int3-pilot-pre-local-2026-11-24`.
+4. **Update to the pinned SHA:** not run. The first time, follow RUNBOOK "One time: pin the existing VM"
+   (the VM's own update.sh at `2bc47f8` is the old, unpinned one); it ends with `update.sh <sha>` (full
+   40 characters), which restarts the shared stack (`stack-up.sh` now also creates the `local` and `mcp`
+   routes and starts the local edge and the MCP endpoint). Per-user Hermes containers keep running.
+5. **Migrate:** not run. `app.tenants.admin migrate` (control v2 → v4; zack and marcuspilot v3 → v5).
+   Additive: `user_memories` and `memory_audit` are new tables, `tenants.cancelled_at` and
+   `allowed_credential_sources` are new columns with defaults.
+6. **TLS for the two new hosts:** not run. The routes already exist after step 4; re-render Caddy and
+   request certificates with the existing `enable-tls.sh` flow (production issuer). No DNS change: the
+   `*.app` wildcard already points at the VM.
 7. **Hosted checks**, from outside (`smoke-external.py chat`), on zack and marcuspilot as one user each:
+   not run.
    - a sourced answer;
    - the launcher host unchanged;
-   - `/launcher/local/policy` is 404 on the hosted host.
-8. **Local checks**, on a new synthetic local-mode tenant (section 6), with a real launcher + Desktop:
+   - `/launcher/local/policy` is **403 on the hosted host**: the hosted edge refuses it before it reaches
+     the brain (it is not on `launcher-edge.allowlist`). On the local host a hosted tenant gets 404.
+8. **Local checks**, on a new synthetic local-mode tenant (section 6), with a real launcher + Desktop
+   (not run on the VM):
    - question → `search_brain` → `[claim:N]` → `validate_citations`;
    - a propose card;
    - `int3_remember` → Memory tab;
