@@ -30,8 +30,8 @@ next_port() {   # per-user ingress ports, loopback only; Caddy is the only thing
   echo $(( ${max:-9499} + 1 ))
 }
 
-compose() {
-  (cd "$REPO_ROOT" && docker compose --profile key-intake \
+compose() {  # key-intake and local-mode are profiles in the base file; the hosted stack runs both
+  (cd "$REPO_ROOT" && docker compose --profile key-intake --profile local-mode \
     -f deploy/hermes/docker-compose.yml -f deploy/gcp/compose.hosted.yml "$@")
 }
 

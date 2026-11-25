@@ -1,6 +1,10 @@
 # Hosted overlay on deploy/hermes/docker-compose.yml. Everything stays bound to loopback: Caddy is
 # the only public listener. Adds restart policies (a VM reboot brings the stack back) and makes the
 # public https URLs required, so a missing setting fails instead of falling back to plain http.
+#
+# Local mode (docs/LOCAL_MODE_DEPLOY_PLAN.md step 1): the local launcher edge (127.0.0.1:8101) and the
+# brain MCP endpoint (127.0.0.1:8200) come from the base file's `local-mode` profile (lib.sh compose()
+# enables it); here they get restart policies, and the brain's two local URLs are required.
 x-restart: &restart
   restart: unless-stopped
 
@@ -12,8 +16,20 @@ services:
     environment:
       APP_ORIGIN: ${APP_ORIGIN:?set by deploy/gcp/vm/stack-up.sh}
       KEY_INTAKE_BASE_URL: ${KEY_INTAKE_BASE_URL:?set by deploy/gcp/vm/stack-up.sh}
+      # The public URLs the launcher writes into local-mode users' Hermes: the MCP endpoint and the
+      # local edge (memory API). Required: no silent fallback to the base file's loopback defaults.
+      LOCAL_MCP_URL: ${LOCAL_MCP_URL:?set by deploy/gcp/vm/stack-up.sh}
+      LOCAL_MEMORY_URL: ${LOCAL_MEMORY_URL:?set by deploy/gcp/vm/stack-up.sh}
   launcher-edge:
     <<: *restart
+  launcher-edge-local:
+    <<: *restart
+  brain-mcp-local:
+    <<: *restart
+    # Exactly one process: MCP sessions and pending confirmation cards live in its memory (base file
+    # comment). One replica; local_server.py starts uvicorn without workers. Do not raise either.
+    deploy:
+      replicas: 1
   gateway:
     <<: *restart
   edge:
