@@ -110,6 +110,7 @@ Published as a GitHub pre-release (the repo is public): tag `launcher-v0.1.1`, a
 | State | `bash deploy/gcp/ops.sh status` |
 | Stop / start | `bash deploy/gcp/ops.sh stop` / `start`. All containers return on start |
 | Stack log | `sudo journalctl -u int3-stack` |
+| Any compose command | Always through lib.sh, never a bare `docker compose`: `sudo bash -c '. /opt/int3/deploy/gcp/vm/lib.sh && load_secrets && compose ps'` (or `logs brain`, `restart brain`, …). It loads the secrets and the public URLs from `/var/lib/int3/local-urls.env` (written by `stack-up.sh` on every start; absent before the first start, so nothing can start with missing values). |
 | Caddy log | `sudo docker logs int3-caddy` (no access log, by design) |
 | Update | `sudo bash /opt/int3/deploy/gcp/vm/update.sh <commit-sha>` moves to that one reviewed commit (it must be on `INT3_REF`; a branch name, a typo or a commit from elsewhere is refused before anything changes) and restarts the shared stack. The VM never updates itself. A change to the gated image reaches a user only when that user is re-provisioned. |
 | Revoke a person | `sudo docker exec … python -m app.launcher.admin revoke-user --tenant T --user U`; their tokens stop within about 30 s |
@@ -170,7 +171,9 @@ its counts must equal the manifest. Run by hand: `sudo systemctl start int3-rest
 `int3-backup-metrics.timer` publishes the age of the last good backup and restore test hourly;
 `bash deploy/gcp/ops.sh backup-alert` sets the policy (backup older than 26 h, restore test older than 8 days).
 
-**Real restore:** stop the stack, remove the `int3_pgdata` volume, `compose up -d db`, then
+**Real restore:** stop the stack, remove the `int3_pgdata` volume, start only the database through lib.sh
+(it loads the secrets and the public URLs that `stack-up.sh` recorded in `/var/lib/int3/local-urls.env`):
+`sudo bash -c '. /opt/int3/deploy/gcp/vm/lib.sh && load_secrets && compose up -d db'`, then
 `gunzip -c postgres.sql.gz | docker exec -i int3-db-1 psql -U brain -d postgres`, then start the stack.
 Secrets come from Secret Manager, and **without `int3-stack-env` the encrypted provider keys cannot be
 decrypted**: never delete that secret. Hermes volumes: untar into `hermes-home-int3-<tenant>-<user>`.

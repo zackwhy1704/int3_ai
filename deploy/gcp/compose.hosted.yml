@@ -13,13 +13,15 @@ services:
     <<: *restart
   brain:
     <<: *restart
+    # Every URL below is set by deploy/gcp/vm/stack-up.sh, which also records them in
+    # /var/lib/int3/local-urls.env for lib.sh compose() (restore, ps, logs). Missing = refuse to start.
     environment:
-      APP_ORIGIN: ${APP_ORIGIN:?set by deploy/gcp/vm/stack-up.sh}
-      KEY_INTAKE_BASE_URL: ${KEY_INTAKE_BASE_URL:?set by deploy/gcp/vm/stack-up.sh}
+      APP_ORIGIN: ${APP_ORIGIN:?set by stack-up.sh; use lib.sh compose() (reads /var/lib/int3/local-urls.env)}
+      KEY_INTAKE_BASE_URL: ${KEY_INTAKE_BASE_URL:?set by stack-up.sh; use lib.sh compose() (reads /var/lib/int3/local-urls.env)}
       # The public URLs the launcher writes into local-mode users' Hermes: the MCP endpoint and the
       # local edge (memory API). Required: no silent fallback to the base file's loopback defaults.
-      LOCAL_MCP_URL: ${LOCAL_MCP_URL:?set by deploy/gcp/vm/stack-up.sh}
-      LOCAL_MEMORY_URL: ${LOCAL_MEMORY_URL:?set by deploy/gcp/vm/stack-up.sh}
+      LOCAL_MCP_URL: ${LOCAL_MCP_URL:?set by stack-up.sh; use lib.sh compose() (reads /var/lib/int3/local-urls.env)}
+      LOCAL_MEMORY_URL: ${LOCAL_MEMORY_URL:?set by stack-up.sh; use lib.sh compose() (reads /var/lib/int3/local-urls.env)}
   launcher-edge:
     <<: *restart
   launcher-edge-local:
@@ -39,4 +41,4 @@ services:
   key-intake:
     <<: *restart
     environment:
-      KEY_INTAKE_BASE_URL: ${KEY_INTAKE_BASE_URL:?set by deploy/gcp/vm/stack-up.sh}
+      KEY_INTAKE_BASE_URL: ${KEY_INTAKE_BASE_URL:?set by stack-up.sh; use lib.sh compose() (reads /var/lib/int3/local-urls.env)}

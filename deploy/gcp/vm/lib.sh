@@ -6,6 +6,10 @@ REPO_ROOT="$(cd "$GCP_ROOT/../.." && pwd)"
 export DEPLOY_PROJECT
 SECRETS=/run/int3/stack.env
 ROUTES=/var/lib/int3/routes.tsv     # <random-id> <local-port> <kind> <label>; not a secret, not public
+# The public URLs compose.hosted.yml requires (:?), written by stack-up.sh on every start so compose() works
+# outside it too (RUNBOOK restore, `compose ps`, `compose logs`). Not secret; 0600 root anyway.
+URLS_ENV=/var/lib/int3/local-urls.env
+URL_VARS=(APP_ORIGIN KEY_INTAKE_BASE_URL LOCAL_MCP_URL LOCAL_MEMORY_URL)
 
 load_secrets() { [ -r "$SECRETS" ] || { echo "$SECRETS missing: is int3-stack.service up?" >&2; return 1; }; set -a; . "$SECRETS"; set +a; }
 
@@ -30,8 +34,26 @@ next_port() {   # per-user ingress ports, loopback only; Caddy is the only thing
   echo $(( ${max:-9499} + 1 ))
 }
 
-compose() {  # key-intake and local-mode are profiles in the base file; the hosted stack runs both
-  (cd "$REPO_ROOT" && docker compose --profile key-intake --profile local-mode \
+# write_urls_env [file]: the URL_VARS from the environment (stack-up.sh just derived them) into $URLS_ENV,
+# atomically and 0600. Refuses an empty one, so a broken start never records a blank URL.
+write_urls_env() {
+  local f="${1:-$URLS_ENV}" v tmp
+  for v in "${URL_VARS[@]}"; do
+    [ -n "${!v:-}" ] || { echo "write_urls_env: $v is empty; not writing $f" >&2; return 1; }
+  done
+  tmp="$(mktemp "$f.XXXXXX")" && chmod 600 "$tmp" || return 1
+  for v in "${URL_VARS[@]}"; do printf '%s=%s\n' "$v" "${!v}"; done > "$tmp"
+  mv -f "$tmp" "$f"
+}
+
+# Every compose call on the VM. key-intake and local-mode are profiles in the base file; the hosted stack
+# runs both. $URLS_ENV, when present, supplies the public URLs; anything exported in the shell (stack-up.sh)
+# wins over it. Without the file and without exports, compose fails on the first missing URL with the
+# hint from compose.hosted.yml, so a first boot still cannot start with missing values.
+compose() {
+  local envf=()
+  [ -r "$URLS_ENV" ] && envf=(--env-file "$URLS_ENV")
+  (cd "$REPO_ROOT" && docker compose "${envf[@]}" --profile key-intake --profile local-mode \
     -f deploy/hermes/docker-compose.yml -f deploy/gcp/compose.hosted.yml "$@")
 }
 

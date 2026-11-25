@@ -16,6 +16,8 @@ MCP_URL="$(public_url "$(route_id mcp 8200 brain-mcp-local)")"
 export LAUNCHER_PUBLIC_URL="$LAUNCHER_URL" KEY_INTAKE_BASE_URL="$KEYS_URL" APP_ORIGIN="$LAUNCHER_URL"
 # What the brain hands local-mode launchers: the MCP endpoint and the memory API (on the local edge).
 export LOCAL_MCP_URL="$MCP_URL/mcp" LOCAL_MEMORY_URL="$LOCAL_URL"
+# Recorded for compose() outside this script (restore, ps, logs): see lib.sh URLS_ENV.
+write_urls_env
 
 cd "$REPO_ROOT"
 . deploy/hermes/images.sh
