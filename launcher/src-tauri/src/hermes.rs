@@ -169,23 +169,42 @@ pub fn policy(install: &Install, compat: &Value) -> Policy {
     Policy { state, message }
 }
 
+/// The packaged Desktop's executable names: the Store build (NousResearchInc.HermesAgent, seen 2026-11-25 as
+/// 2026.7855.419.0) runs "Hermes Agent.exe"; older and sideloaded builds ran "Hermes.exe".
+const PACKAGED_IMAGES: [&str; 2] = ["Hermes Agent.exe", "Hermes.exe"];
+
+/// Does `tasklist /FO CSV /NH` output list one of the packaged Desktop's images?
+fn lists_packaged_hermes(tasklist_csv: &str) -> bool {
+    tasklist_csv.lines().any(|l| {
+        let image = l.trim().trim_start_matches('"').split('"').next().unwrap_or("");
+        PACKAGED_IMAGES.iter().any(|n| image.eq_ignore_ascii_case(n))
+    })
+}
+
 /// Is a packaged Hermes running? (A dev build is not tracked.)
 pub fn running(install: &Install) -> bool {
     if !matches!(install.kind, Kind::Msix { .. }) {
         return false;
     }
-    hidden(Command::new("tasklist").args(["/FI", "IMAGENAME eq Hermes.exe", "/NH"]))
+    hidden(Command::new("tasklist").args(["/FO", "CSV", "/NH"]))
         .output()
-        .map(|o| String::from_utf8_lossy(&o.stdout).contains("Hermes.exe"))
+        .map(|o| lists_packaged_hermes(&String::from_utf8_lossy(&o.stdout)))
         .unwrap_or(false)
 }
 
-/// Close a running packaged Hermes so it re-reads connections.json on start. Only called after
-/// the user confirmed the restart in the launcher.
+/// Close a running packaged Hermes so it re-reads its config, .env and connections.json on start. Only
+/// called after the user confirmed the restart in the launcher. A graceful close (no /F), then a short wait.
 pub fn stop(install: &Install) {
     if matches!(install.kind, Kind::Msix { .. }) {
-        let _ = hidden(Command::new("taskkill").args(["/IM", "Hermes.exe"])).status();
-        std::thread::sleep(std::time::Duration::from_secs(2));
+        for image in PACKAGED_IMAGES {
+            let _ = hidden(Command::new("taskkill").args(["/IM", image])).status();
+        }
+        for _ in 0..15 {
+            std::thread::sleep(std::time::Duration::from_secs(1));
+            if !running(install) {
+                break;
+            }
+        }
     }
 }
 
@@ -212,6 +231,16 @@ pub fn start(install: &Install) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_store_builds_process_is_recognised() {
+        let store = "\"explorer.exe\",\"4\",\"Console\",\"1\",\"1,024 K\"\r\n\"Hermes Agent.exe\",\"18200\",\"Console\",\"1\",\"210,000 K\"\r\n";
+        assert!(lists_packaged_hermes(store)); // Store 2026.7855.419.0
+        assert!(lists_packaged_hermes("\"Hermes.exe\",\"5\",\"Console\",\"1\",\"1 K\"")); // older builds
+        assert!(lists_packaged_hermes("\"hermes agent.exe\",\"5\",\"Console\",\"1\",\"1 K\""));
+        assert!(!lists_packaged_hermes("\"hermes-agent.exe\",\"5\",\"Console\",\"1\",\"1 K\"")); // the CLI alias is not the Desktop
+        assert!(!lists_packaged_hermes("\"python.exe\",\"5\",\"Console\",\"1\",\"1 K\"\r\nINFO: No tasks are running"));
+    }
     use serde_json::json;
 
     fn install(version: &str) -> Install {
