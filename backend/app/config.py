@@ -66,9 +66,10 @@ BRAIN_RATE_PER_DAY = int(os.environ.get("BRAIN_RATE_PER_DAY", "500"))
 # never uses up the brain's.
 MEMORY_RATE_PER_MINUTE = int(os.environ.get("MEMORY_RATE_PER_MINUTE", "60"))
 MEMORY_RATE_PER_DAY = int(os.environ.get("MEMORY_RATE_PER_DAY", "2000"))
-# Local mode M2: where the int3 memory plugin reaches the memory API (the launcher edge, public URL),
-# and how long a cancelled tenant's memories are kept before the purge.
-LOCAL_MEMORY_URL = os.environ.get("LOCAL_MEMORY_URL", "http://127.0.0.1:8100")
+# Local mode M2: where the int3 memory plugin reaches the memory API (the LOCAL launcher edge, public
+# URL; the hosted edge does not serve /launcher/local/*), and how long a cancelled tenant's memories
+# are kept before the purge.
+LOCAL_MEMORY_URL = os.environ.get("LOCAL_MEMORY_URL", "http://127.0.0.1:8101")
 MEMORY_RETENTION_DAYS = int(os.environ.get("MEMORY_RETENTION_DAYS", "30"))
 # The brain MCP endpoint the launcher writes into the local Hermes config.
 LOCAL_MCP_URL = os.environ.get("LOCAL_MCP_URL", "http://127.0.0.1:8200/mcp")

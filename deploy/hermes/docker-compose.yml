@@ -100,8 +100,8 @@ services:
       # Local mode: the brain MCP endpoint the launcher writes into users' own Hermes config.
       LOCAL_MCP_URL: ${LOCAL_MCP_URL:-http://127.0.0.1:8200/mcp}
       # Local mode M2: where the int3 memory plugin in users' Hermes reaches /launcher/local/memory/*
-      # (the launcher edge's public URL), and how long a cancelled tenant's memories are kept.
-      LOCAL_MEMORY_URL: ${LOCAL_MEMORY_URL:-http://127.0.0.1:8100}
+      # (the LOCAL launcher edge's public URL), and how long a cancelled tenant's memories are kept.
+      LOCAL_MEMORY_URL: ${LOCAL_MEMORY_URL:-http://127.0.0.1:8101}
       MEMORY_RETENTION_DAYS: ${MEMORY_RETENTION_DAYS:-30}
     networks:
       ext: {}
@@ -129,6 +129,28 @@ services:
       - ./gated/launcher-edge.allowlist:/opt/proxy/launcher-edge.allowlist:ro
     ports:
       - "127.0.0.1:${LAUNCHER_EDGE_PORT:-8100}:8100"
+    networks: [ext]
+    depends_on: [brain]
+
+  # Local mode's own launcher edge: the same default-deny proxy with launcher-edge-local.allowlist
+  # (sign-in, me, compat, devices, /launcher/local/*, memory; no /launcher/launch, no BYOK). The hosted
+  # edge above no longer serves local mode, so hosted and local users never share a door.
+  # LOOPBACK ONLY: the hosted pilot puts TLS in front instead.
+  launcher-edge-local:
+    profiles: ["local-mode"]
+    image: python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1
+    command: ["python", "/opt/proxy/route_proxy.py"]
+    user: "65534"
+    environment:
+      PROXY_UPSTREAM: http://brain:8000
+      PROXY_PORT: "8101"
+      ALLOWLIST_FILE: /opt/proxy/launcher-edge-local.allowlist
+      PROXY_LOG: /tmp/routes.log
+    volumes:
+      - ./gated/route_proxy.py:/opt/proxy/route_proxy.py:ro
+      - ./gated/launcher-edge-local.allowlist:/opt/proxy/launcher-edge-local.allowlist:ro
+    ports:
+      - "127.0.0.1:${LAUNCHER_EDGE_LOCAL_PORT:-8101}:8101"
     networks: [ext]
     depends_on: [brain]
 

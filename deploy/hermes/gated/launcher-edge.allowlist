@@ -1,7 +1,11 @@
-# Launcher edge: the ONLY host-facing door to the brain API, and only for the launcher's own
-# public routes (backend/app/launcher/routes.py). Same default-deny proxy and format as the
-# per-user backend allowlist (route_proxy.py; METHOD /path or METHOD /prefix*; query ignored).
-# Everything else on the brain (/v1/*, web auth, admin) stays unreachable from the host.
+# Launcher edge (HOSTED mode): the ONLY host-facing door to the brain API for hosted users, and only
+# for the launcher's own public routes (backend/app/launcher/routes.py). Same default-deny proxy and
+# format as the per-user backend allowlist (route_proxy.py; METHOD /path or METHOD /prefix*; query
+# ignored). Everything else on the brain (/v1/*, web auth, admin) stays unreachable from the host.
+#
+# Local mode is NOT served here: /launcher/local/* and the memory routes are on the local edge only
+# (launcher-edge-local.allowlist), so a hosted user's address never serves local mode
+# (docs/LOCAL_MODE_DEPLOY_PLAN.md section 2). test_route_proxy.py proves each edge refuses the other's.
 #
 # EXCLUDED on purpose: POST /launcher/introspect. Only each backend's ingress auth proxy calls it,
 # on the compose network (http://brain:8000); exposing it would hand the host an oracle for
@@ -14,10 +18,5 @@ GET  /launcher/devices          # account: this user's signed-in devices
 POST /launcher/devices/*        # account: /{id}/revoke (own devices only; 404 otherwise)
 GET  /launcher/me               # user, tenant, brain names
 GET  /launcher/compat           # Hermes desktop versions we accept
-GET  /launcher/local/policy     # local mode: the Hermes setup to apply (no secrets)
-POST /launcher/local/posture    # local mode: the launcher's reading of that setup
-POST /launcher/local/launch     # local mode: brain token, only after a good report
-GET  /launcher/local/memory     # local mode: the user's own memories (int3 app, launcher token)
-POST /launcher/local/memory/*   # local mode: save|recall|forget (Hermes plugin, brain token); delete (int3 app)
 POST /launcher/launch           # per-launch desktop token for the user's own backend
 POST /launcher/byok/link        # admin only: one-time key-entry link (opened in the browser)
