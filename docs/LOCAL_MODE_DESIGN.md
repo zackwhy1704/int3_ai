@@ -393,9 +393,10 @@ skills:
 
 ### 3.5 Messaging
 
-- **Process.** The messaging gateway is a separate process, `hermes gateway run|start`. Desktop's local
-  backend doesn't run it, though Desktop can restart it (`hermes_cli/web_routers/actions.py:160`,
-  `apps/desktop/src/api/system.ts:151`).
+- **Process.** The messaging gateway is a separate process, `hermes gateway run|start`. At v0.23.1 Desktop's
+  local backend didn't run it, though Desktop can restart it (`hermes_cli/web_routers/actions.py:160`,
+  `apps/desktop/src/api/system.ts:151`). **No longer true by v0.23.4** (seen live 2026-11-25): Desktop's local
+  backend attaches to the per-host gateway, which is the same process that hosts messaging (§3.7).
 - **Runs with Desktop closed.** Yes, if installed as a Scheduled Task at login (`hermes gateway install`),
   which happens only on an explicit answer (`website/docs/user-guide/windows-native.md:212-243`).
   Revocation still applies: its brain and memory calls use the same token.
@@ -536,13 +537,31 @@ fixed in the launcher:
 - **The agent backend outlives the window:** Desktop's backend is a `gateway run` process that keeps
   running after the window closes, with the MCP header (brain token) and config it loaded. After the 24 h
   token expired, a relaunch reopened the window onto the same gateway and every brain call stayed
-  refused ("access has expired"). The launcher now stops the gateway (`hermes gateway stop`, same home) on
-  every launch. The int3 memory plugin was unaffected: it reads the token from `.env` per call.
+  refused ("access has expired"). The launcher now stops the gateway on every launch: it always runs
+  `hermes gateway stop` (same home) and then requires both exit code 0 and no live process for the PIDs in
+  `gateway.pid` / `gateway.lock` / `gateway_state.json` (`local.rs` `stop_gateway`; v0.23.4
+  `gateway/status.py:41,308-312,778-786`; stop command `hermes_cli/gateway.py:5227-5275`). Hermes refuses
+  (exit 1) while a session has live work (`hermes_cli/gateway_lifecycle_guards.py:97-129`) and reports
+  success even if the process is still exiting after 10 s (`gateway.py:1938-1955`). Either way the launch
+  **fails with nothing written and no token minted**; the launcher never passes `--yes` to interrupt work.
+  The int3 memory plugin was unaffected: it reads the token from `.env` per call.
+- **M4 must revisit this.** The gateway is also the process that hosts the messaging platforms
+  (`gateway/run_adapters.py:176-201`, `:1298` @v0.23.4), and Desktop attaches to it rather than owning it
+  (`apps/desktop/electron/local-gateway.ts:8`, `backend-recycle.ts:10`). Today local mode configures no
+  messaging, so stopping it is harmless. Once Slack/Telegram are set up, every launch would take the bots
+  offline until the next gateway start, and the 24 h brain token would still need a restart or a live
+  reload (`/reload-mcp`) to reach them.
 - **Not driveable remotely:** a packaged build never opens its renderer debugging port (dev-cdp.ts), so the
   step-8 chat turns were typed by the owner and read back from Hermes's own `state.db`.
 - **Updates:** Store auto-update is on by default (no policy set). An unrecorded build shows "not tested
   with int3 yet" and still launches (`hermes.rs` `policy`): the posture check, not the version, is what
   protects the brain.
+- **v0.23.3 → v0.23.4 drift** (files local mode relies on): only `agent/file_safety.py` (a new helper),
+  `apps/desktop/electron/connection-registry.ts` (plugin "launcher" profile routes skipped in the v1
+  migration; `REGISTRY_VERSION` still 2, now `:44`) and unrelated `config_defaults.py` keys changed. Toolsets,
+  the memory provider API, `data-paths.mjs`, the card, the Cloud check inputs and credential sources are
+  byte-identical. Compat row `v0.23.4` (`control_schema.sql`); the Store build 2026.7855.419.0 is recorded
+  with `admin record-build`. It stays `untested`: that state also shows for hosted launches.
 
 **Cloud backup, decided (owner, 2026-11-24): detect, refuse, and tell partners.** From v0.23.3 source:
 - **(a) Manual only.** Settings › Backup & Transfer (`apps/desktop/src/app/settings/backup-settings.tsx:177-218`)

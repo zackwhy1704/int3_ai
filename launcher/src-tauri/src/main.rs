@@ -240,8 +240,9 @@ async fn launch_local(app: tauri::AppHandle, session: State<'_, Session>, restar
         hermes::stop(&install);
     }
     // Always, even with no window open: Desktop's agent backend (the gateway) outlives the window and keeps
-    // the brain token and config it loaded. Desktop starts a fresh one that reads what we write next.
-    local::stop_gateway();
+    // the brain token and config it loaded. Desktop starts a fresh one that reads what we write next. Not
+    // confirmed stopped = stop here: nothing written, no token minted.
+    local::stop_gateway().map_err(fail)?;
     let (workspace, synced) = local::apply(&policy, &me["brains"]).map_err(fail)?;
     if synced {
         return Err(fail(format!(

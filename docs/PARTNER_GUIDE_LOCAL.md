@@ -90,3 +90,5 @@ conversations. If your company stops using int3, all memories are deleted 30 day
   company brain stops within about 15 seconds and int3 says why. Click **Launch Hermes** again to put
   them back.
 - About once a day the connection expires. Hermes then says to reopen int3. Click **Launch Hermes**.
+- If int3 says it **couldn't stop Hermes's background process**, Hermes is still working on something. Wait
+  for it to finish (or quit Hermes), then click **Launch Hermes** again. Nothing was changed.

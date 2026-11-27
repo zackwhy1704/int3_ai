@@ -617,30 +617,99 @@ pub fn watched_stamp() -> Option<std::time::SystemTime> {
         .max()
 }
 
-/// Does `hermes gateway status` say the gateway is running?
-fn gateway_running_in(status_output: &str) -> bool {
-    status_output.lines().any(|l| l.contains("Gateway is running"))
+/// The files in HERMES_HOME that name the gateway's process: `gateway.pid` and `gateway.lock`
+/// (gateway/status.py:308-312 @v0.23.4; a JSON record with "pid", status.py:778-786, or a legacy bare
+/// integer, :843-845) and `gateway_state.json` (status.py:41, :816-822).
+const GATEWAY_RECORDS: [&str; 3] = ["gateway.pid", "gateway.lock", "gateway_state.json"];
+
+fn record_pid(text: &str) -> Option<u32> {
+    let v: Value = serde_json::from_str(text.trim_start_matches('\u{feff}').trim()).ok()?;
+    let pid = match &v {
+        Value::Number(n) => n.as_u64(),
+        _ => v["pid"].as_u64(),
+    }?;
+    u32::try_from(pid).ok().filter(|p| *p != 0)
 }
 
-/// Stop Hermes's background gateway for this home, through Hermes's own CLI (`hermes gateway stop`), and
-/// wait until it is gone. Desktop's agent backend is that gateway (`hermes_cli.main --profile default
-/// gateway run`), and it OUTLIVES the Desktop window: seen on 2026-11-25 with Store Hermes v0.23.4, a gateway
-/// started at one launch was still serving with that launch's MCP header (brain token) two days later, after
-/// the window had been closed and reopened by a relaunch. A new token, a re-applied lockdown or a changed
-/// MCP entry only takes effect in a new gateway, so every launch stops it first; Desktop starts a fresh one.
-pub fn stop_gateway() {
-    let status = || hidden(Command::new(hermes_cli()).args(["gateway", "status"]).env("HERMES_HOME", hermes_home()))
-        .output().map(|o| gateway_running_in(&String::from_utf8_lossy(&o.stdout))).unwrap_or(false);
-    if !status() {
-        return;
+fn gateway_pids(home: &Path) -> Vec<u32> {
+    GATEWAY_RECORDS.iter().filter_map(|f| record_pid(&read_text(&home.join(f)))).collect()
+}
+
+/// Which of `pids` are live python processes in `tasklist /FO CSV /NH` output. A recorded pid that now
+/// belongs to something else (a recycled pid) is not the gateway.
+fn live_gateway_pids(tasklist_csv: &str, pids: &[u32]) -> Vec<u32> {
+    tasklist_csv
+        .lines()
+        .filter_map(|l| {
+            let mut f = l.trim().trim_matches('"').split("\",\"");
+            let image = f.next()?.to_lowercase();
+            let pid: u32 = f.next()?.parse().ok()?;
+            (image.starts_with("python") && pids.contains(&pid)).then_some(pid)
+        })
+        .collect()
+}
+
+/// Did the stop work? Both Hermes's exit code and no recorded gateway process still alive. Exit 0 alone is
+/// not proof: `stop_profile_gateway` reports success after waiting at most 10 s even if the process is still
+/// there (hermes_cli/gateway.py:1938-1955). Exit 1 means Hermes refused because a session has live work
+/// (gateway_lifecycle_guards.py:97-129; we never pass `--yes`) or could not confirm the stop
+/// (gateway_profile_lifecycle.py:232-235). "Nothing to stop" is exit 0 (:230-231).
+fn stop_verdict(exit_ok: bool, output: &str, alive: &[u32]) -> Result<(), String> {
+    if exit_ok && alive.is_empty() {
+        return Ok(());
     }
-    let _ = hidden(Command::new(hermes_cli()).args(["gateway", "stop"]).env("HERMES_HOME", hermes_home())).output();
-    for _ in 0..20 {
-        if !status() {
-            return;
+    // Only Hermes's headline: the following lines name sessions (their titles are the user's content).
+    let why = output
+        .lines()
+        .map(str::trim)
+        .find(|l| l.contains("Refusing to stop") || l.contains("not confirmed"))
+        .unwrap_or("The background process is still running.");
+    Err(format!(
+        "int3 couldn't stop Hermes's background process, so nothing was changed. {why} Let Hermes finish what \
+         it is doing (or quit Hermes), then click Launch Hermes again."
+    ))
+}
+
+/// Stop Hermes's background gateway for this home with Hermes's own CLI (`hermes gateway stop`, always),
+/// then confirm it is gone. Desktop's agent backend is that gateway (Desktop attaches to the per-host
+/// gateway with `gateway ensure`: apps/desktop/electron/local-gateway.ts:8, backend-recycle.ts:10) and it
+/// OUTLIVES the Desktop window: seen on 2026-11-25 with Store Hermes v0.23.4, a gateway started at one launch
+/// was still serving with that launch's MCP header (brain token) two days later. A new token, a re-applied
+/// lockdown or a changed MCP entry only takes effect in a new gateway, so every launch stops it first, and
+/// Desktop starts a fresh one. If it cannot be confirmed stopped, the launch fails: no token is minted and
+/// nothing is written. The same process hosts messaging platforms (gateway/run_adapters.py:176-201): M4 must
+/// revisit this (docs/LOCAL_MODE_DESIGN.md §3.7).
+pub fn stop_gateway() -> Result<(), String> {
+    let home = hermes_home();
+    let mut pids = gateway_pids(&home);
+    let out = hidden(Command::new(hermes_cli()).args(["gateway", "stop"]).env("HERMES_HOME", &home))
+        .output()
+        .map_err(|e| format!("int3 couldn't run `hermes gateway stop`: {e}"))?;
+    pids.extend(gateway_pids(&home));
+    pids.sort_unstable();
+    pids.dedup();
+    let output = format!("{}\n{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    let alive = || -> Result<Vec<u32>, String> {
+        if pids.is_empty() {
+            return Ok(vec![]);
+        }
+        let list = hidden(Command::new("tasklist").args(["/FO", "CSV", "/NH"]))
+            .output()
+            .map_err(|e| format!("int3 couldn't check whether Hermes's background process stopped: {e}"))?;
+        if !list.status.success() {
+            return Err("int3 couldn't check whether Hermes's background process stopped.".into());
+        }
+        Ok(live_gateway_pids(&String::from_utf8_lossy(&list.stdout), &pids))
+    };
+    let mut still = alive()?;
+    for _ in 0..15 {
+        if still.is_empty() || !out.status.success() {
+            break;
         }
         std::thread::sleep(std::time::Duration::from_secs(1));
+        still = alive()?;
     }
+    stop_verdict(out.status.success(), &output, &still)
 }
 
 /// Hermes's Providers settings (apps/desktop/src/app/settings/index.tsx:123,364 and the generic
@@ -713,11 +782,41 @@ mod tests {
     }
 
     #[test]
-    fn gateway_status_is_read_from_hermes_output() {
-        // `hermes gateway status`, Store Hermes v0.23.4 (seen 2026-11-27)
-        assert!(gateway_running_in("✓ Gateway is running (PID: 16200)\n  (Running manually, not as a system service)\n"));
-        assert!(!gateway_running_in("✗ Gateway is not running\n"));
-        assert!(!gateway_running_in(""));
+    fn gateway_records_name_the_process() {
+        // gateway/status.py:778-786 @v0.23.4, a legacy bare pid (:843-845), a BOM, and junk
+        assert_eq!(record_pid(r#"{"pid":7916,"kind":"hermes-gateway","argv":["x"]}"#), Some(7916));
+        assert_eq!(record_pid("123\n"), Some(123));
+        assert_eq!(record_pid("\u{feff}{\"pid\": 5}"), Some(5));
+        for junk in ["", "not json", r#"{"pid":"x"}"#, r#"{"kind":"hermes-gateway"}"#, r#"{"pid":0}"#] {
+            assert_eq!(record_pid(junk), None, "{junk}");
+        }
+        let home = std::env::temp_dir().join(format!("int3-gw-test-{}", std::process::id()));
+        std::fs::create_dir_all(&home).unwrap();
+        assert!(gateway_pids(&home).is_empty());
+        std::fs::write(home.join("gateway.pid"), r#"{"pid":11}"#).unwrap();
+        std::fs::write(home.join("gateway_state.json"), r#"{"pid":12,"gateway_state":"running"}"#).unwrap();
+        assert_eq!(gateway_pids(&home), vec![11, 12]);
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn only_a_live_python_process_counts_as_the_gateway() {
+        let list = "\"python.exe\",\"7916\",\"Console\",\"1\",\"1 K\"\r\n\"pythonw.exe\",\"8\",\"Console\",\"1\",\"1 K\"\r\n\
+                    \"notepad.exe\",\"123\",\"Console\",\"1\",\"1 K\"\r\nINFO: No tasks are running\r\n";
+        assert_eq!(live_gateway_pids(list, &[7916, 8, 123, 999]), vec![7916, 8]); // 123 was recycled
+        assert!(live_gateway_pids(list, &[999]).is_empty());
+    }
+
+    #[test]
+    fn a_stop_is_ok_only_when_hermes_says_so_and_the_process_is_gone() {
+        assert!(stop_verdict(true, "✓ Stopped gateway for this profile", &[]).is_ok());
+        assert!(stop_verdict(true, "✗ No gateway running for this profile", &[]).is_ok()); // nothing to stop
+        assert!(stop_verdict(true, "✓ Stopped gateway for this profile", &[7916]).is_err()); // still alive
+        // gateway_lifecycle_guards.py:88-94: refusal while a session works; its title must not reach the screen
+        let refusal = "✗ Refusing to stop the gateway: 1 live session(s) would be interrupted.\n  • Board salaries\n";
+        let err = stop_verdict(false, refusal, &[]).unwrap_err();
+        assert!(err.contains("Refusing to stop the gateway: 1 live session(s)") && !err.contains("salaries"), "{err}");
+        assert!(stop_verdict(false, "", &[]).unwrap_err().contains("still running"));
     }
 
     #[test]
