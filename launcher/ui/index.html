@@ -8,6 +8,25 @@
   <script src="app.js" defer></script>
 </head>
 <body>
+  <!-- Prerequisite: Hermes Desktop. Shown before sign-in while hermes::detect() finds nothing; the page
+       re-checks every 3 s and moves on by itself once Hermes is installed. -->
+  <main id="view-gethermes" class="view center" hidden>
+    <section class="card narrow">
+      <div class="brand"><span class="logo" aria-hidden="true"></span>int3</div>
+      <h1>Get Hermes</h1>
+      <p class="muted">int3 runs inside Hermes Desktop, a free app from Nous Research. Install it from the
+        Microsoft Store; int3 carries on by itself as soon as it is installed.</p>
+      <div class="actions">
+        <button type="button" id="get-store" class="primary">Get Hermes (free, Microsoft Store)</button>
+      </div>
+      <p id="gethermes-wait" class="muted small" role="status">Waiting for Hermes to be installed…</p>
+      <p id="gethermes-os" class="error" hidden></p>
+      <p class="small"><a href="#" id="store-blocked">Store blocked on your PC?</a></p>
+      <p id="store-blocked-note" class="muted small" hidden>Your browser opens Nous's download page instead.
+        int3 is tested with the Microsoft Store version of Hermes only; the non-Store version is untested.</p>
+    </section>
+  </main>
+
   <!-- Sign in -->
   <main id="view-signin" class="view center" hidden>
     <section class="card narrow">
@@ -54,7 +73,7 @@
             <button id="launch" class="primary big">Launch Hermes</button>
             <p id="hermes-line" class="muted small"></p>
             <p id="hermes-note" class="hermes-note small" role="status" hidden></p>
-            <button id="get-hermes" class="secondary small" hidden>Get Hermes Desktop</button>
+            <button id="get-hermes" class="secondary small" hidden>Get Hermes (free, Microsoft Store)</button>
             <button id="choose-model" class="secondary small" hidden>Choose AI model</button>
           </div>
         </header>

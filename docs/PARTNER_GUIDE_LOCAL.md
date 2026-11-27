@@ -1,8 +1,8 @@
 # int3 local mode — partner notes (pilot preview)
 
 In local mode the assistant runs **on your own PC**, inside the official Hermes app. Your company brain
-and your assistant's memory stay on int3's server. Open the **int3** app, sign in with your invite, and
-click **Launch Hermes**. int3 sets Hermes up for you each time.
+and your assistant's memory stay on int3's server. Install the **int3** app, let it get Hermes for you if
+needed, sign in with your invite, and click **Launch Hermes**. int3 sets Hermes up for you each time.
 
 ## Before you install: check Smart App Control
 
@@ -18,6 +18,24 @@ click **Launch Hermes**. int3 sets Hermes up for you each time.
 
 If a message says **Smart App Control blocked** int3 (now or later, for example after Windows switches
 Evaluation to On), there is no way past it. Tell us.
+
+## Getting Hermes (int3 does this with you)
+
+You don't need to install Hermes first. Open **int3**: if Hermes isn't on this PC yet, int3 shows **Get
+Hermes** instead of the sign-in screen.
+
+1. Click **Get Hermes (free, Microsoft Store)**. The Microsoft Store opens on Hermes Agent (publisher
+   **Nous Research Inc.**).
+2. Click **Get** or **Install** in the Store and wait for it to finish.
+3. Go back to int3: it notices Hermes within a few seconds and moves on to **Sign in** by itself. You don't
+   need to open Hermes or set anything up in it.
+
+**Store blocked on your PC?** (some company PCs turn the Store off) Click that link in int3. Your browser
+opens Nous's download page instead. int3 is tested with the Microsoft Store version of Hermes only; the
+other version is untested, so tell us if you have to use it.
+
+The Store keeps Hermes up to date by itself. When it moves to a version we haven't tested yet, int3 says so
+on the Library screen and still lets you launch; the company brain keeps checking Hermes's setup either way.
 
 ## Choosing the AI model
 

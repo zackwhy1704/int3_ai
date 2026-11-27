@@ -6,7 +6,40 @@ const invoke = (cmd, args) => window.__TAURI__.core.invoke(cmd, args)
 const $ = id => document.getElementById(id)
 
 function show(view) {
-  for (const v of ['signin', 'app']) $(`view-${v}`).hidden = v !== view
+  for (const v of ['gethermes', 'signin', 'app']) $(`view-${v}`).hidden = v !== view
+}
+
+// Prerequisite screen: until hermes::detect() finds Hermes Desktop, show "Get Hermes" and re-check every
+// 3 s; resolve (and stop checking) as soon as it is installed. Checking also stops if the window goes away.
+function untilHermesInstalled() {
+  return new Promise(resolve => {
+    let timer = null
+    let busy = false
+    const stop = () => { if (timer) clearInterval(timer); timer = null }
+    window.addEventListener('pagehide', stop, { once: true })
+    const check = async () => {
+      if (busy) return
+      busy = true
+      try {
+        const p = await invoke('hermes_present')
+        if (p.found) { stop(); resolve(p); return }
+        if (!p.os_supported) {
+          $('gethermes-os').textContent = `Hermes Desktop needs Windows 11 (version 22H2 or later). This PC runs Windows build ${p.os_build}.`
+          $('gethermes-os').hidden = false
+          $('get-store').disabled = true
+        }
+        show('gethermes')
+        if (!timer) timer = setInterval(check, 3000)
+      } catch (e) {
+        $('gethermes-wait').textContent = message(e)
+        show('gethermes')
+        if (!timer) timer = setInterval(check, 3000)
+      } finally {
+        busy = false
+      }
+    }
+    check()
+  })
 }
 
 function tab(name) {
@@ -239,7 +272,16 @@ window.addEventListener('DOMContentLoaded', async () => {
   $('signin').onclick = signIn
   $('invite').onkeydown = ev => { if (ev.key === 'Enter') signIn() }
   $('launch').onclick = () => launch(false)
-  $('get-hermes').onclick = () => call('open_hermes_download').then(refreshHermesLine, () => {})
+  $('get-hermes').onclick = () => call('open_hermes_store').then(refreshHermesLine, () => {})
+  $('get-store').onclick = () => {
+    $('gethermes-wait').textContent = 'The Microsoft Store is open: click Get or Install there. int3 carries on by itself once Hermes is installed.'
+    call('open_hermes_store').catch(e => { $('gethermes-wait').textContent = message(e) })
+  }
+  $('store-blocked').onclick = ev => {
+    ev.preventDefault()
+    $('store-blocked-note').hidden = false
+    call('open_hermes_download').catch(() => {})
+  }
   $('choose-model').onclick = () => call('open_providers').catch(e => { $('launch-msg').hidden = false; $('launch-msg').className = 'notice error'; $('launch-msg').textContent = message(e) })
   $('restart-ok').onclick = () => { $('restart-dialog').close(); launch(true) }
   $('restart-cancel').onclick = () => $('restart-dialog').close()
@@ -262,6 +304,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
+  await untilHermesInstalled()  // the prerequisite: nothing else is useful without Hermes Desktop
   const s = await invoke('status')
   if (!s.signed_in) return show('signin')
   try {

@@ -122,11 +122,40 @@ async fn memory_delete(session: State<'_, Session>, id: Option<i64>, all: bool) 
     session.authed(Method::POST, "/launcher/local/memory/delete", Some(body)).await.map_err(err)
 }
 
-/// Open Nous's download page (a constant: the page cannot choose what is opened).
+/// Open Nous's download page (a constant: the page cannot choose what is opened). The fallback when the
+/// Microsoft Store is blocked; that build is untested with int3.
 #[tauri::command]
 fn open_hermes_download() -> Result<(), Value> {
     std::process::Command::new("rundll32").args(["url.dll,FileProtocolHandler", HERMES_DOWNLOAD]).spawn().map_err(|e| fail(e.to_string()))?;
     Ok(())
+}
+
+/// Hermes Desktop's Microsoft Store product page, opened in the Store app (a constant, like the download
+/// link). Product id 9PMXK8CZC7KR: winget maps the installed package (NousResearchInc.HermesAgent
+/// 2026.7855.419.0) to it in the msstore source, the msstore listing is "Hermes Agent" by Nous Research Inc.,
+/// and it is the id in apps.microsoft.com/detail/9PMXK8CZC7KR (docs/PARTNER_GUIDE_HOSTED.md).
+const HERMES_STORE: &str = "ms-windows-store://pdp/?ProductId=9PMXK8CZC7KR";
+
+#[tauri::command]
+fn open_hermes_store() -> Result<(), Value> {
+    std::process::Command::new("rundll32").args(["url.dll,FileProtocolHandler", HERMES_STORE]).spawn().map_err(|e| fail(e.to_string()))?;
+    Ok(())
+}
+
+/// Is Hermes Desktop installed? No sign-in needed: the "Get Hermes" screen polls this every 3 s before
+/// sign-in. detect() runs a PowerShell MSIX query (~1 s), so it runs off the UI thread.
+#[tauri::command]
+async fn hermes_present() -> Result<Value, Value> {
+    let found = tauri::async_runtime::spawn_blocking(|| hermes::detect().map(|i| i.version))
+        .await
+        .map_err(|e| fail(e.to_string()))?;
+    let build = hermes::os_build();
+    Ok(json!({
+        "found": found.is_some(),
+        "version": found,
+        "os_build": build,
+        "os_supported": build.map_or(true, |b| b >= hermes::MSIX_MIN_BUILD),
+    }))
 }
 
 #[tauri::command]
@@ -332,7 +361,7 @@ async fn sign_out(session: State<'_, Session>) -> Result<Value, Value> {
 fn main() {
     tauri::Builder::default()
         .manage(Session::new(load_server()))
-        .invoke_handler(tauri::generate_handler![status, sign_in, me, account, revoke_device, byok_link, hermes_status, open_hermes_download, launch, launch_local, open_providers, memory_list, memory_delete, sign_out])
+        .invoke_handler(tauri::generate_handler![status, sign_in, me, account, revoke_device, byok_link, hermes_status, hermes_present, open_hermes_download, open_hermes_store, launch, launch_local, open_providers, memory_list, memory_delete, sign_out])
         .run(tauri::generate_context!())
         .expect("error while running the int3 launcher");
 }
