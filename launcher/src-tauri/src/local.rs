@@ -617,6 +617,32 @@ pub fn watched_stamp() -> Option<std::time::SystemTime> {
         .max()
 }
 
+/// Does `hermes gateway status` say the gateway is running?
+fn gateway_running_in(status_output: &str) -> bool {
+    status_output.lines().any(|l| l.contains("Gateway is running"))
+}
+
+/// Stop Hermes's background gateway for this home, through Hermes's own CLI (`hermes gateway stop`), and
+/// wait until it is gone. Desktop's agent backend is that gateway (`hermes_cli.main --profile default
+/// gateway run`), and it OUTLIVES the Desktop window: seen on 2026-11-25 with Store Hermes v0.23.4, a gateway
+/// started at one launch was still serving with that launch's MCP header (brain token) two days later, after
+/// the window had been closed and reopened by a relaunch. A new token, a re-applied lockdown or a changed
+/// MCP entry only takes effect in a new gateway, so every launch stops it first; Desktop starts a fresh one.
+pub fn stop_gateway() {
+    let status = || hidden(Command::new(hermes_cli()).args(["gateway", "status"]).env("HERMES_HOME", hermes_home()))
+        .output().map(|o| gateway_running_in(&String::from_utf8_lossy(&o.stdout))).unwrap_or(false);
+    if !status() {
+        return;
+    }
+    let _ = hidden(Command::new(hermes_cli()).args(["gateway", "stop"]).env("HERMES_HOME", hermes_home())).output();
+    for _ in 0..20 {
+        if !status() {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    }
+}
+
 /// Hermes's Providers settings (apps/desktop/src/app/settings/index.tsx:123,364 and the generic
 /// `hermes://open/<path>` route, apps/desktop/src/lib/hermes-open-target.ts:1-29 @v0.23.1). A dev
 /// build registers `hermes-dev://` instead (apps/desktop/electron/main.ts:17353).
@@ -684,6 +710,14 @@ mod tests {
         assert_eq!((r["memory_provider"].as_str(), r["memory_url"].as_str()), (Some("int3"), Some("https://m.example")));
         assert_eq!(r["memory_plugin_intact"], true);
         let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn gateway_status_is_read_from_hermes_output() {
+        // `hermes gateway status`, Store Hermes v0.23.4 (seen 2026-11-27)
+        assert!(gateway_running_in("✓ Gateway is running (PID: 16200)\n  (Running manually, not as a system service)\n"));
+        assert!(!gateway_running_in("✗ Gateway is not running\n"));
+        assert!(!gateway_running_in(""));
     }
 
     #[test]

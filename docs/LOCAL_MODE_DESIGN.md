@@ -525,6 +525,25 @@ No policy key, toolset name or verdict input changed, so `local_policy.py` is un
 | **Confirmation card (elicitation)** | **Changed.** With a clarify surface bound (Desktop), an empty-schema elicitation is a clarify card "int3_brain asks: …" with **Yes / No**; only Yes accepts. Without one, the yes/no approval as before. Forms Hermes cannot fill are now declined | `tools/mcp_tool_sampling.py:293-295` / `:265-295,351-372`, `tools/mcp_elicitation_form.py:319-343` (new) |
 | **Cloud backup (new)** | **New egress.** Settings › Backup moves this agent into a Hermes Cloud agent: `hermes backup`, then upload. The archive includes `.env` (so `INT3_BRAIN_TOKEN`) and `state.db` (chats, so brain answers). No config key turns it off on a local install | `apps/desktop/src/app/settings/backup-settings.tsx`, `src/lib/agent-transfer.ts:1-10,189-208`, `hermes-cloud-agents.ts:36`, `hermes_cli/backup.py:172-174` @v0.23.3 |
 
+**Store Hermes, first run on Windows 11 (2026-11-25..27), package `NousResearchInc.HermesAgent` 2026.7855.419.0 =
+Hermes v0.23.4** (the Store had already moved past v0.23.3). Differences from the from-source build, all
+fixed in the launcher:
+- **Home:** Desktop used a legacy `~\.hermes` because `%LOCALAPPDATA%\hermes` did not exist (data-paths.mjs
+  :59-62); the launcher now resolves the home the same way. The `hermes` CLI does NOT apply that legacy rule
+  (it wrote `%LOCALAPPDATA%\hermes`), so the launcher always passes `HERMES_HOME` to it.
+- **Process:** the Store build runs `Hermes Agent.exe`, not `Hermes.exe`; the launcher looked for the
+  latter, so it never restarted Store Hermes. Both names are recognised now.
+- **The agent backend outlives the window:** Desktop's backend is a `gateway run` process that keeps
+  running after the window closes, with the MCP header (brain token) and config it loaded. After the 24 h
+  token expired, a relaunch reopened the window onto the same gateway and every brain call stayed
+  refused ("access has expired"). The launcher now stops the gateway (`hermes gateway stop`, same home) on
+  every launch. The int3 memory plugin was unaffected: it reads the token from `.env` per call.
+- **Not driveable remotely:** a packaged build never opens its renderer debugging port (dev-cdp.ts), so the
+  step-8 chat turns were typed by the owner and read back from Hermes's own `state.db`.
+- **Updates:** Store auto-update is on by default (no policy set). An unrecorded build shows "not tested
+  with int3 yet" and still launches (`hermes.rs` `policy`): the posture check, not the version, is what
+  protects the brain.
+
 **Cloud backup, decided (owner, 2026-11-24): detect, refuse, and tell partners.** From v0.23.3 source:
 - **(a) Manual only.** Settings › Backup & Transfer (`apps/desktop/src/app/settings/backup-settings.tsx:177-218`)
   needs a Hermes Cloud sign-in (`:242-243`, an Electron portal session, `electron/main.ts:15004-15016`),
