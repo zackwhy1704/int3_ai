@@ -187,7 +187,7 @@ def test_launch_returns_backend_token_and_compat(client):
     states = {x["release"]: x["state"] for x in out["hermes"]["releases"]}
     assert states["v0.22.6"] == "supported"
     # Local mode's Hermes releases are listed but not "supported": the state shows for hosted launches too.
-    assert states["v0.23.1"] == states["v0.23.3"] == "untested"
+    assert states["v0.23.1"] == states["v0.23.3"] == states["v0.23.4"] == "untested"
     assert _introspect(client, "priya", out["desktop_token"])["active"] is True
 
 

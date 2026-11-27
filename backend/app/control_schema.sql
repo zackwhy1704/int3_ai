@@ -277,7 +277,8 @@ INSERT INTO hermes_compat (release, state, registry_version, is_backend, note) V
     ('v0.22.6', 'supported', 2, true,  'backend pin; route allowlist re-measured for this release'),
     ('v0.21.7', 'untested',  2, false, 'previous pin; desktop not tested against the v0.22.6 backend'),
     ('v0.23.1', 'untested',  2, false, 'local mode validated (M1/M2, from source); hosted desktop not tested'),
-    ('v0.23.3', 'untested',  2, false, 'local mode validated live 2026-11-24 (from source); refuses the brain while a Hermes Cloud agent is connected (design §3.7)')
+    ('v0.23.3', 'untested',  2, false, 'local mode validated live 2026-11-24 (from source); refuses the brain while a Hermes Cloud agent is connected (design §3.7)'),
+    ('v0.23.4', 'untested',  2, false, 'local mode validated live 2026-11-27 (Store build)')
 ON CONFLICT (release) DO NOTHING;
 
 -- BYOK key-entry link minted from the launcher by a tenant admin. Same NOLOGIN key_writer owner
