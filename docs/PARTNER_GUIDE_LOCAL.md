@@ -19,6 +19,13 @@ needed, sign in with your invite, and click **Launch Hermes**. int3 sets Hermes 
 If a message says **Smart App Control blocked** int3 (now or later, for example after Windows switches
 Evaluation to On), there is no way past it. Tell us.
 
+## Install int3
+
+1. Go to the [int3 download page](https://github.com/zackwhy1704/int3_ai/releases/tag/launcher-v0.2.0).
+2. Under **Assets**, click `int3_0.2.0_x64-setup.exe`.
+3. Open it (see the Smart App Control step above). It installs for your Windows account only and shouldn't
+   ask for an administrator password.
+
 ## Getting Hermes (int3 does this with you)
 
 You don't need to install Hermes first. Open **int3**: if Hermes isn't on this PC yet, int3 shows **Get

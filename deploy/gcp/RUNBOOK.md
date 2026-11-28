@@ -100,8 +100,14 @@ invites. The cap is per tenant, per day, and we pay it.
 
 ## Installer
 
-Published as a GitHub pre-release (the repo is public): tag `launcher-v0.1.1`, asset
-`int3_0.1.1_x64-setup.exe`, SHA-256 in the release notes. Build: `launcher/README.md`.
+Published as GitHub pre-releases (the repo is public), unsigned (Smart App Control must be Off or
+Evaluation, `docs/CODE_SIGNING.md`), with a `SHA256SUMS` asset and the SHA-256 in the release notes. Build:
+`launcher/README.md`.
+
+| Tag | Asset | For |
+|---|---|---|
+| `launcher-v0.2.0` | `int3_0.2.0_x64-setup.exe` | local mode (`docs/PARTNER_GUIDE_LOCAL.md`): Store Hermes (`Hermes Agent.exe`), Get Hermes, gateway stop on launch, local-mode compat verdicts |
+| `launcher-v0.1.1` | `int3_0.1.1_x64-setup.exe` | hosted pilot (`docs/PARTNER_GUIDE_HOSTED.md` still links it; v0.2.0 is not yet tested against a hosted backend through the launcher) |
 
 ## Day to day
 
