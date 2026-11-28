@@ -500,7 +500,7 @@ Validated live on 2026-11-24, Windows 11, v0.23.3 Desktop from source with the l
 deploy-plan local checks plus the Hermes Cloud refusal. Dev-build only: the first Anthropic call installs the
 `anthropic` SDK and needs a Hermes restart (the Store bundle ships it, `apps/desktop/BUILDING.md`).
 No policy key, toolset name or verdict input changed, so `local_policy.py` is unchanged. Compat rows:
-`backend/app/control_schema.sql` (both `untested`; registry version 2 at `apps/desktop/electron/connection-registry.ts:43`).
+`backend/app/control_schema.sql` (hosted `untested`, local `supported` from control v5; registry version 2 at `apps/desktop/electron/connection-registry.ts:43`).
 
 | What local mode relies on | Result | Evidence |
 |---|---|---|
@@ -545,6 +545,13 @@ fixed in the launcher:
   success even if the process is still exiting after 10 s (`gateway.py:1938-1955`). Either way the launch
   **fails with nothing written and no token minted**; the launcher never passes `--yes` to interrupt work.
   The int3 memory plugin was unaffected: it reads the token from `.env` per call.
+- **Re-check the gateway's process image name on every Hermes version bump.** "Still running" means a
+  recorded PID whose image name starts with `python` (`local.rs` `live_gateway_pids`; at v0.23.4 the gateway
+  is `python.exe -m hermes_cli.main --profile default gateway run`, from the Store bundle's own Python). If a
+  release renames that image (a frozen `hermes-gateway.exe`, say), a gateway that is still alive no longer
+  counts as alive, so an unfinished stop would pass as confirmed and Hermes could keep the old brain token.
+  On each bump: run `tasklist /FI "PID eq <gateway.pid>"` against the new build and update the match and
+  its test (`only_a_live_python_process_counts_as_the_gateway`) before recording the release.
 - **M4 must revisit this.** The gateway is also the process that hosts the messaging platforms
   (`gateway/run_adapters.py:176-201`, `:1298` @v0.23.4), and Desktop attaches to it rather than owning it
   (`apps/desktop/electron/local-gateway.ts:8`, `backend-recycle.ts:10`). Today local mode configures no
@@ -561,7 +568,13 @@ fixed in the launcher:
   migration; `REGISTRY_VERSION` still 2, now `:44`) and unrelated `config_defaults.py` keys changed. Toolsets,
   the memory provider API, `data-paths.mjs`, the card, the Cloud check inputs and credential sources are
   byte-identical. Compat row `v0.23.4` (`control_schema.sql`); the Store build 2026.7855.419.0 is recorded
-  with `admin record-build`. It stays `untested`: that state also shows for hosted launches.
+  with `admin record-build`.
+- **Two verdicts per release (control v5).** `hermes_compat.state` is the hosted verdict (a desktop against
+  the v0.22.6 backend pin) and `local_state` the local-mode one, which involves no backend. GET
+  `/launcher/compat` returns both and the caller's `mode`, and the launcher shows that mode's verdict (and a
+  local launch refuses `blocked`, as a hosted one does). v0.23.3 and v0.23.4 are local `supported` (validated
+  live 2026-11-24 and 2026-11-27) and hosted `untested`; v0.23.1 (from source only) stays untested in both.
+  The migration sets those two once, when it adds the column, so an operator's later change is kept.
 
 **Cloud backup, decided (owner, 2026-11-24): detect, refuse, and tell partners.** From v0.23.3 source:
 - **(a) Manual only.** Settings › Backup & Transfer (`apps/desktop/src/app/settings/backup-settings.tsx:177-218`)

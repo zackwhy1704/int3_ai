@@ -137,7 +137,12 @@ fn msix_user_data_dirs(family: &str) -> Vec<PathBuf> {
 /// Version policy from the server's compat table (GET /launcher/compat, also in /launch):
 /// a known desktop build takes its release's state; anything else is "untested" (warn, allow);
 /// "blocked" refuses. A dev build is always untested.
+///
+/// Each release carries two verdicts: `state` (hosted: this desktop against our backend pin) and
+/// `local_state` (local mode: stock Hermes on the PC, our brain over MCP, no backend involved). The
+/// server says which mode the signed-in company uses (`mode`); a server without that field is hosted.
 pub fn policy(install: &Install, compat: &Value) -> Policy {
+    let local = compat["mode"] == "local";
     let backend = compat["backend_release"].as_str().unwrap_or("?");
     let build = compat["desktop_builds"]
         .as_array()
@@ -147,24 +152,27 @@ pub fn policy(install: &Install, compat: &Value) -> Policy {
     let Some(build) = build else {
         // Warn, never block: an unknown build is what a partner gets the day Nous ships a new one.
         let what = if install.version == "dev" { "This development build of Hermes".to_string() } else { format!("Hermes {}", install.version) };
+        let server = if local { String::new() } else { format!(" (server: Hermes {backend})") };
         return Policy {
             state: "untested".into(),
-            message: format!("{what} has not been tested with int3 yet (server: Hermes {backend}). You can still continue. If anything looks odd, send us a screenshot."),
+            message: format!("{what} has not been tested with int3 yet{server}. You can still continue. If anything looks odd, send us a screenshot."),
         };
     };
     let release = build["release"].as_str().unwrap_or("?");
+    let field = if local { "local_state" } else { "state" };
     let state = compat["releases"]
         .as_array()
         .into_iter()
         .flatten()
         .find(|r| r["release"].as_str() == Some(release))
-        .and_then(|r| r["state"].as_str())
+        .and_then(|r| r[field].as_str())
         .unwrap_or("untested")
         .to_string();
-    let message = match state.as_str() {
-        "supported" => format!("Hermes {release} is supported."),
-        "blocked" => format!("Hermes {release} is blocked on this server. Update Hermes Desktop, then try again."),
-        _ => format!("Hermes {release} has not been tested against backend {backend}."),
+    let message = match (state.as_str(), local) {
+        ("supported", _) => format!("Hermes {release} is supported."),
+        ("blocked", _) => format!("Hermes {release} is blocked on this server. Update Hermes Desktop, then try again."),
+        (_, true) => format!("Hermes {release} has not been tested with int3 yet. You can still continue. If anything looks odd, send us a screenshot."),
+        (_, false) => format!("Hermes {release} has not been tested against backend {backend}."),
     };
     Policy { state, message }
 }
@@ -265,6 +273,47 @@ mod tests {
     fn known_build_takes_its_release_state() {
         assert_eq!(policy(&install("2026.7300.1.0"), &compat()).state, "supported");
         assert_eq!(policy(&install("2025.100.1.0"), &compat()).state, "blocked");
+    }
+
+    /// Local and hosted verdicts are separate: the same build can be supported locally and untested hosted.
+    fn compat_with_modes(mode: Option<&str>) -> Value {
+        let mut c = json!({"backend_release": "v0.22.6",
+               "releases": [{"release": "v0.23.4", "state": "untested", "local_state": "supported"},
+                            {"release": "v0.23.1", "state": "untested", "local_state": "untested"},
+                            {"release": "v0.22.6", "state": "supported", "local_state": "blocked"},
+                            {"release": "v0.23.9", "state": "untested"}],
+               "desktop_builds": [{"platform": "windows", "package_version": "2026.7855.419.0", "release": "v0.23.4"},
+                                  {"platform": "windows", "package_version": "2026.7000.1.0", "release": "v0.23.1"},
+                                  {"platform": "windows", "package_version": "2026.7300.1.0", "release": "v0.22.6"},
+                                  {"platform": "windows", "package_version": "2026.8000.1.0", "release": "v0.23.9"}]});
+        if let Some(m) = mode {
+            c["mode"] = json!(m);
+        }
+        c
+    }
+
+    #[test]
+    fn a_local_launch_shows_the_local_verdict_and_hosted_keeps_its_own() {
+        let store = install("2026.7855.419.0");
+        let local = policy(&store, &compat_with_modes(Some("local")));
+        assert_eq!((local.state.as_str(), local.message.as_str()), ("supported", "Hermes v0.23.4 is supported."));
+        let hosted = policy(&store, &compat_with_modes(Some("hosted")));
+        assert_eq!(hosted.state, "untested");
+        assert!(hosted.message.contains("against backend v0.22.6"));
+        // An older server sends no mode: hosted, as before.
+        assert_eq!(policy(&store, &compat_with_modes(None)).state, "untested");
+
+        let untested = policy(&install("2026.7000.1.0"), &compat_with_modes(Some("local")));
+        assert_eq!(untested.state, "untested");
+        assert!(untested.message.contains("You can still continue") && !untested.message.contains("backend"),
+                "local mode has no backend pin to name: {}", untested.message);
+        // Each mode's "blocked" is its own.
+        assert_eq!(policy(&install("2026.7300.1.0"), &compat_with_modes(Some("local"))).state, "blocked");
+        assert_eq!(policy(&install("2026.7300.1.0"), &compat_with_modes(Some("hosted"))).state, "supported");
+        // A row from a server without local_state: untested in local mode, never supported by accident.
+        assert_eq!(policy(&install("2026.8000.1.0"), &compat_with_modes(Some("local"))).state, "untested");
+        let unknown = policy(&install("2026.9999.1.0"), &compat_with_modes(Some("local")));
+        assert!(unknown.message.contains("2026.9999.1.0") && !unknown.message.contains("server: Hermes"));
     }
 
     #[test]

@@ -258,6 +258,19 @@ CREATE TABLE IF NOT EXISTS hermes_compat (
     note             text NOT NULL DEFAULT ''
 );
 CREATE UNIQUE INDEX IF NOT EXISTS hermes_compat_one_backend ON hermes_compat(is_backend) WHERE is_backend;
+-- local_state (control v5): the same verdict for LOCAL mode (stock Hermes on the user's PC, our brain over MCP),
+-- which does not depend on the backend pin. `state` stays the hosted verdict. GET /launcher/compat returns both
+-- with the caller's mode, and the launcher shows the one for that mode. Additive: added once, and only on that
+-- run are the releases validated live in local mode marked supported (v0.23.3 from source 2026-11-24, v0.23.4
+-- Store build 2026-11-27), so an operator's later change survives every init/migrate. Every other row: untested.
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                 WHERE table_schema = 'public' AND table_name = 'hermes_compat' AND column_name = 'local_state') THEN
+    ALTER TABLE hermes_compat ADD COLUMN local_state text NOT NULL DEFAULT 'untested'
+      CONSTRAINT hermes_compat_local_state_check CHECK (local_state IN ('supported', 'untested', 'blocked'));
+    UPDATE hermes_compat SET local_state = 'supported' WHERE release IN ('v0.23.3', 'v0.23.4');
+  END IF;
+END $$;
 -- Observed native package versions (MSIX quads are timestamp-derived, msix-shared.mjs:98-107, so
 -- they cannot be computed from the tag; record what an official install actually reports).
 CREATE TABLE IF NOT EXISTS hermes_desktop_builds (
@@ -271,14 +284,15 @@ CREATE TABLE IF NOT EXISTS hermes_desktop_builds (
 -- (connection-registry.ts:40) and the {encoding:'plain'} token envelope (main.ts:8066-8106), both
 -- byte-identical to v0.21.7. A v0.21.7 desktop against a v0.22.6 backend has not been tested.
 -- v0.23.x: REGISTRY_VERSION 2 (apps/desktop/electron/connection-registry.ts:43 at both tags). The state
--- is shown for hosted and local launches alike, so it stays 'untested' until a hosted desktop is tested
--- against the v0.22.6 backend; local-mode status is in the note (docs/LOCAL_MODE_DESIGN.md §3.7).
-INSERT INTO hermes_compat (release, state, registry_version, is_backend, note) VALUES
-    ('v0.22.6', 'supported', 2, true,  'backend pin; route allowlist re-measured for this release'),
-    ('v0.21.7', 'untested',  2, false, 'previous pin; desktop not tested against the v0.22.6 backend'),
-    ('v0.23.1', 'untested',  2, false, 'local mode validated (M1/M2, from source); hosted desktop not tested'),
-    ('v0.23.3', 'untested',  2, false, 'local mode validated live 2026-11-24 (from source); refuses the brain while a Hermes Cloud agent is connected (design §3.7)'),
-    ('v0.23.4', 'untested',  2, false, 'local mode validated live 2026-11-27 (Store build)')
+-- hosted `state` stays 'untested' until a hosted desktop is tested against the v0.22.6 backend. local_state:
+-- supported for the releases validated live in local mode (docs/LOCAL_MODE_DESIGN.md §3.7); v0.23.1 was
+-- validated from source before the live runs, so it stays untested.
+INSERT INTO hermes_compat (release, state, local_state, registry_version, is_backend, note) VALUES
+    ('v0.22.6', 'supported', 'untested',  2, true,  'backend pin; route allowlist re-measured for this release'),
+    ('v0.21.7', 'untested',  'untested',  2, false, 'previous pin; desktop not tested against the v0.22.6 backend'),
+    ('v0.23.1', 'untested',  'untested',  2, false, 'local mode validated (M1/M2, from source); hosted desktop not tested'),
+    ('v0.23.3', 'untested',  'supported', 2, false, 'local mode validated live 2026-11-24 (from source); refuses the brain while a Hermes Cloud agent is connected (design §3.7)'),
+    ('v0.23.4', 'untested',  'supported', 2, false, 'local mode validated live 2026-11-27 (Store build)')
 ON CONFLICT (release) DO NOTHING;
 
 -- BYOK key-entry link minted from the launcher by a tenant admin. Same NOLOGIN key_writer owner

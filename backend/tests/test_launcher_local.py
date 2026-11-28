@@ -95,6 +95,20 @@ def test_local_endpoints_are_404_for_hosted_tenants(client):
     assert client.get("/launcher/me", headers=_bearer(access)).json()["tenant"]["launch_mode"] == "hosted"
 
 
+def test_compat_gives_a_local_company_the_local_verdict(client, local_tenant):
+    """Local mode has its own per-release verdict; the hosted one is still listed, unchanged."""
+    access = _sign_in(client, "priya")["access_token"]
+    r = client.get("/launcher/compat", headers=_bearer(access))
+    assert r.status_code == 200
+    compat = r.json()
+    assert compat["mode"] == "local"
+    local = {x["release"]: x["local_state"] for x in compat["releases"]}
+    hosted = {x["release"]: x["state"] for x in compat["releases"]}
+    assert local["v0.23.3"] == local["v0.23.4"] == "supported"
+    assert local["v0.23.1"] == local["v0.22.6"] == local["v0.21.7"] == "untested"
+    assert hosted["v0.23.4"] == "untested" and hosted["v0.22.6"] == "supported"
+
+
 def test_policy_carries_the_lockdown_and_no_secret(client, local_tenant):
     access = _sign_in(client, "priya")["access_token"]
     r = client.get("/launcher/local/policy", headers=_bearer(access))

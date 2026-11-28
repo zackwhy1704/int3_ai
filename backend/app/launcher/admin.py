@@ -123,7 +123,7 @@ def main(argv: list[str] | None = None) -> None:
             if not all(part.isdigit() for part in a.package_version.split(".")):
                 raise SystemExit("package version must be dotted digits, e.g. 2026.7300.1.0")
             known = control.execute(
-                "SELECT state FROM hermes_compat WHERE release = %s", (a.release,)
+                "SELECT state, local_state FROM hermes_compat WHERE release = %s", (a.release,)
             ).fetchone()
             if known is None:
                 raise SystemExit(f"release {a.release} is not in hermes_compat")
@@ -134,7 +134,7 @@ def main(argv: list[str] | None = None) -> None:
                 (a.platform, a.package_version, a.release),
             )
             print(f"recorded {a.platform} Hermes Desktop {a.package_version} = {a.release}"
-                  f" (launcher will report: {known['state']})")
+                  f" (launcher will report: hosted {known['state']}, local {known['local_state']})")
         elif a.cmd == "set-launch-mode":
             _require_control_current(control)
             t = _tenant(control, a.tenant)

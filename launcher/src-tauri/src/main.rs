@@ -230,6 +230,12 @@ async fn launch(session: State<'_, Session>, restart: bool) -> Result<Value, Val
 async fn launch_local(app: tauri::AppHandle, session: State<'_, Session>, restart: bool) -> Result<Value, Value> {
     let install = hermes::detect().ok_or_else(|| fail(format!("Hermes Desktop is not installed. Get it from {HERMES_DOWNLOAD}")))?;
     local::set_registry_dirs(install.user_data_dirs.clone()); // the report checks connections.json for Hermes Cloud
+    // The local-mode verdict for this build (compat `mode` is local here): blocked refuses before anything changes.
+    let compat = session.authed(Method::GET, "/launcher/compat", None).await.map_err(err)?;
+    let version = hermes::policy(&install, &compat);
+    if version.state == "blocked" {
+        return Err(fail(version.message));
+    }
     let running = hermes::running(&install);
     if running && !restart {
         return Ok(json!({"needs_restart": true}));
@@ -267,6 +273,7 @@ async fn launch_local(app: tauri::AppHandle, session: State<'_, Session>, restar
     Ok(json!({
         "launched": true,
         "mode": "local",
+        "policy": version,
         "workspace": workspace.to_string_lossy(),
         "expires_at": grant["expires_at"],
     }))

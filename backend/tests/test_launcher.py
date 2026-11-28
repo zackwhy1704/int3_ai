@@ -184,10 +184,13 @@ def test_launch_returns_backend_token_and_compat(client):
     assert out["backend"]["id"] == "hermes-test-priya"
     assert out["desktop_token"].startswith("cb_dt_")
     assert out["hermes"]["backend_release"] == "v0.22.6"
+    assert out["hermes"]["mode"] == "hosted"
     states = {x["release"]: x["state"] for x in out["hermes"]["releases"]}
     assert states["v0.22.6"] == "supported"
-    # Local mode's Hermes releases are listed but not "supported": the state shows for hosted launches too.
+    # Releases validated only in local mode stay untested for hosted launches (their local_state is separate).
     assert states["v0.23.1"] == states["v0.23.3"] == states["v0.23.4"] == "untested"
+    compat = client.get("/launcher/compat", headers=_bearer(s["access_token"])).json()
+    assert compat["mode"] == "hosted" and {x["release"]: x["state"] for x in compat["releases"]} == states
     assert _introspect(client, "priya", out["desktop_token"])["active"] is True
 
 

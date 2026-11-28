@@ -167,22 +167,26 @@ def me(p: Principal = Depends(launcher_principal)) -> dict:
     }
 
 
-def _compat(control) -> dict:
+def _compat(control, mode: str) -> dict:
+    """Per release: `state` (hosted: this desktop against our backend pin) and `local_state` (local mode:
+    stock Hermes on the PC, our brain over MCP). `mode` is the caller's tenant mode; the launcher shows that
+    mode's verdict (hermes.rs policy)."""
     releases = control.execute(
-        "SELECT release, state, registry_version, is_backend FROM hermes_compat ORDER BY release"
+        "SELECT release, state, local_state, registry_version, is_backend FROM hermes_compat ORDER BY release"
     ).fetchall()
     builds = control.execute(
         "SELECT platform, package_version, release FROM hermes_desktop_builds"
         " ORDER BY platform, package_version"
     ).fetchall()
     backend = next((r["release"] for r in releases if r["is_backend"]), None)
-    return {"backend_release": backend, "releases": releases, "desktop_builds": builds}
+    return {"mode": mode, "backend_release": backend, "releases": releases, "desktop_builds": builds}
 
 
 @router.get("/compat")
 def compat(p: Principal = Depends(launcher_principal)) -> dict:
+    mode = _launch_mode(p.tenant_id)
     with control_conn() as control:
-        return _compat(control)
+        return _compat(control, mode)
 
 
 @router.post("/launch")
@@ -198,7 +202,7 @@ def launch(p: Principal = Depends(launcher_principal)) -> dict:
         if backend is None:
             raise HTTPException(409, "no backend is provisioned for this user yet")
         token, expires = tokens.mint_desktop(control, _device_id(p), backend["backend_id"])
-        compat_info = _compat(control)
+        compat_info = _compat(control, "hosted")  # /launch is the hosted path
     return {
         "backend": {
             "id": backend["backend_id"],

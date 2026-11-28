@@ -21,7 +21,8 @@ TENANT_VERSION = 5
 # admin.init(), which re-runs control_schema.sql idempotently.
 # v3: tenants.cancelled_at + memory_audit (local mode M2).
 # v4: brain_audit.outcome allows 'not_found' (the audit row is written after the handler).
-CONTROL_VERSION = 4
+# v5: hermes_compat.local_state (a local-mode verdict per release, separate from the hosted `state`).
+CONTROL_VERSION = 5
 
 
 def ensure_table(conn) -> None:

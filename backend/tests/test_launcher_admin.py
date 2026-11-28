@@ -73,9 +73,9 @@ def test_set_credential_sources_validates_and_stores_canonical_order(capsys, res
     assert set(local_policy.CREDENTIAL_SOURCES) >= {"api_key", "personal_login"}
 
 
-def test_control_v4_is_applied_by_migrate_and_required_by_the_commands(capsys, restore_tenant):
-    """Rewind the control DB to v3 (the old brain_audit outcome check, no v4 row): the commands refuse,
-    `migrate` applies the v4 schema (not just the number), and the commands then work."""
+def test_control_migrations_are_applied_by_migrate_and_required_by_the_commands(capsys, restore_tenant):
+    """Rewind the control DB to v3 (the old brain_audit outcome check, no v4+ rows): the commands refuse,
+    `migrate` applies the current schema (not just the number), and the commands then work."""
     try:
         with admin_conn(config.CONTROL_DB) as c:
             c.execute("ALTER TABLE brain_audit DROP CONSTRAINT IF EXISTS brain_audit_outcome_check")
@@ -88,14 +88,14 @@ def test_control_v4_is_applied_by_migrate_and_required_by_the_commands(capsys, r
             for v in (1, 2, 3):
                 migrations.record(c, v)
         msg = _refused("set-launch-mode", "--tenant", TENANT, "--mode", "local")
-        assert msg.startswith("the control database is at v3; this code needs v4.") and "migrate" in msg
+        assert msg.startswith("the control database is at v3; this code needs v5.") and "migrate" in msg
         assert "control database is at v3" in _refused("set-credential-sources", "--tenant", TENANT, "api_key")
         assert _tenant()["launch_mode"] == "hosted"
 
         tenants_admin.migrate()
-        assert "migrated control: v3 -> v4" in capsys.readouterr().out
+        assert "migrated control: v3 -> v5" in capsys.readouterr().out
         with admin_conn(config.CONTROL_DB) as c:
-            assert migrations.current(c) == migrations.CONTROL_VERSION == 4
+            assert migrations.current(c) == migrations.CONTROL_VERSION == 5
             check = c.execute("SELECT pg_get_constraintdef(oid) AS d FROM pg_constraint"
                               " WHERE conname = 'brain_audit_outcome_check'").fetchone()["d"]
             assert "'not_found'" in check
@@ -104,3 +104,51 @@ def test_control_v4_is_applied_by_migrate_and_required_by_the_commands(capsys, r
     finally:  # never leave the test DB at v3
         tenants_admin.migrate()
         capsys.readouterr()
+
+
+def _local_states() -> dict:
+    with admin_conn(config.CONTROL_DB) as c:
+        return {r["release"]: r["local_state"] for r in c.execute("SELECT release, local_state FROM hermes_compat")}
+
+
+def test_control_v5_adds_local_state_once_and_keeps_an_operators_later_change(capsys):
+    """A v4 control DB (no local_state, rows from the earlier seed): `migrate` adds the column, marks only the
+    releases validated live in local mode supported, leaves the hosted `state` alone, and a later re-run of the
+    schema (every init) does not undo an operator's change."""
+    def hosted_states():
+        with admin_conn(config.CONTROL_DB) as c:
+            return {r["release"]: r["state"] for r in c.execute("SELECT release, state FROM hermes_compat")}
+
+    hosted_before = hosted_states()
+    try:
+        with admin_conn(config.CONTROL_DB) as c:
+            c.execute("ALTER TABLE hermes_compat DROP COLUMN local_state")
+            c.execute("DELETE FROM schema_migrations WHERE version > 4")
+            for v in (1, 2, 3, 4):
+                migrations.record(c, v)
+        tenants_admin.migrate()
+        assert "migrated control: v4 -> v5" in capsys.readouterr().out
+        local = _local_states()
+        assert local["v0.23.3"] == local["v0.23.4"] == "supported"
+        assert local["v0.23.1"] == local["v0.22.6"] == local["v0.21.7"] == "untested"
+        assert hosted_states() == hosted_before  # additive: the hosted verdict is untouched
+
+        with admin_conn(config.CONTROL_DB) as c:  # operator blocks v0.23.4 for local mode, then init re-runs
+            c.execute("UPDATE hermes_compat SET local_state = 'blocked' WHERE release = 'v0.23.4'")
+            c.execute((tenants_admin.APP_DIR / "control_schema.sql").read_text())
+            with pytest.raises(Exception, match="hermes_compat_local_state_check"):
+                with c.transaction():
+                    c.execute("UPDATE hermes_compat SET local_state = 'maybe' WHERE release = 'v0.23.4'")
+        assert _local_states()["v0.23.4"] == "blocked"
+    finally:
+        with admin_conn(config.CONTROL_DB) as c:
+            c.execute("UPDATE hermes_compat SET local_state = 'supported' WHERE release IN ('v0.23.3', 'v0.23.4')")
+        tenants_admin.migrate()
+        capsys.readouterr()
+
+
+def test_record_build_reports_both_verdicts(capsys):
+    out = _run(capsys, "record-build", "--platform", "windows", "--package-version", "2026.7855.419.0",
+               "--release", "v0.23.4")
+    assert out.strip() == ("recorded windows Hermes Desktop 2026.7855.419.0 = v0.23.4"
+                           " (launcher will report: hosted untested, local supported)")
